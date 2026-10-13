@@ -255,32 +255,38 @@ export class WasmToolchain {
     this.clangModule = null;
     this.lldModule = null;
     this.initialized = false;
+    this.initPromise = null;
   }
 
   async init(onProgress = () => {}) {
     if (this.initialized) return;
+    if (this.initPromise) return this.initPromise;
 
-    onProgress('Loading compiler components...');
-    const [memfsBuf, sysrootTarBuf] = await Promise.all([
-      fetch(`${this.basePath}/memfs.wasm`).then(r => r.arrayBuffer()),
-      fetch(`${this.basePath}/sysroot.tar`).then(r => r.arrayBuffer()),
-    ]);
+    this.initPromise = (async () => {
+      onProgress('Loading compiler components...');
+      const [memfsBuf, sysrootTarBuf] = await Promise.all([
+        fetch(`${this.basePath}/memfs.wasm`).then(r => r.arrayBuffer()),
+        fetch(`${this.basePath}/sysroot.tar`).then(r => r.arrayBuffer()),
+      ]);
 
-    this.memfs = new MemFS(memfsBuf, this.hostWrite);
+      this.memfs = new MemFS(memfsBuf, this.hostWrite);
 
-    onProgress('Unpacking standard library headers and runtime...');
-    const tar = new Tar(sysrootTarBuf);
-    const entries = tar.getEntries();
-    for (const entry of entries) {
-      if (entry.type === '5') {
-        this.memfs.addDirectory(entry.filename);
-      } else if (entry.contents) {
-        this.memfs.addFile(entry.filename, entry.contents);
+      onProgress('Unpacking standard library headers and runtime...');
+      const tar = new Tar(sysrootTarBuf);
+      const entries = tar.getEntries();
+      for (const entry of entries) {
+        if (entry.type === '5') {
+          this.memfs.addDirectory(entry.filename);
+        } else if (entry.contents) {
+          this.memfs.addFile(entry.filename, entry.contents);
+        }
       }
-    }
 
-    onProgress('Compiler ready.');
-    this.initialized = true;
+      onProgress('Compiler ready.');
+      this.initialized = true;
+    })();
+
+    await this.initPromise;
   }
 
   async _getClang() {
@@ -301,12 +307,16 @@ export class WasmToolchain {
     return this.lldModule;
   }
 
-  syncFileToMemfs(path, content) {
+  async syncFileToMemfs(path, content) {
+    if (!this.initialized) {
+      await this.init();
+    }
     const cleanPath = path.replace(/^\/+/, '');
     this.memfs.addFile(cleanPath, content);
   }
 
   getFileFromMemfs(path) {
+    if (!this.memfs) return null;
     const cleanPath = path.replace(/^\/+/, '');
     return this.memfs.getFileContents(cleanPath);
   }

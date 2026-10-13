@@ -41,11 +41,16 @@ export async function executeGccCommand({
     return `${cwd}/${p}`.replace(/\/+/g, '/');
   };
 
+  // Ensure toolchain is initialized before accessing its MemFS
+  if (toolchain && typeof toolchain.init === 'function') {
+    await toolchain.init();
+  }
+
   // Sync VFS workspace files into Toolchain MemFS
   const allWorkspaceFiles = vfs.getAllFiles('/workspace');
   for (const f of allWorkspaceFiles) {
     if (!f.isDir) {
-      toolchain.syncFileToMemfs(f.path, f.content);
+      await toolchain.syncFileToMemfs(f.path, f.content);
     }
   }
 

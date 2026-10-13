@@ -89,6 +89,11 @@ export class App {
       },
     });
 
+    // Warm up compiler in background so memfs is ready
+    this.toolchain.init().catch(err => {
+      console.warn('Toolchain background pre-initialization notice:', err);
+    });
+
     // Open default file main.c
     if (this.vfs.exists('/workspace/src/main.c')) {
       this.editorManager.openFile('/workspace/src/main.c');
