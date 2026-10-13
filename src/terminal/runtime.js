@@ -1,0 +1,160 @@
+// Execution Runtime Host Manager
+// Coordinates runtime.worker.js with SharedArrayBuffer and terminal stdin capture
+
+const CONTROL_STATE_IDX = 0;
+const CONTROL_LEN_IDX = 1;
+const CONTROL_READ_POS_IDX = 2;
+const DATA_OFFSET = 16;
+
+const STATE_IDLE = 0;
+const STATE_WAITING = 1;
+const STATE_READY = 2;
+const STATE_EOF = -1;
+
+export class RuntimeManager {
+  constructor(terminal) {
+    this.terminal = terminal;
+    this.worker = null;
+    this.isRunning = false;
+    this.isWaitingForStdin = false;
+    this.stdinLineBuffer = '';
+
+    if (window.crossOriginIsolated) {
+      this.sharedBuffer = new SharedArrayBuffer(8192);
+      this.sharedInt32 = new Int32Array(this.sharedBuffer);
+      this.sharedUint8 = new Uint8Array(this.sharedBuffer);
+    } else {
+      this.sharedBuffer = null;
+      this.sharedInt32 = null;
+      this.sharedUint8 = null;
+    }
+  }
+
+  runBinary(wasmBytes, argv = ['./a.out']) {
+    return new Promise((resolve, reject) => {
+      if (this.isRunning) {
+        this.kill();
+      }
+
+      this.isRunning = true;
+      this.isWaitingForStdin = false;
+      this.stdinLineBuffer = '';
+
+      if (this.sharedInt32) {
+        Atomics.store(this.sharedInt32, CONTROL_STATE_IDX, STATE_IDLE);
+        Atomics.store(this.sharedInt32, CONTROL_LEN_IDX, 0);
+        Atomics.store(this.sharedInt32, CONTROL_READ_POS_IDX, 0);
+      }
+
+      this.worker = new Worker(
+        new URL('../workers/runtime.worker.js', import.meta.url),
+        { type: 'module' }
+      );
+
+      this.worker.onmessage = (event) => {
+        const msg = event.data;
+        if (!msg) return;
+
+        if (msg.type === 'stdout') {
+          this.terminal.write(msg.data.replace(/\r?\n/g, '\r\n'));
+        } else if (msg.type === 'stdin_request') {
+          this.isWaitingForStdin = true;
+        } else if (msg.type === 'done') {
+          this.cleanUp();
+          resolve(msg.exitCode);
+        } else if (msg.type === 'error') {
+          this.cleanUp();
+          this.terminal.writeln(`\r\n\x1b[31mRuntime Error: ${msg.error}\x1b[0m`);
+          resolve(1);
+        }
+      };
+
+      this.worker.onerror = (err) => {
+        this.cleanUp();
+        this.terminal.writeln(`\r\n\x1b[31mRuntime Worker Error: ${err.message}\x1b[0m`);
+        resolve(1);
+      };
+
+      this.worker.postMessage({
+        type: 'run',
+        wasmBytes,
+        sharedBuffer: this.sharedBuffer,
+        argv,
+      });
+    });
+  }
+
+  handleTerminalInput(key) {
+    if (!this.isRunning || !this.isWaitingForStdin) {
+      return false;
+    }
+
+    // Enter
+    if (key === '\r' || key === '\n') {
+      this.terminal.writeln('');
+      const lineWithNewline = this.stdinLineBuffer + '\n';
+      this.stdinLineBuffer = '';
+
+      if (this.sharedInt32 && this.sharedUint8) {
+        const encoded = new TextEncoder().encode(lineWithNewline);
+        const toWrite = Math.min(encoded.length, this.sharedBuffer.byteLength - DATA_OFFSET);
+
+        this.sharedUint8.set(encoded.subarray(0, toWrite), DATA_OFFSET);
+        Atomics.store(this.sharedInt32, CONTROL_LEN_IDX, toWrite);
+        Atomics.store(this.sharedInt32, CONTROL_READ_POS_IDX, 0);
+
+        // Resume runtime worker waiting on Atomics.wait
+        Atomics.store(this.sharedInt32, CONTROL_STATE_IDX, STATE_READY);
+        Atomics.notify(this.sharedInt32, CONTROL_STATE_IDX, 1);
+      }
+
+      this.isWaitingForStdin = false;
+      return true;
+    }
+
+    // Backspace
+    if (key === '\x7f' || key === '\x08') {
+      if (this.stdinLineBuffer.length > 0) {
+        this.stdinLineBuffer = this.stdinLineBuffer.slice(0, -1);
+        this.terminal.write('\b \b');
+      }
+      return true;
+    }
+
+    // Printable key
+    if (key.length === 1 && key >= ' ') {
+      this.stdinLineBuffer += key;
+      this.terminal.write(key);
+      return true;
+    }
+
+    return true;
+  }
+
+  kill() {
+    if (!this.isRunning) return;
+
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+    }
+
+    if (this.sharedInt32) {
+      Atomics.store(this.sharedInt32, CONTROL_STATE_IDX, STATE_EOF);
+      Atomics.notify(this.sharedInt32, CONTROL_STATE_IDX, 1);
+    }
+
+    this.cleanUp();
+    this.terminal.writeln('\r\n\x1b[31m[Process terminated]\x1b[0m');
+  }
+
+  cleanUp() {
+    this.isRunning = false;
+    this.isWaitingForStdin = false;
+    this.stdinLineBuffer = '';
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+    }
+  }
+}
