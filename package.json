@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node test/vfs.test.js && node test/shell.test.js && node test/toolchain.test.js && node test/runtime.test.js"
+    "test": "node test/vfs.test.js && node test/shell.test.js && node test/toolchain.test.js && node test/runtime.test.js && node test/make.test.js"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
