@@ -183,12 +183,14 @@ For hosting environments that do not allow configuring custom response headers (
 
 ### GitHub Pages
 
-1. Build the production assets:
-   ```bash
-   npm run build
-   ```
-2. Push the contents of `dist/` to your `gh-pages` branch (or configure GitHub Actions to deploy the `dist/` folder).
-3. `public/coi-serviceworker.js` is automatically loaded by `index.html` to spoof cross-origin isolation headers on GitHub Pages.
+The repository includes a GitHub Actions workflow in [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) that automatically runs tests, builds the production bundle, and deploys to GitHub Pages whenever you push to the `main` branch.
+
+#### One-Time Setup in GitHub:
+1. Go to your repository on GitHub: `https://github.com/<owner>/<repo>/settings/pages`
+2. Under **Build and deployment** > **Source**, select **GitHub Actions** (instead of *Deploy from a branch*).
+3. Push to `main` (or click **Run workflow** under the **Actions** tab).
+
+The application will be live at `https://<owner>.github.io/<repo>/`! Because the build uses relative asset resolution, sub-path hosting on GitHub Pages works out-of-the-box, and `coi-serviceworker.js` provides cross-origin isolation (COOP/COEP) and offline PWA caching automatically.
 
 ### Nginx
 
