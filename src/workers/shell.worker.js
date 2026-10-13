@@ -60,11 +60,12 @@ function resolvePath(p) {
   return '/' + resolved.join('/');
 }
 
-// Command line tokenizer
-function parseArgs(line) {
-  const args = [];
+// Command line tokenizer distinguishing quoted vs unquoted tokens
+function parseTokens(line) {
+  const tokens = [];
   let current = '';
   let inQuotes = null;
+  let isQuoted = false;
 
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
@@ -76,21 +77,103 @@ function parseArgs(line) {
       }
     } else if (ch === '"' || ch === "'") {
       inQuotes = ch;
+      isQuoted = true;
     } else if (/\s/.test(ch)) {
-      if (current.length > 0) {
-        args.push(current);
+      if (current.length > 0 || isQuoted) {
+        tokens.push({ text: current, quoted: isQuoted });
         current = '';
+        isQuoted = false;
       }
     } else {
       current += ch;
     }
   }
 
-  if (current.length > 0) {
-    args.push(current);
+  if (current.length > 0 || isQuoted) {
+    tokens.push({ text: current, quoted: isQuoted });
   }
 
-  return args;
+  return tokens;
+}
+
+function parseArgs(line) {
+  return parseTokens(line).map(t => t.text);
+}
+
+// Glob expansion helpers
+function hasGlob(token) {
+  return /[*?]/.test(token);
+}
+
+function globToRegex(pattern) {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.');
+  return new RegExp('^' + escaped + '$');
+}
+
+async function expandGlobToken(token, currentDir) {
+  if (!hasGlob(token)) return [token];
+
+  const isAbsolute = token.startsWith('/');
+  const rawParts = token.split('/').filter(Boolean);
+
+  async function expandSegments(currentVfsPath, segmentIndex, currentPrefix) {
+    if (segmentIndex >= rawParts.length) {
+      return [currentPrefix];
+    }
+
+    const segment = rawParts[segmentIndex];
+    const isLast = segmentIndex === rawParts.length - 1;
+
+    if (!hasGlob(segment)) {
+      const nextVfsPath = currentVfsPath === '/' ? `/${segment}` : `${currentVfsPath}/${segment}`;
+      const nextPrefix = currentPrefix
+        ? (currentPrefix === '/' ? `/${segment}` : `${currentPrefix}/${segment}`)
+        : segment;
+      try {
+        const exists = await callHost('vfs_exists', { path: nextVfsPath });
+        if (!exists) return [];
+        return await expandSegments(nextVfsPath, segmentIndex + 1, nextPrefix);
+      } catch {
+        return [];
+      }
+    }
+
+    try {
+      const entries = await callHost('vfs_readDir', { path: currentVfsPath });
+      const regex = globToRegex(segment);
+      const matches = entries.filter(e => {
+        if (!segment.startsWith('.') && e.name.startsWith('.')) return false;
+        return regex.test(e.name);
+      });
+
+      const results = [];
+      for (const match of matches) {
+        if (!isLast && !match.isDir) continue;
+        const nextVfsPath = currentVfsPath === '/' ? `/${match.name}` : `${currentVfsPath}/${match.name}`;
+        const nextPrefix = currentPrefix
+          ? (currentPrefix === '/' ? `/${match.name}` : `${currentPrefix}/${match.name}`)
+          : match.name;
+        const sub = await expandSegments(nextVfsPath, segmentIndex + 1, nextPrefix);
+        results.push(...sub);
+      }
+      return results;
+    } catch {
+      return [];
+    }
+  }
+
+  const startVfsPath = isAbsolute ? '/' : currentDir;
+  const startPrefix = isAbsolute ? (token.startsWith('//') ? '//' : '/') : '';
+  const expanded = await expandSegments(startVfsPath, 0, startPrefix);
+
+  if (expanded.length === 0) {
+    return [token];
+  }
+
+  return expanded.sort();
 }
 
 // Built-in POSIX CLI Commands
@@ -132,33 +215,97 @@ const builtins = {
       }
     }
 
-    const target = paths.length > 0 ? resolvePath(paths[0]) : cwd;
-
-    try {
-      const items = await callHost('vfs_readDir', { path: target });
-      const filtered = showAll ? items : items.filter(it => !it.name.startsWith('.'));
-
+    const formatItem = (name, isDir, size) => {
       if (longFormat) {
-        for (const item of filtered) {
-          const typeChar = item.isDir ? 'd' : '-';
-          const sizeStr = String(item.size).padStart(8, ' ');
-          const nameColored = item.isDir
-            ? `\x1b[1;34m${item.name}\x1b[0m`
-            : item.name.endsWith('.out') || item.name.endsWith('.wasm')
-            ? `\x1b[1;32m${item.name}\x1b[0m`
-            : item.name;
-          writeln(`${typeChar}rwxr-xr-x 1 user staff ${sizeStr} ${nameColored}`);
+        const typeChar = isDir ? 'd' : '-';
+        const sizeStr = String(size).padStart(8, ' ');
+        const nameColored = isDir
+          ? `\x1b[1;34m${name}\x1b[0m`
+          : (name.endsWith('.out') || name.endsWith('.wasm'))
+          ? `\x1b[1;32m${name}\x1b[0m`
+          : name;
+        return `${typeChar}rwxr-xr-x 1 user staff ${sizeStr} ${nameColored}`;
+      } else {
+        if (isDir) return `\x1b[1;34m${name}/\x1b[0m`;
+        if (name.endsWith('.out') || name.endsWith('.wasm')) return `\x1b[1;32m${name}\x1b[0m`;
+        return name;
+      }
+    };
+
+    if (paths.length === 0) {
+      try {
+        const items = await callHost('vfs_readDir', { path: cwd });
+        const filtered = showAll ? items : items.filter(it => !it.name.startsWith('.'));
+        if (longFormat) {
+          for (const item of filtered) {
+            writeln(formatItem(item.name, item.isDir, item.size));
+          }
+        } else {
+          writeln(filtered.map(item => formatItem(item.name, item.isDir, item.size)).join('  '));
+        }
+      } catch (err) {
+        writeln(`ls: cannot access '${cwd}': ${err.message}`);
+      }
+      return;
+    }
+
+    // Inspect each path in paths
+    const missing = [];
+    const fileList = [];
+    const dirList = [];
+
+    for (const p of paths) {
+      const target = resolvePath(p);
+      try {
+        const exists = await callHost('vfs_exists', { path: target });
+        if (!exists) {
+          missing.push({ path: p, target });
+        } else {
+          const stat = await callHost('vfs_stat', { path: target });
+          if (stat.isDir) {
+            dirList.push({ path: p, target, stat });
+          } else {
+            fileList.push({ path: p, target, stat });
+          }
+        }
+      } catch {
+        missing.push({ path: p, target });
+      }
+    }
+
+    for (const m of missing) {
+      writeln(`ls: cannot access '${m.path}': No such file or directory`);
+    }
+
+    if (fileList.length > 0) {
+      if (longFormat) {
+        for (const f of fileList) {
+          writeln(formatItem(f.path, false, f.stat.size));
         }
       } else {
-        const names = filtered.map(item => {
-          if (item.isDir) return `\x1b[1;34m${item.name}/\x1b[0m`;
-          if (item.name.endsWith('.out') || item.name.endsWith('.wasm')) return `\x1b[1;32m${item.name}\x1b[0m`;
-          return item.name;
-        });
-        writeln(names.join('  '));
+        writeln(fileList.map(f => formatItem(f.path, false, f.stat.size)).join('  '));
       }
-    } catch (err) {
-      writeln(`ls: cannot access '${target}': ${err.message}`);
+    }
+
+    for (let i = 0; i < dirList.length; i++) {
+      const d = dirList[i];
+      if (paths.length > 1) {
+        if (fileList.length > 0 || i > 0) writeln('');
+        writeln(`${d.path}:`);
+      }
+      try {
+        const items = await callHost('vfs_readDir', { path: d.target });
+        const filtered = showAll ? items : items.filter(it => !it.name.startsWith('.'));
+        if (longFormat) {
+          for (const item of filtered) {
+            writeln(formatItem(item.name, item.isDir, item.size));
+          }
+        } else {
+          writeln(filtered.map(item => formatItem(item.name, item.isDir, item.size)).join('  '));
+        }
+      } catch (err) {
+        writeln(`ls: cannot access '${d.path}': ${err.message}`);
+      }
     }
   },
 
@@ -347,8 +494,22 @@ async function executeCommandLine(commandStr) {
     const trimmed = part.trim();
     if (!trimmed) continue;
 
-    const args = parseArgs(trimmed);
-    let cmd = args.shift();
+    const tokens = parseTokens(trimmed);
+    if (tokens.length === 0) continue;
+
+    const cmdToken = tokens.shift();
+    let cmd = cmdToken.text;
+
+    // Expand globs in arguments
+    const args = [];
+    for (const token of tokens) {
+      if (token.quoted || !hasGlob(token.text)) {
+        args.push(token.text);
+      } else {
+        const expanded = await expandGlobToken(token.text, cwd);
+        args.push(...expanded);
+      }
+    }
 
     // Map path-prefixed commands like /bin/ls or /usr/bin/gcc
     const baseCmd = (cmd.startsWith('/bin/') || cmd.startsWith('/usr/bin/'))
