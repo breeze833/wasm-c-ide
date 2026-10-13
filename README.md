@@ -192,6 +192,17 @@ The repository includes a GitHub Actions workflow in [`.github/workflows/deploy.
 
 The application will be live at `https://<owner>.github.io/<repo>/`! Because the build uses relative asset resolution, sub-path hosting on GitHub Pages works out-of-the-box, and `coi-serviceworker.js` provides cross-origin isolation (COOP/COEP) and offline PWA caching automatically.
 
+### Direct Zip Download & GitHub Releases
+
+On every push to `main`, the GitHub Actions workflow automatically packages the production `dist/` directory into a portable zip archive and publishes it to the repository's **Latest Release**:
+
+- **Direct Download**: Download [`wasm-c-ide.zip`](https://github.com/breeze833/wasm-c-ide/releases/latest/download/wasm-c-ide.zip) from the GitHub Releases page.
+- **Local Packaging**: You can also package the zip archive locally at any time:
+  ```bash
+  npm run pack
+  ```
+  This builds the bundle and outputs `wasm-c-ide.zip` in the repository root. Extracting its contents directly into any static web server document root runs the full IDE offline with no installation or Node.js runtime required.
+
 ### Nginx
 
 Configure your Nginx server block to serve the `dist/` folder with the necessary isolation headers:

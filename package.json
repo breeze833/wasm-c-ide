@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "pack": "vite build && (cd dist && zip -r ../wasm-c-ide.zip .)",
     "test": "node test/vfs.test.js && node test/shell.test.js && node test/toolchain.test.js && node test/runtime.test.js && node test/make.test.js && node test/sw.test.js"
   },
   "dependencies": {
