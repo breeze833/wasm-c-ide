@@ -540,6 +540,35 @@ namespace std {
 `
 };
 
+export const STANDARD_LIBS = [
+  'crt1.o',
+  'libc.a',
+  'libc++.a',
+  'libc++abi.a',
+  'libm.a',
+  'libpthread.a',
+];
+
+export const BIN_COMMANDS = [
+  'sh',
+  'ls',
+  'cat',
+  'rm',
+  'mkdir',
+  'cp',
+  'mv',
+  'pwd',
+  'clear',
+  'echo',
+];
+
+export const USR_BIN_COMMANDS = [
+  'gcc',
+  'clang',
+  'make',
+  'wasm-ld',
+];
+
 export function mountSysroot(vfs) {
   // Mount C standard headers
   for (const [filename, content] of Object.entries(STANDARD_C_HEADERS)) {
@@ -549,5 +578,22 @@ export function mountSysroot(vfs) {
   // Mount C++ headers
   for (const [filename, content] of Object.entries(STANDARD_CPP_HEADERS)) {
     vfs.writeFile(`/usr/include/${filename}`, content, Date.now(), true);
+  }
+
+  // Mount /usr/lib static libraries
+  for (const lib of STANDARD_LIBS) {
+    if (!vfs.exists(`/usr/lib/${lib}`)) {
+      vfs.writeFile(`/usr/lib/${lib}`, `!<arch>\n/* ${lib} wasi-libc */\n`, Date.now(), true);
+    }
+  }
+
+  // Mount /bin built-in executables
+  for (const cmd of BIN_COMMANDS) {
+    vfs.writeFile(`/bin/${cmd}`, `#!/bin/sh\n# Built-in utility: ${cmd}\n`, Date.now(), true);
+  }
+
+  // Mount /usr/bin toolchain executables
+  for (const cmd of USR_BIN_COMMANDS) {
+    vfs.writeFile(`/usr/bin/${cmd}`, `#!/bin/sh\n# Toolchain binary: ${cmd}\n`, Date.now(), true);
   }
 }

@@ -267,7 +267,7 @@ const builtins = {
     write('\x1b[2J\x1b[H');
   },
 
-  sh: async (args) => {
+    sh: async (args) => {
     if (args.length === 0) {
       writeln('sh: script file required');
       return;
@@ -284,6 +284,25 @@ const builtins = {
       }
     } catch (err) {
       writeln(`sh: ${args[0]}: ${err.message}`);
+    }
+  },
+
+  which: async (args) => {
+    if (args.length === 0) return;
+    for (const name of args) {
+      if (['sh', 'ls', 'cat', 'rm', 'mkdir', 'cp', 'mv', 'pwd', 'clear', 'echo'].includes(name)) {
+        writeln(`/bin/${name}`);
+      } else if (['gcc', 'clang', 'make', 'wasm-ld'].includes(name)) {
+        writeln(`/usr/bin/${name}`);
+      } else {
+        const full = resolvePath(name);
+        const exists = await callHost('vfs_exists', { path: full });
+        if (exists) {
+          writeln(full);
+        } else {
+          writeln(`which: no ${name} in (/usr/bin:/bin)`);
+        }
+      }
     }
   },
 };
@@ -329,14 +348,21 @@ async function executeCommandLine(commandStr) {
     if (!trimmed) continue;
 
     const args = parseArgs(trimmed);
-    const cmd = args.shift();
+    let cmd = args.shift();
+
+    // Map path-prefixed commands like /bin/ls or /usr/bin/gcc
+    const baseCmd = (cmd.startsWith('/bin/') || cmd.startsWith('/usr/bin/'))
+      ? cmd.split('/').pop()
+      : cmd;
 
     if (builtins[cmd]) {
       await builtins[cmd](args);
+    } else if (builtins[baseCmd]) {
+      await builtins[baseCmd](args);
     } else {
       // Delegate external command (gcc, clang, make, ./a.out) to host
       try {
-        await callHost('exec_command', { cmd, args, rawLine: trimmed, cwd });
+        await callHost('exec_command', { cmd: baseCmd, args, rawLine: trimmed, cwd });
       } catch (err) {
         writeln(err.message || `${cmd}: command not found`);
       }

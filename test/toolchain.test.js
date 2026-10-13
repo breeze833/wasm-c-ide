@@ -144,5 +144,40 @@ console.log('✓ Direct compile & link argument parsing passed');
   console.log('✓ WasmToolchain.syncFileToMemfs initializes if not yet initialized');
 }
 
-console.log('--- ALL TOOLCHAIN DRIVER TESTS PASSED ---');
+// Test 6: Real MemFS safe getFileContents and multi-level directory creation
+{
+  import('node:fs').then(async (fs) => {
+    const memfsBuf = fs.readFileSync('public/sysroot/wasm/memfs.wasm');
+    const sysrootBuf = fs.readFileSync('public/sysroot/wasm/sysroot.tar');
+
+    globalThis.fetch = async (url) => {
+      const filePath = url.replace(/^\/?sysroot\//, 'public/sysroot/');
+      const data = fs.readFileSync(filePath);
+      return {
+        arrayBuffer: async () => data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+      };
+    };
+
+    const vfs = new VFS();
+    const tc = new WasmToolchain({ basePath: '/sysroot/wasm', vfs });
+    await tc.init();
+
+    // Verify non-existent file query returns null without throwing unreachable
+    const nonExistent = tc.getFileFromMemfs('workspace/nonexistent.o');
+    assert.strictEqual(nonExistent, null, 'Querying non-existent file must return null cleanly');
+    console.log('✓ MemFS.getFileContents returns null on missing file without trapping');
+
+    // Verify deeply nested file add creates directories without trapping
+    await tc.syncFileToMemfs('/workspace/deep/nested/dir/test.c', 'int x = 42;\n');
+    assert.strictEqual(tc.memfs.directories.has('workspace/deep/nested/dir'), true);
+    console.log('✓ MemFS automatically creates nested directories on file add');
+
+    // Verify /usr/lib files are mirrored into VFS
+    assert.strictEqual(vfs.exists('/usr/lib/libc.a'), true);
+    assert.strictEqual(vfs.exists('/usr/lib/crt1.o'), true);
+    console.log('✓ WasmToolchain mirrors libc runtime files into VFS /usr/lib');
+
+    console.log('--- ALL TOOLCHAIN DRIVER TESTS PASSED ---');
+  });
+}
 

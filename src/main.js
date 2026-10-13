@@ -82,6 +82,7 @@ export class App {
     // Initialize Toolchain
     this.toolchain = new WasmToolchain({
       basePath: '/sysroot/wasm',
+      vfs: this.vfs,
       hostWrite: (str) => {
         if (this.terminal) {
           this.terminal.write(str.replace(/\r?\n/g, '\r\n'));

@@ -67,6 +67,8 @@ class MemFS {
   constructor(memfsBuffer, hostWrite = () => {}) {
     this.hostWrite = hostWrite;
     this.hostMem_ = null;
+    this.directories = new Set(['', '/', '.']);
+    this.files = new Set();
 
     const env = {
       abort: () => { throw new Error('MemFS abort'); },
@@ -88,32 +90,68 @@ class MemFS {
     this.hostMem_ = mem;
   }
 
+  ensureDirectory(path) {
+    const clean = (path || '').replace(/^\/+|\/+$/g, '');
+    if (!clean) return;
+    const parts = clean.split('/').filter(Boolean);
+    let current = '';
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      if (!this.directories.has(current)) {
+        this.addDirectory(current);
+      }
+    }
+  }
+
   addDirectory(path) {
+    const cleanPath = (path || '').replace(/^\/+|\/+$/g, '');
+    if (!cleanPath || this.directories.has(cleanPath)) return;
+
+    // Ensure parent directory exists first to prevent MemFS lookup.parent abort
+    const lastSlash = cleanPath.lastIndexOf('/');
+    if (lastSlash !== -1) {
+      this.ensureDirectory(cleanPath.substring(0, lastSlash));
+    }
+
     this.mem.check();
-    this.mem.write(this.exports.GetPathBuf(), path);
-    this.exports.AddDirectoryNode(path.length);
+    this.mem.write(this.exports.GetPathBuf(), cleanPath);
+    this.exports.AddDirectoryNode(cleanPath.length);
+    this.directories.add(cleanPath);
   }
 
   addFile(path, contents) {
+    const cleanPath = (path || '').replace(/^\/+/, '');
+    const lastSlash = cleanPath.lastIndexOf('/');
+    if (lastSlash !== -1) {
+      this.ensureDirectory(cleanPath.substring(0, lastSlash));
+    }
+
     const length = contents instanceof ArrayBuffer
       ? contents.byteLength
       : contents.length;
     this.mem.check();
-    this.mem.write(this.exports.GetPathBuf(), path);
-    const inode = this.exports.AddFileNode(path.length, length);
+    this.mem.write(this.exports.GetPathBuf(), cleanPath);
+    const inode = this.exports.AddFileNode(cleanPath.length, length);
     const addr = this.exports.GetFileNodeAddress(inode);
     this.mem.check();
     this.mem.write(addr, contents);
+    this.files.add(cleanPath);
   }
 
   getFileContents(path) {
-    this.mem.check();
-    this.mem.write(this.exports.GetPathBuf(), path);
-    const inode = this.exports.FindNode(path.length);
-    if (!inode) return null;
-    const addr = this.exports.GetFileNodeAddress(inode);
-    const size = this.exports.GetFileNodeSize(inode);
-    return new Uint8Array(this.mem.buffer.slice(addr, addr + size));
+    try {
+      const cleanPath = (path || '').replace(/^\/+/, '');
+      this.mem.check();
+      this.mem.write(this.exports.GetPathBuf(), cleanPath);
+      const inode = this.exports.FindNode(cleanPath.length);
+      if (!inode) return null;
+      const addr = this.exports.GetFileNodeAddress(inode);
+      const size = this.exports.GetFileNodeSize(inode);
+      return new Uint8Array(this.mem.buffer.slice(addr, addr + size));
+    } catch {
+      // FindNode asserts lookup.node on missing files and traps with unreachable; catch cleanly
+      return null;
+    }
   }
 
   host_write(fd, iovs, iovs_len, nwritten_out) {
@@ -251,11 +289,18 @@ export class WasmToolchain {
   constructor(options = {}) {
     this.basePath = options.basePath || '/sysroot/wasm';
     this.hostWrite = options.hostWrite || console.log;
+    this.vfs = options.vfs || null;
     this.memfs = null;
     this.clangModule = null;
     this.lldModule = null;
     this.initialized = false;
     this.initPromise = null;
+  }
+
+  ensureDirectoryInMemfs(dirPath) {
+    if (this.memfs) {
+      this.memfs.ensureDirectory(dirPath);
+    }
   }
 
   async init(onProgress = () => {}) {
@@ -271,6 +316,16 @@ export class WasmToolchain {
 
       this.memfs = new MemFS(memfsBuf, this.hostWrite);
 
+      // Ensure root workspace and system directories exist in MemFS
+      this.memfs.ensureDirectory('workspace');
+      this.memfs.ensureDirectory('workspace/src');
+      this.memfs.ensureDirectory('workspace/include');
+      this.memfs.ensureDirectory('workspace/build');
+      this.memfs.ensureDirectory('usr');
+      this.memfs.ensureDirectory('usr/lib');
+      this.memfs.ensureDirectory('usr/bin');
+      this.memfs.ensureDirectory('bin');
+
       onProgress('Unpacking standard library headers and runtime...');
       const tar = new Tar(sysrootTarBuf);
       const entries = tar.getEntries();
@@ -279,6 +334,17 @@ export class WasmToolchain {
           this.memfs.addDirectory(entry.filename);
         } else if (entry.contents) {
           this.memfs.addFile(entry.filename, entry.contents);
+
+          // Mirror standard libraries to /usr/lib in MemFS and VFS
+          if (entry.filename.startsWith('lib/wasm32-wasi/')) {
+            const libName = entry.filename.substring('lib/wasm32-wasi/'.length);
+            if (libName) {
+              this.memfs.addFile(`usr/lib/${libName}`, entry.contents);
+              if (this.vfs) {
+                this.vfs.writeFile(`/usr/lib/${libName}`, entry.contents, Date.now(), true);
+              }
+            }
+          }
         }
       }
 
@@ -328,6 +394,12 @@ export class WasmToolchain {
     const cleanSrc = sourcePath.replace(/^\/+/, '');
     const cleanObj = objPath.replace(/^\/+/, '');
 
+    // Ensure output directory exists in MemFS before compilation
+    const lastSlash = cleanObj.lastIndexOf('/');
+    if (lastSlash !== -1) {
+      this.memfs.ensureDirectory(cleanObj.substring(0, lastSlash));
+    }
+
     const args = [
       '-cc1',
       '-emit-obj',
@@ -367,6 +439,12 @@ export class WasmToolchain {
     const cleanObjs = objPaths.map(p => p.replace(/^\/+/, ''));
     const cleanOut = outputPath.replace(/^\/+/, '');
 
+    // Ensure output directory exists in MemFS before linking
+    const lastSlash = cleanOut.lastIndexOf('/');
+    if (lastSlash !== -1) {
+      this.memfs.ensureDirectory(cleanOut.substring(0, lastSlash));
+    }
+
     const stackSize = 1024 * 1024;
     const libdir = 'lib/wasm32-wasi';
     const crt1 = `${libdir}/crt1.o`;
@@ -375,6 +453,7 @@ export class WasmToolchain {
       '--no-threads',
       '-z', `stack-size=${stackSize}`,
       `-L${libdir}`,
+      `-Lusr/lib`,
       crt1,
       ...cleanObjs,
       '-lc',

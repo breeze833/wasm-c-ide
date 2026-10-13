@@ -46,10 +46,28 @@ export async function executeGccCommand({
     await toolchain.init();
   }
 
-  // Sync VFS workspace files into Toolchain MemFS
+  const ensureParentDir = (filePath) => {
+    const norm = resolve(filePath);
+    const lastSlash = norm.lastIndexOf('/');
+    if (lastSlash > 0) {
+      const dirPath = norm.substring(0, lastSlash);
+      if (!vfs.exists(dirPath)) {
+        try { vfs.mkdir(dirPath, true); } catch {}
+      }
+      if (typeof toolchain.ensureDirectoryInMemfs === 'function') {
+        toolchain.ensureDirectoryInMemfs(dirPath);
+      }
+    }
+  };
+
+  // Sync VFS workspace files and directories into Toolchain MemFS
   const allWorkspaceFiles = vfs.getAllFiles('/workspace');
   for (const f of allWorkspaceFiles) {
-    if (!f.isDir) {
+    if (f.isDir) {
+      if (typeof toolchain.ensureDirectoryInMemfs === 'function') {
+        toolchain.ensureDirectoryInMemfs(f.path);
+      }
+    } else {
       await toolchain.syncFileToMemfs(f.path, f.content);
     }
   }
@@ -66,6 +84,8 @@ export async function executeGccCommand({
       const objResolved = outputFile
         ? resolve(outputFile)
         : srcResolved.replace(/\.(c|cpp|cc)$/, '.o');
+
+      ensureParentDir(objResolved);
 
       const exitCode = await toolchain.compile(
         srcResolved,
@@ -93,6 +113,7 @@ export async function executeGccCommand({
   for (const src of sources) {
     const srcResolved = resolve(src);
     const objResolved = srcResolved.replace(/\.(c|cpp|cc)$/, '.o');
+    ensureParentDir(objResolved);
 
     const exitCode = await toolchain.compile(
       srcResolved,
@@ -119,6 +140,7 @@ export async function executeGccCommand({
   }
 
   const finalOutput = resolve(outputFile || 'a.out');
+  ensureParentDir(finalOutput);
   const linkExitCode = await toolchain.link(generatedObjects, finalOutput, flags);
 
   if (linkExitCode === 0) {

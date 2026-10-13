@@ -30,10 +30,12 @@ export class VFS {
     this.listeners = new Set();
 
     // Ensure root directories exist
-    this.mkdir('/workspace', true);
-    this.mkdir('/usr', true);
-    this.mkdir('/usr/include', true);
-    this.mkdir('/usr/lib', true);
+    this.mkdir('/workspace', true, true);
+    this.mkdir('/usr', true, true);
+    this.mkdir('/usr/include', true, true);
+    this.mkdir('/usr/lib', true, true);
+    this.mkdir('/usr/bin', true, true);
+    this.mkdir('/bin', true, true);
   }
 
   subscribe(listener) {
@@ -53,7 +55,7 @@ export class VFS {
 
   _isReadOnly(path) {
     const norm = normalizePath(path);
-    return norm.startsWith('/usr');
+    return norm.startsWith('/usr') || norm.startsWith('/bin');
   }
 
   _resolve(path, createIntermediate = false) {
@@ -87,10 +89,10 @@ export class VFS {
     return current;
   }
 
-  mkdir(path, recursive = true) {
+  mkdir(path, recursive = true, allowReadOnly = false) {
     const norm = normalizePath(path);
     if (norm === '/') return;
-    if (this._isReadOnly(norm) && !norm.startsWith('/usr')) {
+    if (!allowReadOnly && this._isReadOnly(norm)) {
       throw new Error(`Permission denied: Cannot create directory in read-only path ${norm}`);
     }
 

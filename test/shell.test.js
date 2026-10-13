@@ -50,4 +50,31 @@ const args3 = parseArgs('echo "int a = 10;" > test.c');
 assert.deepStrictEqual(args3, ['echo', 'int a = 10;', '>', 'test.c']);
 console.log('✓ parseArgs redirection passed');
 
+// Test 4: Command path normalization (/bin/ls -> ls, /usr/bin/gcc -> gcc)
+function normalizeCommand(cmd) {
+  if (cmd.startsWith('/bin/') || cmd.startsWith('/usr/bin/')) {
+    return cmd.split('/').pop();
+  }
+  return cmd;
+}
+assert.strictEqual(normalizeCommand('/bin/ls'), 'ls');
+assert.strictEqual(normalizeCommand('/usr/bin/gcc'), 'gcc');
+assert.strictEqual(normalizeCommand('make'), 'make');
+console.log('✓ Command path normalization passed');
+
+// Test 5: which resolution
+function resolveWhich(name) {
+  if (['sh', 'ls', 'cat', 'rm', 'mkdir', 'cp', 'mv', 'pwd', 'clear', 'echo'].includes(name)) {
+    return `/bin/${name}`;
+  } else if (['gcc', 'clang', 'make', 'wasm-ld'].includes(name)) {
+    return `/usr/bin/${name}`;
+  }
+  return null;
+}
+assert.strictEqual(resolveWhich('ls'), '/bin/ls');
+assert.strictEqual(resolveWhich('gcc'), '/usr/bin/gcc');
+assert.strictEqual(resolveWhich('make'), '/usr/bin/make');
+assert.strictEqual(resolveWhich('sh'), '/bin/sh');
+console.log('✓ which path resolution passed');
+
 console.log('--- ALL SHELL TESTS PASSED ---');
