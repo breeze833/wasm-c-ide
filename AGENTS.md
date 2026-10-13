@@ -19,24 +19,48 @@ You are an autonomous senior systems and web engineer implementing the project s
 /
 ├── SPEC.md                    # Technical specification & architectural ground truth
 ├── AGENTS.md                  # Agent operating protocols (this file)
+├── README.md                  # User-facing project documentation & deployment guides
 ├── index.html                 # Main entry point (loads /coi-serviceworker.js)
-├── package.json               # Development tooling & build scripts
-├── vite.config.js             # Vite configuration (headers, workers, wasm support)
+├── package.json               # Development tooling, dependencies, and test scripts
+├── vite.config.js             # Vite configuration (COOP/COEP headers, workers, wasm support)
 ├── src/
-│   ├── main.js                # App bootstrap & layout setup
-│   ├── components/            # UI components (Editor, Terminal, FileTree, Settings)
-│   ├── editor/                # Monaco / CodeMirror controller & tabs manager
-│   ├── terminal/              # xterm.js wrapper & command injection bridge
-│   ├── vfs/                   # Virtual File System layer (MEMFS + IndexedDB sync)
-│   ├── workers/               # Web Workers
-│   │   ├── shell.worker.js    # Busybox/WASI worker
-│   │   └── runtime.worker.js  # User app execution sandbox (Atomics stdin handler)
-│   └── toolchain/             # Wasm toolchain wrappers (clang, wasm-ld, make)
-└── public/
-    ├── coi-serviceworker.js   # Cross-origin isolation shim for GitHub Pages
-    └── sysroot/               # Read-only libc headers and pre-built wasm binaries
-        ├── include/           # Standard C/C++ headers
-        └── wasm/              # Clang, LLD, Busybox, and Make Wasm modules
+│   ├── main.js                # App bootstrap, DOM layout, and UI event binding
+│   ├── style.css              # Dark theme styling, button color hierarchy, tooltips
+│   ├── components/
+│   │   ├── filetree.js        # File tree sidebar, directory expansion, file operations
+│   │   ├── settings.js        # Project settings modal, build.sh & Makefile generation
+│   │   └── toast.js           # Non-blocking notification toasts
+│   ├── editor/
+│   │   ├── editor.js          # Monaco editor instance controller and save actions
+│   │   ├── monaco-setup.js    # Monaco worker environment setup
+│   │   └── tabs.js            # Tab bar manager and dirty mark (*) tracking
+│   ├── terminal/
+│   │   ├── terminal.js        # xterm.js wrapper and command injection bridge
+│   │   └── runtime.js         # Host-side runtime manager and SharedArrayBuffer coordinator
+│   ├── toolchain/
+│   │   ├── driver.js          # gcc / clang command parser and execution coordinator
+│   │   ├── make.js            # Incremental Makefile runner evaluating mtimes
+│   │   ├── tar.js             # Sysroot tarball extractor
+│   │   └── wasm-clang.js      # Clang, LLD, and MemFS WebAssembly wrappers
+│   ├── vfs/
+│   │   ├── archive.js         # JSZip project export and import routines
+│   │   ├── storage.js         # IndexedDB synchronization and default project seed
+│   │   ├── sysroot.js         # Standard C/C++ sysroot header and binary mount definitions
+│   │   └── vfs.js             # In-memory virtual filesystem with path normalization
+│   └── workers/
+│       ├── runtime.worker.js  # WASI host executing user binaries with Atomics stdin
+│       └── shell.worker.js    # Interactive POSIX shell worker (pushd/popd, globs, mv/cp)
+├── public/
+│   ├── coi-serviceworker.js   # Cross-origin isolation shim for GitHub Pages
+│   └── sysroot/
+│       ├── wasm/              # Prebuilt clang.wasm, lld.wasm, memfs.wasm, sysroot.tar
+│       └── include/           # Minimal fallback libc headers
+└── test/
+    ├── make.test.js           # Makefile parsing and incremental build tests
+    ├── runtime.test.js        # SharedArrayBuffer Atomics protocol tests
+    ├── shell.test.js          # Shell argument parsing, globs, pushd/popd, and mv/cp tests
+    ├── toolchain.test.js      # Toolchain driver, MemFS directory, and libc library tests
+    └── vfs.test.js            # VFS hierarchy, permissions, and zip round-trip tests
 
 ---
 

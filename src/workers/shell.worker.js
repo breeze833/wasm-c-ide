@@ -60,11 +60,12 @@ function resolvePath(p) {
   return '/' + resolved.join('/');
 }
 
-// Command line tokenizer
-function parseArgs(line) {
-  const args = [];
+// Command line tokenizer distinguishing quoted vs unquoted tokens
+function parseTokens(line) {
+  const tokens = [];
   let current = '';
   let inQuotes = null;
+  let isQuoted = false;
 
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
@@ -76,46 +77,214 @@ function parseArgs(line) {
       }
     } else if (ch === '"' || ch === "'") {
       inQuotes = ch;
+      isQuoted = true;
     } else if (/\s/.test(ch)) {
-      if (current.length > 0) {
-        args.push(current);
+      if (current.length > 0 || isQuoted) {
+        tokens.push({ text: current, quoted: isQuoted });
         current = '';
+        isQuoted = false;
       }
     } else {
       current += ch;
     }
   }
 
-  if (current.length > 0) {
-    args.push(current);
+  if (current.length > 0 || isQuoted) {
+    tokens.push({ text: current, quoted: isQuoted });
   }
 
-  return args;
+  return tokens;
+}
+
+function parseArgs(line) {
+  return parseTokens(line).map(t => t.text);
+}
+
+// Glob expansion helpers
+function hasGlob(token) {
+  return /[*?]/.test(token);
+}
+
+function globToRegex(pattern) {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.');
+  return new RegExp('^' + escaped + '$');
+}
+
+async function expandGlobToken(token, currentDir) {
+  if (!hasGlob(token)) return [token];
+
+  const isAbsolute = token.startsWith('/');
+  const rawParts = token.split('/').filter(Boolean);
+
+  async function expandSegments(currentVfsPath, segmentIndex, currentPrefix) {
+    if (segmentIndex >= rawParts.length) {
+      return [currentPrefix];
+    }
+
+    const segment = rawParts[segmentIndex];
+    const isLast = segmentIndex === rawParts.length - 1;
+
+    if (!hasGlob(segment)) {
+      const nextVfsPath = currentVfsPath === '/' ? `/${segment}` : `${currentVfsPath}/${segment}`;
+      const nextPrefix = currentPrefix
+        ? (currentPrefix === '/' ? `/${segment}` : `${currentPrefix}/${segment}`)
+        : segment;
+      try {
+        const exists = await callHost('vfs_exists', { path: nextVfsPath });
+        if (!exists) return [];
+        return await expandSegments(nextVfsPath, segmentIndex + 1, nextPrefix);
+      } catch {
+        return [];
+      }
+    }
+
+    try {
+      const entries = await callHost('vfs_readDir', { path: currentVfsPath });
+      const regex = globToRegex(segment);
+      const matches = entries.filter(e => {
+        if (!segment.startsWith('.') && e.name.startsWith('.')) return false;
+        return regex.test(e.name);
+      });
+
+      const results = [];
+      for (const match of matches) {
+        if (!isLast && !match.isDir) continue;
+        const nextVfsPath = currentVfsPath === '/' ? `/${match.name}` : `${currentVfsPath}/${match.name}`;
+        const nextPrefix = currentPrefix
+          ? (currentPrefix === '/' ? `/${match.name}` : `${currentPrefix}/${match.name}`)
+          : match.name;
+        const sub = await expandSegments(nextVfsPath, segmentIndex + 1, nextPrefix);
+        results.push(...sub);
+      }
+      return results;
+    } catch {
+      return [];
+    }
+  }
+
+  const startVfsPath = isAbsolute ? '/' : currentDir;
+  const startPrefix = isAbsolute ? (token.startsWith('//') ? '//' : '/') : '';
+  const expanded = await expandSegments(startVfsPath, 0, startPrefix);
+
+  if (expanded.length === 0) {
+    return [token];
+  }
+
+  return expanded.sort();
+}
+
+const dirStack = [];
+let oldPwd = '/workspace';
+
+function formatStackPath(p) {
+  return p === '/workspace' ? '~' : p.replace(/^\/workspace/, '~');
+}
+
+function printDirStack() {
+  const all = [cwd, ...dirStack.slice().reverse()].map(formatStackPath);
+  writeln(all.join(' '));
 }
 
 // Built-in POSIX CLI Commands
 const builtins = {
   pwd: async () => {
     writeln(cwd);
+    return 0;
   },
 
   cd: async (args) => {
-    const target = args[0] ? resolvePath(args[0]) : '/workspace';
+    let target = args[0];
+    if (!target) {
+      target = '/workspace';
+    } else if (target === '-') {
+      target = oldPwd;
+      writeln(target);
+    } else {
+      target = resolvePath(target);
+    }
+
     try {
       const exists = await callHost('vfs_exists', { path: target });
       if (!exists) {
         writeln(`cd: no such file or directory: ${args[0]}`);
-        return;
+        return 1;
       }
       const stat = await callHost('vfs_stat', { path: target });
       if (!stat || !stat.isDir) {
         writeln(`cd: not a directory: ${args[0]}`);
-        return;
+        return 1;
       }
+      oldPwd = cwd;
       cwd = target;
+      return 0;
     } catch (err) {
       writeln(`cd: ${err.message}`);
+      return 1;
     }
+  },
+
+  pushd: async (args) => {
+    let target = args[0];
+    if (!target) {
+      if (dirStack.length === 0) {
+        writeln('pushd: no other directory');
+        return 1;
+      }
+      const top = dirStack.pop();
+      dirStack.push(cwd);
+      oldPwd = cwd;
+      cwd = top;
+      printDirStack();
+      return 0;
+    }
+
+    if (target === '.') {
+      dirStack.push(cwd);
+      printDirStack();
+      return 0;
+    }
+
+    const resolved = resolvePath(target);
+    try {
+      const exists = await callHost('vfs_exists', { path: resolved });
+      if (!exists) {
+        writeln(`pushd: ${target}: No such file or directory`);
+        return 1;
+      }
+      const stat = await callHost('vfs_stat', { path: resolved });
+      if (!stat || !stat.isDir) {
+        writeln(`pushd: ${target}: Not a directory`);
+        return 1;
+      }
+      dirStack.push(cwd);
+      oldPwd = cwd;
+      cwd = resolved;
+      printDirStack();
+      return 0;
+    } catch (err) {
+      writeln(`pushd: ${err.message}`);
+      return 1;
+    }
+  },
+
+  popd: async () => {
+    if (dirStack.length === 0) {
+      writeln('popd: directory stack empty');
+      return 1;
+    }
+    const popped = dirStack.pop();
+    oldPwd = cwd;
+    cwd = popped;
+    printDirStack();
+    return 0;
+  },
+
+  dirs: async () => {
+    printDirStack();
+    return 0;
   },
 
   ls: async (args) => {
@@ -132,33 +301,97 @@ const builtins = {
       }
     }
 
-    const target = paths.length > 0 ? resolvePath(paths[0]) : cwd;
-
-    try {
-      const items = await callHost('vfs_readDir', { path: target });
-      const filtered = showAll ? items : items.filter(it => !it.name.startsWith('.'));
-
+    const formatItem = (name, isDir, size) => {
       if (longFormat) {
-        for (const item of filtered) {
-          const typeChar = item.isDir ? 'd' : '-';
-          const sizeStr = String(item.size).padStart(8, ' ');
-          const nameColored = item.isDir
-            ? `\x1b[1;34m${item.name}\x1b[0m`
-            : item.name.endsWith('.out') || item.name.endsWith('.wasm')
-            ? `\x1b[1;32m${item.name}\x1b[0m`
-            : item.name;
-          writeln(`${typeChar}rwxr-xr-x 1 user staff ${sizeStr} ${nameColored}`);
+        const typeChar = isDir ? 'd' : '-';
+        const sizeStr = String(size).padStart(8, ' ');
+        const nameColored = isDir
+          ? `\x1b[1;34m${name}\x1b[0m`
+          : (name.endsWith('.out') || name.endsWith('.wasm'))
+          ? `\x1b[1;32m${name}\x1b[0m`
+          : name;
+        return `${typeChar}rwxr-xr-x 1 user staff ${sizeStr} ${nameColored}`;
+      } else {
+        if (isDir) return `\x1b[1;34m${name}/\x1b[0m`;
+        if (name.endsWith('.out') || name.endsWith('.wasm')) return `\x1b[1;32m${name}\x1b[0m`;
+        return name;
+      }
+    };
+
+    if (paths.length === 0) {
+      try {
+        const items = await callHost('vfs_readDir', { path: cwd });
+        const filtered = showAll ? items : items.filter(it => !it.name.startsWith('.'));
+        if (longFormat) {
+          for (const item of filtered) {
+            writeln(formatItem(item.name, item.isDir, item.size));
+          }
+        } else {
+          writeln(filtered.map(item => formatItem(item.name, item.isDir, item.size)).join('  '));
+        }
+      } catch (err) {
+        writeln(`ls: cannot access '${cwd}': ${err.message}`);
+      }
+      return;
+    }
+
+    // Inspect each path in paths
+    const missing = [];
+    const fileList = [];
+    const dirList = [];
+
+    for (const p of paths) {
+      const target = resolvePath(p);
+      try {
+        const exists = await callHost('vfs_exists', { path: target });
+        if (!exists) {
+          missing.push({ path: p, target });
+        } else {
+          const stat = await callHost('vfs_stat', { path: target });
+          if (stat.isDir) {
+            dirList.push({ path: p, target, stat });
+          } else {
+            fileList.push({ path: p, target, stat });
+          }
+        }
+      } catch {
+        missing.push({ path: p, target });
+      }
+    }
+
+    for (const m of missing) {
+      writeln(`ls: cannot access '${m.path}': No such file or directory`);
+    }
+
+    if (fileList.length > 0) {
+      if (longFormat) {
+        for (const f of fileList) {
+          writeln(formatItem(f.path, false, f.stat.size));
         }
       } else {
-        const names = filtered.map(item => {
-          if (item.isDir) return `\x1b[1;34m${item.name}/\x1b[0m`;
-          if (item.name.endsWith('.out') || item.name.endsWith('.wasm')) return `\x1b[1;32m${item.name}\x1b[0m`;
-          return item.name;
-        });
-        writeln(names.join('  '));
+        writeln(fileList.map(f => formatItem(f.path, false, f.stat.size)).join('  '));
       }
-    } catch (err) {
-      writeln(`ls: cannot access '${target}': ${err.message}`);
+    }
+
+    for (let i = 0; i < dirList.length; i++) {
+      const d = dirList[i];
+      if (paths.length > 1) {
+        if (fileList.length > 0 || i > 0) writeln('');
+        writeln(`${d.path}:`);
+      }
+      try {
+        const items = await callHost('vfs_readDir', { path: d.target });
+        const filtered = showAll ? items : items.filter(it => !it.name.startsWith('.'));
+        if (longFormat) {
+          for (const item of filtered) {
+            writeln(formatItem(item.name, item.isDir, item.size));
+          }
+        } else {
+          writeln(filtered.map(item => formatItem(item.name, item.isDir, item.size)).join('  '));
+        }
+      } catch (err) {
+        writeln(`ls: cannot access '${d.path}': ${err.message}`);
+      }
     }
   },
 
@@ -203,71 +436,243 @@ const builtins = {
     const dirs = [];
     for (const arg of args) {
       if (arg === '-p') recursive = true;
-      else dirs.push(arg);
+      else if (!arg.startsWith('-')) dirs.push(arg);
     }
+    if (dirs.length === 0) {
+      writeln('mkdir: missing operand');
+      return 1;
+    }
+    let hasError = false;
     for (const dir of dirs) {
       const target = resolvePath(dir);
       try {
         await callHost('vfs_mkdir', { path: target, recursive });
       } catch (err) {
         writeln(`mkdir: cannot create directory '${dir}': ${err.message}`);
+        hasError = true;
       }
     }
+    return hasError ? 1 : 0;
   },
 
   rm: async (args) => {
     let recursive = false;
+    let force = false;
     const targets = [];
     for (const arg of args) {
-      if (arg === '-r' || arg === '-rf' || arg === '-f') recursive = true;
-      else targets.push(arg);
+      if (arg === '-r' || arg === '-R') recursive = true;
+      else if (arg === '-f') force = true;
+      else if (arg === '-rf' || arg === '-fr') { recursive = true; force = true; }
+      else if (!arg.startsWith('-')) targets.push(arg);
     }
+    if (targets.length === 0) {
+      if (!force) {
+        writeln('rm: missing operand');
+        return 1;
+      }
+      return 0;
+    }
+    let hasError = false;
     for (const target of targets) {
       const resolved = resolvePath(target);
       try {
         await callHost('vfs_remove', { path: resolved, recursive });
       } catch (err) {
-        if (!args.includes('-f') && !args.includes('-rf')) {
+        if (!force) {
           writeln(`rm: cannot remove '${target}': ${err.message}`);
+          hasError = true;
         }
       }
     }
+    return hasError ? 1 : 0;
   },
 
   cp: async (args) => {
-    if (args.length < 2) {
+    let recursive = false;
+    const operands = [];
+    for (const arg of args) {
+      if (arg === '-r' || arg === '-R' || arg === '-rf' || arg === '-fr') {
+        recursive = true;
+      } else if (arg.startsWith('-')) {
+        // ignore other flags
+      } else {
+        operands.push(arg);
+      }
+    }
+
+    if (operands.length === 0) {
       writeln('cp: missing file operand');
-      return;
+      return 1;
     }
-    const src = resolvePath(args[0]);
-    const dst = resolvePath(args[1]);
-    try {
-      const content = await callHost('vfs_readFile', { path: src, asText: false });
-      await callHost('vfs_writeFile', { path: dst, content });
-    } catch (err) {
-      writeln(`cp: cannot copy '${args[0]}' to '${args[1]}': ${err.message}`);
+    if (operands.length === 1) {
+      writeln(`cp: missing destination file operand after '${operands[0]}'`);
+      return 1;
     }
+
+    const destRaw = operands[operands.length - 1];
+    const sourcesRaw = operands.slice(0, operands.length - 1);
+    const destNorm = resolvePath(destRaw);
+    const destStat = await callHost('vfs_stat', { path: destNorm });
+    const destIsDir = destStat && destStat.isDir;
+    const destEndsWithSlash = destRaw.endsWith('/');
+
+    if (sourcesRaw.length > 1 && !destIsDir) {
+      writeln(`cp: target '${destRaw}' is not a directory`);
+      return 1;
+    }
+
+    if (destEndsWithSlash && !destIsDir && !destStat) {
+      writeln(`cp: cannot create regular file '${destRaw}': Not a directory`);
+      return 1;
+    }
+
+    let hasError = false;
+
+    async function copyEntry(srcPath, dstPath) {
+      const stat = await callHost('vfs_stat', { path: srcPath });
+      if (!stat) {
+        throw new Error(`No such file or directory: ${srcPath}`);
+      }
+      if (stat.isDir) {
+        if (!recursive) {
+          throw new Error(`-r not specified; omitting directory '${srcPath}'`);
+        }
+        await callHost('vfs_mkdir', { path: dstPath, recursive: true });
+        const entries = await callHost('vfs_readDir', { path: srcPath });
+        for (const entry of entries) {
+          const childSrc = srcPath === '/' ? `/${entry.name}` : `${srcPath}/${entry.name}`;
+          const childDst = dstPath === '/' ? `/${entry.name}` : `${dstPath}/${entry.name}`;
+          await copyEntry(childSrc, childDst);
+        }
+      } else {
+        const content = await callHost('vfs_readFile', { path: srcPath, asText: false });
+        await callHost('vfs_writeFile', { path: dstPath, content });
+      }
+    }
+
+    for (const srcRaw of sourcesRaw) {
+      const srcNorm = resolvePath(srcRaw);
+      const srcStat = await callHost('vfs_stat', { path: srcNorm });
+      if (!srcStat) {
+        writeln(`cp: cannot stat '${srcRaw}': No such file or directory`);
+        hasError = true;
+        continue;
+      }
+
+      const srcBase = srcNorm.split('/').filter(Boolean).pop();
+      let targetPath;
+      if (destIsDir) {
+        targetPath = destNorm === '/' ? `/${srcBase}` : `${destNorm}/${srcBase}`;
+      } else {
+        targetPath = destNorm;
+      }
+
+      if (srcNorm === targetPath) {
+        writeln(`cp: '${srcRaw}' and '${destRaw}' are the same file`);
+        hasError = true;
+        continue;
+      }
+
+      try {
+        await copyEntry(srcNorm, targetPath);
+      } catch (err) {
+        writeln(`cp: cannot copy '${srcRaw}' to '${destRaw}': ${err.message}`);
+        hasError = true;
+      }
+    }
+
+    return hasError ? 1 : 0;
   },
 
   mv: async (args) => {
-    if (args.length < 2) {
+    const operands = [];
+    for (const arg of args) {
+      if (arg.startsWith('-') && arg.length > 1) {
+        // ignore flags like -f, -v
+      } else {
+        operands.push(arg);
+      }
+    }
+
+    if (operands.length === 0) {
       writeln('mv: missing file operand');
-      return;
+      return 1;
     }
-    const src = resolvePath(args[0]);
-    const dst = resolvePath(args[1]);
-    try {
-      await callHost('vfs_rename', { oldPath: src, newPath: dst });
-    } catch (err) {
-      writeln(`mv: cannot move '${args[0]}' to '${args[1]}': ${err.message}`);
+    if (operands.length === 1) {
+      writeln(`mv: missing destination file operand after '${operands[0]}'`);
+      return 1;
     }
+
+    const destRaw = operands[operands.length - 1];
+    const sourcesRaw = operands.slice(0, operands.length - 1);
+    const destNorm = resolvePath(destRaw);
+    const destStat = await callHost('vfs_stat', { path: destNorm });
+    const destIsDir = destStat && destStat.isDir;
+    const destEndsWithSlash = destRaw.endsWith('/');
+
+    if (sourcesRaw.length > 1 && !destIsDir) {
+      writeln(`mv: target '${destRaw}' is not a directory`);
+      return 1;
+    }
+
+    if (destEndsWithSlash && !destIsDir && !destStat) {
+      writeln(`mv: cannot move to '${destRaw}': Not a directory`);
+      return 1;
+    }
+
+    let hasError = false;
+
+    for (const srcRaw of sourcesRaw) {
+      const srcNorm = resolvePath(srcRaw);
+      const srcStat = await callHost('vfs_stat', { path: srcNorm });
+      if (!srcStat) {
+        writeln(`mv: cannot stat '${srcRaw}': No such file or directory`);
+        hasError = true;
+        continue;
+      }
+
+      if (srcNorm === '/' || srcNorm === '/workspace') {
+        writeln(`mv: cannot move root or workspace: '${srcRaw}'`);
+        hasError = true;
+        continue;
+      }
+
+      const srcBase = srcNorm.split('/').filter(Boolean).pop();
+      let targetPath;
+      if (destIsDir) {
+        targetPath = destNorm === '/' ? `/${srcBase}` : `${destNorm}/${srcBase}`;
+      } else {
+        targetPath = destNorm;
+      }
+
+      if (srcNorm === targetPath) {
+        writeln(`mv: '${srcRaw}' and '${destRaw}' are the same file`);
+        hasError = true;
+        continue;
+      }
+
+      if (srcStat.isDir && (targetPath + '/').startsWith(srcNorm + '/')) {
+        writeln(`mv: cannot move '${srcRaw}' to a subdirectory of itself, '${destRaw}'`);
+        hasError = true;
+        continue;
+      }
+
+      try {
+        await callHost('vfs_rename', { oldPath: srcNorm, newPath: targetPath });
+      } catch (err) {
+        writeln(`mv: cannot move '${srcRaw}' to '${destRaw}': ${err.message}`);
+        hasError = true;
+      }
+    }
+
+    return hasError ? 1 : 0;
   },
 
   clear: async () => {
     write('\x1b[2J\x1b[H');
   },
 
-  sh: async (args) => {
+    sh: async (args) => {
     if (args.length === 0) {
       writeln('sh: script file required');
       return;
@@ -286,7 +691,67 @@ const builtins = {
       writeln(`sh: ${args[0]}: ${err.message}`);
     }
   },
+
+  which: async (args) => {
+    if (args.length === 0) return 0;
+    for (const name of args) {
+      if (['sh', 'ls', 'cat', 'rm', 'mkdir', 'cp', 'mv', 'pwd', 'clear', 'echo', 'pushd', 'popd', 'dirs', 'push', 'pop'].includes(name)) {
+        writeln(`/bin/${name}`);
+      } else if (['gcc', 'clang', 'make', 'wasm-ld'].includes(name)) {
+        writeln(`/usr/bin/${name}`);
+      } else {
+        const full = resolvePath(name);
+        const exists = await callHost('vfs_exists', { path: full });
+        if (exists) {
+          writeln(full);
+        } else {
+          writeln(`which: no ${name} in (/usr/bin:/bin)`);
+        }
+      }
+    }
+    return 0;
+  },
 };
+
+builtins.push = builtins.pushd;
+builtins.pop = builtins.popd;
+
+// Parser for chained shell commands with &&, ||, and ;
+function parseCommandChain(line) {
+  const commands = [];
+  let current = '';
+  let inQuotes = null;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === inQuotes) inQuotes = null;
+      current += ch;
+    } else if (ch === '"' || ch === "'") {
+      inQuotes = ch;
+      current += ch;
+    } else if (ch === '&' && line[i + 1] === '&') {
+      commands.push({ cmd: current.trim(), op: '&&' });
+      current = '';
+      i++;
+    } else if (ch === '|' && line[i + 1] === '|') {
+      commands.push({ cmd: current.trim(), op: '||' });
+      current = '';
+      i++;
+    } else if (ch === ';') {
+      commands.push({ cmd: current.trim(), op: ';' });
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+
+  if (current.trim()) {
+    commands.push({ cmd: current.trim(), op: null });
+  }
+
+  return commands;
+}
 
 // Autocompletion
 async function handleTabCompletion() {
@@ -321,26 +786,68 @@ async function handleTabCompletion() {
   } catch {}
 }
 
-// Execute single command line
+// Execute single command line with operator chaining (&&, ||, ;)
 async function executeCommandLine(commandStr) {
-  const parts = commandStr.split('&&');
-  for (const part of parts) {
-    const trimmed = part.trim();
-    if (!trimmed) continue;
+  const commands = parseCommandChain(commandStr);
+  let lastExitCode = 0;
+  let prevOp = null;
 
-    const args = parseArgs(trimmed);
-    const cmd = args.shift();
+  for (let i = 0; i < commands.length; i++) {
+    const { cmd: rawCmd, op } = commands[i];
+    if (!rawCmd) continue;
 
-    if (builtins[cmd]) {
-      await builtins[cmd](args);
-    } else {
-      // Delegate external command (gcc, clang, make, ./a.out) to host
-      try {
-        await callHost('exec_command', { cmd, args, rawLine: trimmed, cwd });
-      } catch (err) {
-        writeln(err.message || `${cmd}: command not found`);
+    if (prevOp === '&&' && lastExitCode !== 0) {
+      prevOp = op;
+      continue;
+    }
+    if (prevOp === '||' && lastExitCode === 0) {
+      prevOp = op;
+      continue;
+    }
+
+    const tokens = parseTokens(rawCmd);
+    if (tokens.length === 0) {
+      prevOp = op;
+      continue;
+    }
+
+    const cmdToken = tokens.shift();
+    let cmd = cmdToken.text;
+
+    // Expand globs in arguments
+    const args = [];
+    for (const token of tokens) {
+      if (token.quoted || !hasGlob(token.text)) {
+        args.push(token.text);
+      } else {
+        const expanded = await expandGlobToken(token.text, cwd);
+        args.push(...expanded);
       }
     }
+
+    // Map path-prefixed commands like /bin/ls or /usr/bin/gcc
+    const baseCmd = (cmd.startsWith('/bin/') || cmd.startsWith('/usr/bin/'))
+      ? cmd.split('/').pop()
+      : cmd;
+
+    try {
+      if (builtins[cmd]) {
+        const res = await builtins[cmd](args);
+        lastExitCode = typeof res === 'number' ? res : 0;
+      } else if (builtins[baseCmd]) {
+        const res = await builtins[baseCmd](args);
+        lastExitCode = typeof res === 'number' ? res : 0;
+      } else {
+        // Delegate external command (gcc, clang, make, ./a.out) to host
+        await callHost('exec_command', { cmd: baseCmd, args, rawLine: rawCmd, cwd });
+        lastExitCode = 0;
+      }
+    } catch (err) {
+      writeln(err.message || `${cmd}: command not found`);
+      lastExitCode = 1;
+    }
+
+    prevOp = op;
   }
 }
 

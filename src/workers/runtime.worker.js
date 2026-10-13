@@ -77,9 +77,12 @@ async function runWasm(wasmBytes, argv, environ) {
       const bufLen = memU32()[(iovs >> 2) + i * 2 + 1];
 
       let available = 0;
+      let curLen = 0;
+      let curPos = 0;
+
       if (sharedInt32) {
-        let curLen = Atomics.load(sharedInt32, CONTROL_LEN_IDX);
-        let curPos = Atomics.load(sharedInt32, CONTROL_READ_POS_IDX);
+        curLen = Atomics.load(sharedInt32, CONTROL_LEN_IDX);
+        curPos = Atomics.load(sharedInt32, CONTROL_READ_POS_IDX);
         available = curLen - curPos;
       }
 
@@ -104,7 +107,7 @@ async function runWasm(wasmBytes, argv, environ) {
       }
 
       if (available > 0 && sharedInt32) {
-        const curPos = Atomics.load(sharedInt32, CONTROL_READ_POS_IDX);
+        curPos = Atomics.load(sharedInt32, CONTROL_READ_POS_IDX);
         const toCopy = Math.min(bufLen, available);
         const target = memU8().subarray(bufPtr, bufPtr + toCopy);
         const source = sharedUint8.subarray(DATA_OFFSET + curPos, DATA_OFFSET + curPos + toCopy);

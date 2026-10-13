@@ -82,11 +82,17 @@ export class App {
     // Initialize Toolchain
     this.toolchain = new WasmToolchain({
       basePath: '/sysroot/wasm',
+      vfs: this.vfs,
       hostWrite: (str) => {
         if (this.terminal) {
           this.terminal.write(str.replace(/\r?\n/g, '\r\n'));
         }
       },
+    });
+
+    // Warm up compiler in background so memfs is ready
+    this.toolchain.init().catch(err => {
+      console.warn('Toolchain background pre-initialization notice:', err);
     });
 
     // Open default file main.c
@@ -364,8 +370,8 @@ export class App {
         const baseName = relPath.split('/').pop().replace(/\.(c|cpp)$/, '');
         const objPath = `build/${baseName}.o`;
 
-        // Strict command bridge: Type into xterm
-        const cmd = `gcc -Iinclude -Wall -c ${relPath} -o ${objPath}`;
+        // Strict command bridge: Type into xterm with directory stack preservation
+        const cmd = `pushd . && cd /workspace && gcc -Iinclude -Wall -c ${relPath} -o ${objPath}; popd`;
         this.terminal.injectCommand(cmd);
       });
     }
@@ -373,18 +379,17 @@ export class App {
     if (btnBuild) {
       btnBuild.addEventListener('click', () => {
         checkDirtyWarning();
-        // Strict command bridge: Type into xterm
-        if (this.buildSystem === 'make') {
-          this.terminal.injectCommand('make');
-        } else {
-          this.terminal.injectCommand('sh build.sh');
-        }
+        // Strict command bridge: Type into xterm with directory stack preservation
+        const buildCmd = this.buildSystem === 'make' ? 'make' : 'sh build.sh';
+        const cmd = `pushd . && cd /workspace && ${buildCmd}; popd`;
+        this.terminal.injectCommand(cmd);
       });
     }
 
     if (btnRun) {
       btnRun.addEventListener('click', () => {
-        this.terminal.injectCommand('./a.out');
+        const cmd = 'pushd . && cd /workspace && ./a.out; popd';
+        this.terminal.injectCommand(cmd);
       });
     }
 
@@ -457,12 +462,42 @@ export function initApp() {
           <option value="sh">build.sh</option>
           <option value="make">Makefile</option>
         </select>
-        <button id="btn-save" class="btn" title="Save Active File (Ctrl+S)">Save</button>
-        <button id="btn-compile" class="btn" title="Compile Active File">Compile</button>
-        <button id="btn-build" class="btn btn-primary" title="Build Project">Build</button>
-        <button id="btn-run" class="btn btn-success" title="Run Executable">Run</button>
-        <button id="btn-stop" class="btn btn-danger" title="Stop Execution">Stop</button>
-        <button id="btn-settings" class="btn" title="Project Settings">Settings</button>
+        <button id="btn-save" class="btn btn-save" title="Save Active File (Ctrl+S)">
+          <svg class="btn-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M13.854 3.646l-1.5-1.5A.5.5 0 0 0 12 2H2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4a.5.5 0 0 0-.146-.354zM4 3h6v3H4V3zm9 10H3V3h1v3.5A.5.5 0 0 0 4.5 7h5a.5.5 0 0 0 .5-.5V3h1.793l1.207 1.207V13zM6 9h4v3H6V9z"/>
+          </svg>
+          <span>Save</span>
+        </button>
+        <button id="btn-compile" class="btn btn-compile" title="Compile Active File">
+          <svg class="btn-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M9.1 4.4L8.6 2H7.4l-.5 2.4-.7.3-2-1.3-.9.8 1.3 2-.2.7-2.5.5v1.2l2.5.5.3.8-1.4 1.9.8.8 2-1.4.7.3.5 2.4h1.2l.5-2.4.7-.3 2 1.3.8-.8-1.3-2 .3-.7 2.4-.5V7.6l-2.4-.5-.3-.7 1.3-2-.8-.8-2 1.3-.7-.2zM8 10c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
+          </svg>
+          <span>Compile</span>
+        </button>
+        <button id="btn-build" class="btn btn-primary" title="Build Project">
+          <svg class="btn-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M14.7 10.7l-4.4-4.4c.4-.9.2-2-.5-2.7l-1.8-1.8c-.8-.8-2-.8-2.8 0L3.8 3.2c-.8.8-.8 2 0 2.8l1.8 1.8c.7.7 1.8.9 2.7.5l4.4 4.4c.2.2.5.2.7 0l1.3-1.3c.2-.2.2-.5 0-.7zm-8.8-5.3L4.5 4c-.4-.4-.4-1 0-1.4l1.4-1.4c.4-.4 1-.4 1.4 0l1.4 1.4c.4.4.4 1 0 1.4L7.3 5.4 5.9 4l-.7.7.7.7z"/>
+          </svg>
+          <span>Build</span>
+        </button>
+        <button id="btn-run" class="btn btn-success" title="Run Executable">
+          <svg class="btn-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M4 2.5v11l9-5.5-9-5.5z"/>
+          </svg>
+          <span>Run</span>
+        </button>
+        <button id="btn-stop" class="btn btn-danger" title="Stop Execution">
+          <svg class="btn-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M3.5 3.5h9v9h-9v-9z"/>
+          </svg>
+          <span>Stop</span>
+        </button>
+        <button id="btn-settings" class="btn" title="Project Settings">
+          <svg class="btn-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M14 4h-1.1a2 2 0 0 0-3.8 0H2v1h7.1a2 2 0 0 0 3.8 0H14V4zm-3 1.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2zM14 11H8.9a2 2 0 0 0-3.8 0H2v1h3.1a2 2 0 0 0 3.8 0H14v-1zm-7 1.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/>
+          </svg>
+          <span>Settings</span>
+        </button>
       </div>
     </header>
 
@@ -471,10 +506,26 @@ export function initApp() {
         <div class="sidebar-header">
           <span>Workspace</span>
           <div class="sidebar-actions">
-            <button id="btn-new-file" class="icon-btn" title="New File">+ File</button>
-            <button id="btn-new-folder" class="icon-btn" title="New Folder">+ Folder</button>
-            <button id="btn-export-zip" class="icon-btn" title="Export Zip">Export</button>
-            <button id="btn-import-zip" class="icon-btn" title="Import Zip">Import</button>
+            <button id="btn-new-file" class="icon-btn" title="New File" data-tooltip="New File" aria-label="New File">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M9 1H3a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h5v-1H3V2h5v3h3v3h1V4.5L8.5 1H9zm4 10v-2h-1v2H9v1h3v3h1v-3h3v-1h-3z"/>
+              </svg>
+            </button>
+            <button id="btn-new-folder" class="icon-btn" title="New Folder" data-tooltip="New Folder" aria-label="New Folder">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M7.25 3l.75 1h6a1 1 0 0 1 1 1v2.5h-1V5H8l-.75-1H2v9h6v1H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h4.25l1 1zm4.75 8v-2h-1v2H8v1h3v3h1v-3h3v-1h-3z"/>
+              </svg>
+            </button>
+            <button id="btn-import-zip" class="icon-btn" title="Import Zip" data-tooltip="Import Zip" aria-label="Import Zip">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M7.5 10.5V3.707L5.354 5.854l-.708-.708L8 1.793l3.354 3.353-.708.708L8.5 3.707v6.793h-1zM2 11.5v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2h-1v2H3v-2H2z"/>
+              </svg>
+            </button>
+            <button id="btn-export-zip" class="icon-btn" title="Export Zip" data-tooltip="Export Zip" aria-label="Export Zip">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8.5 1.5v6.793l2.146-2.147.708.708L8 10.207 4.646 6.854l.708-.708 2.146 2.147V1.5h1zM2 11.5v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2h-1v2H3v-2H2z"/>
+              </svg>
+            </button>
           </div>
         </div>
         <div id="file-tree" class="file-tree-container"></div>
@@ -491,7 +542,11 @@ export function initApp() {
         <section class="terminal-section">
           <div class="terminal-header">
             <span>Terminal</span>
-            <button id="btn-clear-term" class="icon-btn" title="Clear Terminal">Clear</button>
+            <button id="btn-clear-term" class="icon-btn" title="Clear Terminal" data-tooltip="Clear Terminal" aria-label="Clear Terminal">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M5 2V1h6v1h4v1H1V2h4zm1 3v8h1V5H6zm3 0v8h1V5H9zm-6 0v9a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5H3z"/>
+              </svg>
+            </button>
           </div>
           <div id="terminal-container" class="terminal-container"></div>
         </section>

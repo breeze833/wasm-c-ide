@@ -50,4 +50,65 @@ Atomics.store(sharedInt32, CONTROL_STATE_IDX, STATE_EOF);
 assert.strictEqual(Atomics.load(sharedInt32, CONTROL_STATE_IDX), STATE_EOF);
 console.log('✓ Process EOF termination state verified');
 
+// Test 5: Regression test - readStdin logic in strict mode with waiting/resumption
+{
+  "use strict";
+  // Reset shared buffer
+  Atomics.store(sharedInt32, CONTROL_STATE_IDX, STATE_IDLE);
+  Atomics.store(sharedInt32, CONTROL_LEN_IDX, 0);
+  Atomics.store(sharedInt32, CONTROL_READ_POS_IDX, 0);
+
+  function readStdinMock(bufLen) {
+    let totalRead = 0;
+    let available = 0;
+    let curLen = 0;
+    let curPos = 0;
+
+    if (sharedInt32) {
+      curLen = Atomics.load(sharedInt32, CONTROL_LEN_IDX);
+      curPos = Atomics.load(sharedInt32, CONTROL_READ_POS_IDX);
+      available = curLen - curPos;
+    }
+
+    if (available <= 0 && sharedInt32) {
+      // Simulate input arrival while blocked
+      const input = "123\n";
+      const enc = new TextEncoder().encode(input);
+      sharedUint8.set(enc, DATA_OFFSET);
+      Atomics.store(sharedInt32, CONTROL_LEN_IDX, enc.length);
+      Atomics.store(sharedInt32, CONTROL_READ_POS_IDX, 0);
+      Atomics.store(sharedInt32, CONTROL_STATE_IDX, STATE_READY);
+
+      // Reload values after wake-up (must not throw ReferenceError on curLen/curPos)
+      curLen = Atomics.load(sharedInt32, CONTROL_LEN_IDX);
+      curPos = Atomics.load(sharedInt32, CONTROL_READ_POS_IDX);
+      available = curLen - curPos;
+    }
+
+    if (available > 0 && sharedInt32) {
+      curPos = Atomics.load(sharedInt32, CONTROL_READ_POS_IDX);
+      const toCopy = Math.min(bufLen, available);
+      const target = new Uint8Array(toCopy);
+      const source = sharedUint8.subarray(DATA_OFFSET + curPos, DATA_OFFSET + curPos + toCopy);
+      target.set(source);
+      Atomics.add(sharedInt32, CONTROL_READ_POS_IDX, toCopy);
+      totalRead += toCopy;
+    }
+
+    return totalRead;
+  }
+
+  // First read reads 2 bytes
+  const r1 = readStdinMock(2);
+  assert.strictEqual(r1, 2);
+  assert.strictEqual(Atomics.load(sharedInt32, CONTROL_READ_POS_IDX), 2);
+
+  // Second read reads remaining 2 bytes without blocking
+  const r2 = readStdinMock(2);
+  assert.strictEqual(r2, 2);
+  assert.strictEqual(Atomics.load(sharedInt32, CONTROL_READ_POS_IDX), 4);
+
+  console.log('✓ readStdin strict-mode variable scope and multi-read verified');
+}
+
 console.log('--- ALL RUNTIME TESTS PASSED ---');

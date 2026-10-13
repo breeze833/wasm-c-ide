@@ -30,10 +30,12 @@ export class VFS {
     this.listeners = new Set();
 
     // Ensure root directories exist
-    this.mkdir('/workspace', true);
-    this.mkdir('/usr', true);
-    this.mkdir('/usr/include', true);
-    this.mkdir('/usr/lib', true);
+    this.mkdir('/workspace', true, true);
+    this.mkdir('/usr', true, true);
+    this.mkdir('/usr/include', true, true);
+    this.mkdir('/usr/lib', true, true);
+    this.mkdir('/usr/bin', true, true);
+    this.mkdir('/bin', true, true);
   }
 
   subscribe(listener) {
@@ -53,7 +55,7 @@ export class VFS {
 
   _isReadOnly(path) {
     const norm = normalizePath(path);
-    return norm.startsWith('/usr');
+    return norm.startsWith('/usr') || norm.startsWith('/bin');
   }
 
   _resolve(path, createIntermediate = false) {
@@ -87,10 +89,10 @@ export class VFS {
     return current;
   }
 
-  mkdir(path, recursive = true) {
+  mkdir(path, recursive = true, allowReadOnly = false) {
     const norm = normalizePath(path);
     if (norm === '/') return;
-    if (this._isReadOnly(norm) && !norm.startsWith('/usr')) {
+    if (!allowReadOnly && this._isReadOnly(norm)) {
       throw new Error(`Permission denied: Cannot create directory in read-only path ${norm}`);
     }
 
@@ -266,28 +268,64 @@ export class VFS {
       throw new Error('Permission denied: Cannot rename read-only paths');
     }
 
+    if (oldNorm === newNorm) {
+      return;
+    }
+
     const sourceNode = this._resolve(oldNorm);
     if (!sourceNode) {
       throw new Error(`Source not found: ${oldNorm}`);
+    }
+
+    // If destination is an existing directory, move into it with source basename
+    let targetNorm = newNorm;
+    const destNode = this._resolve(newNorm);
+    if (destNode && destNode.isDir) {
+      const oldParts = oldNorm.split('/').filter(Boolean);
+      const oldName = oldParts[oldParts.length - 1];
+      targetNorm = newNorm === '/' ? `/${oldName}` : `${newNorm}/${oldName}`;
+      if (this._isReadOnly(targetNorm)) {
+        throw new Error('Permission denied: Cannot rename into read-only path');
+      }
+      if (oldNorm === targetNorm) {
+        return;
+      }
+    }
+
+    if (sourceNode.isDir && (targetNorm + '/').startsWith(oldNorm + '/')) {
+      throw new Error(`Cannot move directory into itself: ${targetNorm}`);
     }
 
     const oldParts = oldNorm.split('/').filter(Boolean);
     const oldName = oldParts.pop();
     const oldParent = this._resolve('/' + oldParts.join('/'));
 
-    const newParts = newNorm.split('/').filter(Boolean);
+    const newParts = targetNorm.split('/').filter(Boolean);
     const newName = newParts.pop();
     const newParent = this._resolve('/' + newParts.join('/'), true);
 
-    if (newParent.children.has(newName)) {
-      throw new Error(`Destination already exists: ${newNorm}`);
+    if (!newParent || !newParent.isDir) {
+      throw new Error(`Destination directory not found: /${newParts.join('/')}`);
+    }
+
+    const existingDest = newParent.children.get(newName);
+    if (existingDest) {
+      if (existingDest.isDir && !sourceNode.isDir) {
+        throw new Error(`Cannot overwrite directory with non-directory: ${targetNorm}`);
+      }
+      if (!existingDest.isDir && sourceNode.isDir) {
+        throw new Error(`Cannot overwrite non-directory with directory: ${targetNorm}`);
+      }
+      if (existingDest.isDir && sourceNode.isDir && existingDest.children.size > 0) {
+        throw new Error(`Directory not empty: ${targetNorm}`);
+      }
     }
 
     oldParent.children.delete(oldName);
     sourceNode.name = newName;
     newParent.children.set(newName, sourceNode);
 
-    this._notify({ type: 'rename', oldPath: oldNorm, path: newNorm });
+    this._notify({ type: 'rename', oldPath: oldNorm, path: targetNorm });
   }
 
   // Returns all files under a path recursively as flat array of { path, isDir, content, mtime }
