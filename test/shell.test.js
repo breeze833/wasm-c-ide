@@ -422,4 +422,199 @@ console.log('✓ parseCommandChain passed');
   console.log('✓ Command chaining execution with error recovery passed');
 }
 
+// Test 11: mv and cp directory destination variants (mv a.out src, mv a.out src/, etc.)
+{
+  const vfs = new VFS();
+  mountSysroot(vfs);
+  vfs.mkdir('/workspace/src');
+  vfs.mkdir('/workspace/build');
+
+  let output = [];
+  function writeln(msg) { output.push(msg); }
+
+  function resolvePath(p, cwd = '/workspace') {
+    if (!p) return cwd;
+    let target = p.startsWith('/') ? p : `${cwd}/${p}`;
+    const parts = target.split('/').filter(Boolean);
+    const resolved = [];
+    for (const part of parts) {
+      if (part === '.') continue;
+      if (part === '..') {
+        if (resolved.length > 0) resolved.pop();
+      } else {
+        resolved.push(part);
+      }
+    }
+    return '/' + resolved.join('/');
+  }
+
+  async function mockMv(args, cwd = '/workspace') {
+    const operands = [];
+    for (const arg of args) {
+      if (arg.startsWith('-') && arg.length > 1) {}
+      else operands.push(arg);
+    }
+    if (operands.length === 0) {
+      writeln('mv: missing file operand');
+      return 1;
+    }
+    if (operands.length === 1) {
+      writeln(`mv: missing destination file operand after '${operands[0]}'`);
+      return 1;
+    }
+
+    const destRaw = operands[operands.length - 1];
+    const sourcesRaw = operands.slice(0, operands.length - 1);
+    const destNorm = resolvePath(destRaw, cwd);
+    const destStat = vfs.stat(destNorm);
+    const destIsDir = destStat && destStat.isDir;
+    const destEndsWithSlash = destRaw.endsWith('/');
+
+    if (sourcesRaw.length > 1 && !destIsDir) {
+      writeln(`mv: target '${destRaw}' is not a directory`);
+      return 1;
+    }
+
+    if (destEndsWithSlash && !destIsDir && !destStat) {
+      writeln(`mv: cannot move to '${destRaw}': Not a directory`);
+      return 1;
+    }
+
+    let hasError = false;
+    for (const srcRaw of sourcesRaw) {
+      const srcNorm = resolvePath(srcRaw, cwd);
+      const srcStat = vfs.stat(srcNorm);
+      if (!srcStat) {
+        writeln(`mv: cannot stat '${srcRaw}': No such file or directory`);
+        hasError = true;
+        continue;
+      }
+      if (srcNorm === '/' || srcNorm === '/workspace') {
+        writeln(`mv: cannot move root or workspace: '${srcRaw}'`);
+        hasError = true;
+        continue;
+      }
+
+      const srcBase = srcNorm.split('/').filter(Boolean).pop();
+      let targetPath;
+      if (destIsDir) {
+        targetPath = destNorm === '/' ? `/${srcBase}` : `${destNorm}/${srcBase}`;
+      } else {
+        targetPath = destNorm;
+      }
+
+      if (srcNorm === targetPath) {
+        writeln(`mv: '${srcRaw}' and '${destRaw}' are the same file`);
+        hasError = true;
+        continue;
+      }
+
+      if (srcStat.isDir && (targetPath + '/').startsWith(srcNorm + '/')) {
+        writeln(`mv: cannot move '${srcRaw}' to a subdirectory of itself, '${destRaw}'`);
+        hasError = true;
+        continue;
+      }
+
+      try {
+        vfs.rename(srcNorm, targetPath);
+      } catch (err) {
+        writeln(`mv: cannot move '${srcRaw}' to '${destRaw}': ${err.message}`);
+        hasError = true;
+      }
+    }
+    return hasError ? 1 : 0;
+  }
+
+  async function mockCp(args, cwd = '/workspace') {
+    let recursive = false;
+    const operands = [];
+    for (const arg of args) {
+      if (arg === '-r' || arg === '-R' || arg === '-rf' || arg === '-fr') recursive = true;
+      else if (!arg.startsWith('-')) operands.push(arg);
+    }
+    if (operands.length < 2) return 1;
+
+    const destRaw = operands[operands.length - 1];
+    const sourcesRaw = operands.slice(0, operands.length - 1);
+    const destNorm = resolvePath(destRaw, cwd);
+    const destStat = vfs.stat(destNorm);
+    const destIsDir = destStat && destStat.isDir;
+    const destEndsWithSlash = destRaw.endsWith('/');
+
+    if (sourcesRaw.length > 1 && !destIsDir) return 1;
+    if (destEndsWithSlash && !destIsDir && !destStat) return 1;
+
+    function copyEntry(srcPath, dstPath) {
+      const stat = vfs.stat(srcPath);
+      if (stat.isDir) {
+        if (!recursive) throw new Error('-r not specified');
+        vfs.mkdir(dstPath);
+        for (const entry of vfs.readDir(srcPath)) {
+          copyEntry(`${srcPath}/${entry.name}`, `${dstPath}/${entry.name}`);
+        }
+      } else {
+        vfs.writeFile(dstPath, vfs.readFile(srcPath, false));
+      }
+    }
+
+    for (const srcRaw of sourcesRaw) {
+      const srcNorm = resolvePath(srcRaw, cwd);
+      const srcBase = srcNorm.split('/').filter(Boolean).pop();
+      const targetPath = destIsDir ? `${destNorm}/${srcBase}` : destNorm;
+      copyEntry(srcNorm, targetPath);
+    }
+    return 0;
+  }
+
+  // Case 1: mv a.out src (target directory without trailing slash)
+  vfs.writeFile('/workspace/a.out', 'bin-mv-1');
+  const code1 = await mockMv(['a.out', 'src']);
+  assert.strictEqual(code1, 0);
+  assert.strictEqual(vfs.exists('/workspace/a.out'), false);
+  assert.strictEqual(vfs.exists('/workspace/src/a.out'), true);
+  assert.strictEqual(vfs.readFile('/workspace/src/a.out', true), 'bin-mv-1');
+
+  // Case 2: mv a.out src/ (target directory with trailing slash)
+  vfs.writeFile('/workspace/a.out', 'bin-mv-2');
+  const code2 = await mockMv(['a.out', 'src/']);
+  assert.strictEqual(code2, 0);
+  assert.strictEqual(vfs.exists('/workspace/a.out'), false);
+  assert.strictEqual(vfs.readFile('/workspace/src/a.out', true), 'bin-mv-2');
+
+  // Case 3: mv a.out src/a.out (explicit target file path)
+  vfs.writeFile('/workspace/a.out', 'bin-mv-3');
+  const code3 = await mockMv(['a.out', 'src/a.out']);
+  assert.strictEqual(code3, 0);
+  assert.strictEqual(vfs.exists('/workspace/a.out'), false);
+  assert.strictEqual(vfs.readFile('/workspace/src/a.out', true), 'bin-mv-3');
+
+  // Case 4: mv multiple files into directory: mv f1 f2 src/
+  vfs.writeFile('/workspace/f1', 'c1');
+  vfs.writeFile('/workspace/f2', 'c2');
+  const code4 = await mockMv(['f1', 'f2', 'src/']);
+  assert.strictEqual(code4, 0);
+  assert.strictEqual(vfs.exists('/workspace/src/f1'), true);
+  assert.strictEqual(vfs.exists('/workspace/src/f2'), true);
+
+  // Case 5: mv a.out nonexistent/ (fails because trailing slash requires directory)
+  vfs.writeFile('/workspace/a.out', 'bin-mv-5');
+  const code5 = await mockMv(['a.out', 'nonexistent/']);
+  assert.strictEqual(code5, 1);
+  assert.strictEqual(vfs.exists('/workspace/a.out'), true);
+
+  // Case 6: cp a.out src/ and cp a.out src
+  const cpCode1 = await mockCp(['a.out', 'src/']);
+  assert.strictEqual(cpCode1, 0);
+  assert.strictEqual(vfs.exists('/workspace/a.out'), true);
+  assert.strictEqual(vfs.readFile('/workspace/src/a.out', true), 'bin-mv-5');
+
+  // Case 7: cp -r src backup/
+  const cpCode2 = await mockCp(['-r', 'src', 'backup']);
+  assert.strictEqual(cpCode2, 0);
+  assert.strictEqual(vfs.exists('/workspace/backup/a.out'), true);
+  assert.strictEqual(vfs.exists('/workspace/backup/f1'), true);
+
+  console.log('✓ mv and cp directory destination variants passed');
+}
+
 console.log('--- ALL SHELL TESTS PASSED ---');

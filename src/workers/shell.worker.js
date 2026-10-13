@@ -436,64 +436,236 @@ const builtins = {
     const dirs = [];
     for (const arg of args) {
       if (arg === '-p') recursive = true;
-      else dirs.push(arg);
+      else if (!arg.startsWith('-')) dirs.push(arg);
     }
+    if (dirs.length === 0) {
+      writeln('mkdir: missing operand');
+      return 1;
+    }
+    let hasError = false;
     for (const dir of dirs) {
       const target = resolvePath(dir);
       try {
         await callHost('vfs_mkdir', { path: target, recursive });
       } catch (err) {
         writeln(`mkdir: cannot create directory '${dir}': ${err.message}`);
+        hasError = true;
       }
     }
+    return hasError ? 1 : 0;
   },
 
   rm: async (args) => {
     let recursive = false;
+    let force = false;
     const targets = [];
     for (const arg of args) {
-      if (arg === '-r' || arg === '-rf' || arg === '-f') recursive = true;
-      else targets.push(arg);
+      if (arg === '-r' || arg === '-R') recursive = true;
+      else if (arg === '-f') force = true;
+      else if (arg === '-rf' || arg === '-fr') { recursive = true; force = true; }
+      else if (!arg.startsWith('-')) targets.push(arg);
     }
+    if (targets.length === 0) {
+      if (!force) {
+        writeln('rm: missing operand');
+        return 1;
+      }
+      return 0;
+    }
+    let hasError = false;
     for (const target of targets) {
       const resolved = resolvePath(target);
       try {
         await callHost('vfs_remove', { path: resolved, recursive });
       } catch (err) {
-        if (!args.includes('-f') && !args.includes('-rf')) {
+        if (!force) {
           writeln(`rm: cannot remove '${target}': ${err.message}`);
+          hasError = true;
         }
       }
     }
+    return hasError ? 1 : 0;
   },
 
   cp: async (args) => {
-    if (args.length < 2) {
+    let recursive = false;
+    const operands = [];
+    for (const arg of args) {
+      if (arg === '-r' || arg === '-R' || arg === '-rf' || arg === '-fr') {
+        recursive = true;
+      } else if (arg.startsWith('-')) {
+        // ignore other flags
+      } else {
+        operands.push(arg);
+      }
+    }
+
+    if (operands.length === 0) {
       writeln('cp: missing file operand');
-      return;
+      return 1;
     }
-    const src = resolvePath(args[0]);
-    const dst = resolvePath(args[1]);
-    try {
-      const content = await callHost('vfs_readFile', { path: src, asText: false });
-      await callHost('vfs_writeFile', { path: dst, content });
-    } catch (err) {
-      writeln(`cp: cannot copy '${args[0]}' to '${args[1]}': ${err.message}`);
+    if (operands.length === 1) {
+      writeln(`cp: missing destination file operand after '${operands[0]}'`);
+      return 1;
     }
+
+    const destRaw = operands[operands.length - 1];
+    const sourcesRaw = operands.slice(0, operands.length - 1);
+    const destNorm = resolvePath(destRaw);
+    const destStat = await callHost('vfs_stat', { path: destNorm });
+    const destIsDir = destStat && destStat.isDir;
+    const destEndsWithSlash = destRaw.endsWith('/');
+
+    if (sourcesRaw.length > 1 && !destIsDir) {
+      writeln(`cp: target '${destRaw}' is not a directory`);
+      return 1;
+    }
+
+    if (destEndsWithSlash && !destIsDir && !destStat) {
+      writeln(`cp: cannot create regular file '${destRaw}': Not a directory`);
+      return 1;
+    }
+
+    let hasError = false;
+
+    async function copyEntry(srcPath, dstPath) {
+      const stat = await callHost('vfs_stat', { path: srcPath });
+      if (!stat) {
+        throw new Error(`No such file or directory: ${srcPath}`);
+      }
+      if (stat.isDir) {
+        if (!recursive) {
+          throw new Error(`-r not specified; omitting directory '${srcPath}'`);
+        }
+        await callHost('vfs_mkdir', { path: dstPath, recursive: true });
+        const entries = await callHost('vfs_readDir', { path: srcPath });
+        for (const entry of entries) {
+          const childSrc = srcPath === '/' ? `/${entry.name}` : `${srcPath}/${entry.name}`;
+          const childDst = dstPath === '/' ? `/${entry.name}` : `${dstPath}/${entry.name}`;
+          await copyEntry(childSrc, childDst);
+        }
+      } else {
+        const content = await callHost('vfs_readFile', { path: srcPath, asText: false });
+        await callHost('vfs_writeFile', { path: dstPath, content });
+      }
+    }
+
+    for (const srcRaw of sourcesRaw) {
+      const srcNorm = resolvePath(srcRaw);
+      const srcStat = await callHost('vfs_stat', { path: srcNorm });
+      if (!srcStat) {
+        writeln(`cp: cannot stat '${srcRaw}': No such file or directory`);
+        hasError = true;
+        continue;
+      }
+
+      const srcBase = srcNorm.split('/').filter(Boolean).pop();
+      let targetPath;
+      if (destIsDir) {
+        targetPath = destNorm === '/' ? `/${srcBase}` : `${destNorm}/${srcBase}`;
+      } else {
+        targetPath = destNorm;
+      }
+
+      if (srcNorm === targetPath) {
+        writeln(`cp: '${srcRaw}' and '${destRaw}' are the same file`);
+        hasError = true;
+        continue;
+      }
+
+      try {
+        await copyEntry(srcNorm, targetPath);
+      } catch (err) {
+        writeln(`cp: cannot copy '${srcRaw}' to '${destRaw}': ${err.message}`);
+        hasError = true;
+      }
+    }
+
+    return hasError ? 1 : 0;
   },
 
   mv: async (args) => {
-    if (args.length < 2) {
+    const operands = [];
+    for (const arg of args) {
+      if (arg.startsWith('-') && arg.length > 1) {
+        // ignore flags like -f, -v
+      } else {
+        operands.push(arg);
+      }
+    }
+
+    if (operands.length === 0) {
       writeln('mv: missing file operand');
-      return;
+      return 1;
     }
-    const src = resolvePath(args[0]);
-    const dst = resolvePath(args[1]);
-    try {
-      await callHost('vfs_rename', { oldPath: src, newPath: dst });
-    } catch (err) {
-      writeln(`mv: cannot move '${args[0]}' to '${args[1]}': ${err.message}`);
+    if (operands.length === 1) {
+      writeln(`mv: missing destination file operand after '${operands[0]}'`);
+      return 1;
     }
+
+    const destRaw = operands[operands.length - 1];
+    const sourcesRaw = operands.slice(0, operands.length - 1);
+    const destNorm = resolvePath(destRaw);
+    const destStat = await callHost('vfs_stat', { path: destNorm });
+    const destIsDir = destStat && destStat.isDir;
+    const destEndsWithSlash = destRaw.endsWith('/');
+
+    if (sourcesRaw.length > 1 && !destIsDir) {
+      writeln(`mv: target '${destRaw}' is not a directory`);
+      return 1;
+    }
+
+    if (destEndsWithSlash && !destIsDir && !destStat) {
+      writeln(`mv: cannot move to '${destRaw}': Not a directory`);
+      return 1;
+    }
+
+    let hasError = false;
+
+    for (const srcRaw of sourcesRaw) {
+      const srcNorm = resolvePath(srcRaw);
+      const srcStat = await callHost('vfs_stat', { path: srcNorm });
+      if (!srcStat) {
+        writeln(`mv: cannot stat '${srcRaw}': No such file or directory`);
+        hasError = true;
+        continue;
+      }
+
+      if (srcNorm === '/' || srcNorm === '/workspace') {
+        writeln(`mv: cannot move root or workspace: '${srcRaw}'`);
+        hasError = true;
+        continue;
+      }
+
+      const srcBase = srcNorm.split('/').filter(Boolean).pop();
+      let targetPath;
+      if (destIsDir) {
+        targetPath = destNorm === '/' ? `/${srcBase}` : `${destNorm}/${srcBase}`;
+      } else {
+        targetPath = destNorm;
+      }
+
+      if (srcNorm === targetPath) {
+        writeln(`mv: '${srcRaw}' and '${destRaw}' are the same file`);
+        hasError = true;
+        continue;
+      }
+
+      if (srcStat.isDir && (targetPath + '/').startsWith(srcNorm + '/')) {
+        writeln(`mv: cannot move '${srcRaw}' to a subdirectory of itself, '${destRaw}'`);
+        hasError = true;
+        continue;
+      }
+
+      try {
+        await callHost('vfs_rename', { oldPath: srcNorm, newPath: targetPath });
+      } catch (err) {
+        writeln(`mv: cannot move '${srcRaw}' to '${destRaw}': ${err.message}`);
+        hasError = true;
+      }
+    }
+
+    return hasError ? 1 : 0;
   },
 
   clear: async () => {

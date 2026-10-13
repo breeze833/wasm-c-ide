@@ -68,7 +68,21 @@ vfs.rename('/workspace/src/hello.c', '/workspace/src/main.c');
 assert.strictEqual(vfs.exists('/workspace/src/hello.c'), false);
 assert.strictEqual(vfs.exists('/workspace/src/main.c'), true);
 
+// Test 4b: Rename file into directory targets (e.g. mv a.out src and mv a.out src/)
+vfs.writeFile('/workspace/a.out', 'binary-data-1');
+vfs.rename('/workspace/a.out', '/workspace/src');
+assert.strictEqual(vfs.exists('/workspace/a.out'), false);
+assert.strictEqual(vfs.exists('/workspace/src/a.out'), true);
+assert.strictEqual(vfs.readFile('/workspace/src/a.out', true), 'binary-data-1');
+
+// Test 4c: Rename with trailing slash and overwrite existing destination
+vfs.writeFile('/workspace/a.out', 'binary-data-2');
+vfs.rename('/workspace/a.out', '/workspace/src/');
+assert.strictEqual(vfs.exists('/workspace/a.out'), false);
+assert.strictEqual(vfs.readFile('/workspace/src/a.out', true), 'binary-data-2');
+
 vfs.remove('/workspace/src/main.c');
+vfs.remove('/workspace/src/a.out');
 assert.strictEqual(vfs.exists('/workspace/src/main.c'), false);
 console.log('✓ VFS rename and remove passed');
 
