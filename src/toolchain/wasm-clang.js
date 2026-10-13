@@ -64,26 +64,46 @@ class Memory {
 const ESUCCESS = 0;
 
 class MemFS {
-  constructor(memfsBuffer, hostWrite = () => {}) {
+  constructor(memfsBuffer, hostWrite = () => {}, instance = null) {
     this.hostWrite = hostWrite;
     this.hostMem_ = null;
     this.directories = new Set(['', '/', '.']);
     this.files = new Set();
 
-    const env = {
-      abort: () => { throw new Error('MemFS abort'); },
-      host_write: this.host_write.bind(this),
-      host_read: this.host_read.bind(this),
-      memfs_log: this.memfs_log.bind(this),
-      copy_in: this.copy_in.bind(this),
-      copy_out: this.copy_out.bind(this),
-    };
-
-    const module = new WebAssembly.Module(memfsBuffer);
-    this.instance = new WebAssembly.Instance(module, { env });
+    if (instance) {
+      this.instance = instance;
+    } else {
+      const env = {
+        abort: () => { throw new Error('MemFS abort'); },
+        host_write: this.host_write.bind(this),
+        host_read: this.host_read.bind(this),
+        memfs_log: this.memfs_log.bind(this),
+        copy_in: this.copy_in.bind(this),
+        copy_out: this.copy_out.bind(this),
+      };
+      const module = new WebAssembly.Module(memfsBuffer);
+      this.instance = new WebAssembly.Instance(module, { env });
+    }
     this.exports = this.instance.exports;
     this.mem = new Memory(this.exports.memory);
     this.exports.init();
+  }
+
+  static async create(memfsBuffer, hostWrite = () => {}) {
+    let memfsInstance;
+    const env = {
+      abort: () => { throw new Error('MemFS abort'); },
+      host_write: (...args) => memfsInstance.host_write(...args),
+      host_read: (...args) => memfsInstance.host_read(...args),
+      memfs_log: (...args) => memfsInstance.memfs_log(...args),
+      copy_in: (...args) => memfsInstance.copy_in(...args),
+      copy_out: (...args) => memfsInstance.copy_out(...args),
+    };
+
+    const res = await WebAssembly.instantiate(memfsBuffer, { env });
+    const instance = res instanceof WebAssembly.Instance ? res : (res.instance || res);
+    memfsInstance = new MemFS(memfsBuffer, hostWrite, instance);
+    return memfsInstance;
   }
 
   set hostMem(mem) {
@@ -200,11 +220,16 @@ class MemFS {
 }
 
 class AppInstance {
-  constructor(module, memfs, name, ...args) {
+  constructor(memfs, name, ...args) {
     this.argv = [name, ...args];
     this.environ = { USER: 'student', PWD: '/workspace' };
     this.memfs = memfs;
+    this.instance = null;
+    this.exports = null;
+    this.mem = null;
+  }
 
+  _buildImports() {
     const wasi_unstable = {
       proc_exit: (code) => { throw new ProcExit(code); },
       environ_sizes_get: (count_out, size_out) => {
@@ -261,20 +286,36 @@ class AppInstance {
     // Overlay memfs WASI filesystem operations
     Object.assign(wasi_unstable, this.memfs.exports);
 
-    this.instance = new WebAssembly.Instance(module, {
+    return {
       wasi_unstable,
       wasi_snapshot_preview1: wasi_unstable,
       env: {},
-    });
+    };
+  }
 
+  _attachInstance(instance) {
+    this.instance = instance;
     this.exports = this.instance.exports;
-    this.mem = new Memory(this.exports.memory);
-    this.memfs.hostMem = this.mem;
+    this.mem = this.exports.memory ? new Memory(this.exports.memory) : null;
+    if (this.mem) {
+      this.memfs.hostMem = this.mem;
+    }
+  }
+
+  static async create(module, memfs, name, ...args) {
+    const app = new AppInstance(memfs, name, ...args);
+    const imports = app._buildImports();
+    const res = await WebAssembly.instantiate(module, imports);
+    const instance = res instanceof WebAssembly.Instance ? res : (res.instance || res);
+    app._attachInstance(instance);
+    return app;
   }
 
   run() {
     try {
-      this.exports._start();
+      if (typeof this.exports._start === 'function') {
+        this.exports._start();
+      }
       return 0;
     } catch (err) {
       if (err instanceof ProcExit) {
@@ -314,7 +355,7 @@ export class WasmToolchain {
         fetch(`${this.basePath}/sysroot.tar`).then(r => r.arrayBuffer()),
       ]);
 
-      this.memfs = new MemFS(memfsBuf, this.hostWrite);
+      this.memfs = await MemFS.create(memfsBuf, this.hostWrite);
 
       // Ensure root workspace and system directories exist in MemFS
       this.memfs.ensureDirectory('workspace');
@@ -427,7 +468,7 @@ export class WasmToolchain {
     args.push(...customFlags);
     args.push('-o', cleanObj, cleanSrc);
 
-    const app = new AppInstance(clang, this.memfs, 'clang', ...args);
+    const app = await AppInstance.create(clang, this.memfs, 'clang', ...args);
     const exitCode = app.run();
     return exitCode;
   }
@@ -463,7 +504,7 @@ export class WasmToolchain {
       '-o', cleanOut,
     ];
 
-    const app = new AppInstance(lld, this.memfs, 'wasm-ld', ...args);
+    const app = await AppInstance.create(lld, this.memfs, 'wasm-ld', ...args);
     const exitCode = app.run();
     return exitCode;
   }

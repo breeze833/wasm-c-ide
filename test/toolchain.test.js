@@ -177,6 +177,28 @@ console.log('✓ Direct compile & link argument parsing passed');
     assert.strictEqual(vfs.exists('/usr/lib/crt1.o'), true);
     console.log('✓ WasmToolchain mirrors libc runtime files into VFS /usr/lib');
 
+    // Test 7: Verify async WebAssembly.instantiate is used (bypassing Chrome 8MB sync limit)
+    const origInstance = WebAssembly.Instance;
+    let syncInstanceCalled = false;
+    try {
+      WebAssembly.Instance = function() {
+        syncInstanceCalled = true;
+        throw new Error('WebAssembly.Instance is disallowed on the main thread, if the buffer size is larger than 8MB.');
+      };
+
+      // Mock clang module with minimal valid wasm module
+      const dummyWasmBytes = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+      tc.clangModule = await WebAssembly.compile(dummyWasmBytes);
+      tc.vfs.writeFile('/workspace/src/test.c', 'int main() { return 0; }');
+
+      // Compiling should instantiate via WebAssembly.instantiate, NOT new WebAssembly.Instance
+      const exitCode = await tc.compile('/workspace/src/test.c', '/workspace/build/test.o');
+      assert.strictEqual(syncInstanceCalled, false, 'Synchronous WebAssembly.Instance must not be invoked');
+      console.log('✓ Clang compilation uses async WebAssembly.instantiate without hitting 8MB sync limit');
+    } finally {
+      WebAssembly.Instance = origInstance;
+    }
+
     console.log('--- ALL TOOLCHAIN DRIVER TESTS PASSED ---');
   });
 }
