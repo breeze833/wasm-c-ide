@@ -333,6 +333,23 @@ body, html {
   position: relative;
 }
 
+.editor-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--tab-inactive-bg);
+  border-bottom: 1px solid var(--border-color);
+  height: 35px;
+  flex-shrink: 0;
+}
+
+.editor-header-bar .tabs-bar {
+  border-bottom: none;
+  flex: 1;
+  overflow-x: auto;
+  height: 100%;
+}
+
 .tabs-bar {
   height: 35px;
   background-color: var(--tab-inactive-bg);
@@ -340,6 +357,56 @@ body, html {
   display: flex;
   overflow-x: auto;
   flex-shrink: 0;
+}
+
+.pane-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  height: 100%;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.zoom-size-label {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  padding: 2px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  min-width: 32px;
+  text-align: center;
+  transition: all 0.15s ease;
+}
+
+.zoom-size-label:hover {
+  color: var(--text-bright);
+  background-color: var(--bg-active);
+}
+
+.zoom-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  color: var(--text-muted);
+  padding: 0;
+}
+
+.zoom-btn:hover {
+  color: var(--text-bright);
+  background-color: var(--bg-active);
+}
+
+.terminal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
 }
 
 .tab-item {

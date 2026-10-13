@@ -18,14 +18,26 @@ export class EditorManager {
     this.container = containerElement;
     this.vfs = vfs;
     this.onDirtyChange = onDirtyChange;
+    this.onFontSizeChange = null;
 
     this.openTabs = new Map(); // path -> { model, isDirty }
     this.activePath = null;
 
+    let initialFontSize = 13;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const saved = parseInt(localStorage.getItem('wasm_ide_editor_font_size'), 10);
+        if (Number.isFinite(saved) && saved >= 9 && saved <= 36) {
+          initialFontSize = saved;
+        }
+      }
+    } catch {}
+    this.fontSize = initialFontSize;
+
     this.editor = monaco.editor.create(this.container, {
       theme: 'vs-dark',
       automaticLayout: true,
-      fontSize: 13,
+      fontSize: this.fontSize,
       fontFamily: "'Cascadia Code', 'Fira Code', Consolas, 'Courier New', monospace",
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
@@ -40,10 +52,52 @@ export class EditorManager {
       }
     });
 
+    // Font Zoom Commands: Ctrl/Cmd + = / - / 0
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Equal, () => {
+      this.zoomIn();
+    });
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Minus, () => {
+      this.zoomOut();
+    });
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Digit0, () => {
+      this.resetFontSize();
+    });
+
     // Resize listener
     window.addEventListener('resize', () => {
       this.editor.layout();
     });
+  }
+
+  getFontSize() {
+    return this.fontSize;
+  }
+
+  setFontSize(size) {
+    const clamped = Math.min(36, Math.max(9, Math.round(size)));
+    this.fontSize = clamped;
+    this.editor.updateOptions({ fontSize: clamped });
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('wasm_ide_editor_font_size', String(clamped));
+      }
+    } catch {}
+    if (typeof this.onFontSizeChange === 'function') {
+      this.onFontSizeChange(clamped);
+    }
+    return clamped;
+  }
+
+  zoomIn(delta = 1) {
+    return this.setFontSize(this.fontSize + delta);
+  }
+
+  zoomOut(delta = 1) {
+    return this.setFontSize(this.fontSize - delta);
+  }
+
+  resetFontSize() {
+    return this.setFontSize(13);
   }
 
   layout() {

@@ -116,6 +116,9 @@ export class App {
     // Attach Top Header Action Buttons
     this.attachHeaderActions();
 
+    // Zoom Controls for Editor and Terminal
+    this.setupZoomControls();
+
     // Draggable Split Resizer between Editor and Terminal
     this.setupSplitResizer();
 
@@ -454,6 +457,48 @@ export class App {
     }
   }
 
+  setupZoomControls() {
+    // Editor Zoom Wiring
+    const editorZoomLabel = document.getElementById('editor-font-size-label');
+    const updateEditorZoomUI = (size) => {
+      if (editorZoomLabel) editorZoomLabel.textContent = `${size}px`;
+    };
+    if (this.editorManager) {
+      this.editorManager.onFontSizeChange = updateEditorZoomUI;
+      updateEditorZoomUI(this.editorManager.getFontSize());
+    }
+
+    document.getElementById('btn-editor-zoom-in')?.addEventListener('click', () => {
+      this.editorManager?.zoomIn();
+    });
+    document.getElementById('btn-editor-zoom-out')?.addEventListener('click', () => {
+      this.editorManager?.zoomOut();
+    });
+    editorZoomLabel?.addEventListener('click', () => {
+      this.editorManager?.resetFontSize();
+    });
+
+    // Terminal Zoom Wiring
+    const termZoomLabel = document.getElementById('term-font-size-label');
+    const updateTermZoomUI = (size) => {
+      if (termZoomLabel) termZoomLabel.textContent = `${size}px`;
+    };
+    if (this.terminal) {
+      this.terminal.onFontSizeChange = updateTermZoomUI;
+      updateTermZoomUI(this.terminal.getFontSize());
+    }
+
+    document.getElementById('btn-term-zoom-in')?.addEventListener('click', () => {
+      this.terminal?.zoomIn();
+    });
+    document.getElementById('btn-term-zoom-out')?.addEventListener('click', () => {
+      this.terminal?.zoomOut();
+    });
+    termZoomLabel?.addEventListener('click', () => {
+      this.terminal?.resetFontSize();
+    });
+  }
+
   setupSplitResizer() {
     const resizer = document.getElementById('split-resizer');
     const terminalSection = document.querySelector('.terminal-section');
@@ -592,7 +637,22 @@ export function initApp() {
 
       <main class="content-area">
         <section class="editor-section">
-          <div id="tabs-bar" class="tabs-bar"></div>
+          <div class="editor-header-bar">
+            <div id="tabs-bar" class="tabs-bar"></div>
+            <div class="pane-zoom-controls" id="editor-zoom-controls">
+              <button id="btn-editor-zoom-out" class="icon-btn zoom-btn" title="Zoom Out Editor Font (Ctrl+-)" data-tooltip="Zoom Out (Ctrl+-)" aria-label="Zoom Out Editor Font">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M2 8a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 8z"/>
+                </svg>
+              </button>
+              <span id="editor-font-size-label" class="zoom-size-label" title="Click to Reset Font Size (13px)" data-tooltip="Click to Reset (13px)">13px</span>
+              <button id="btn-editor-zoom-in" class="icon-btn zoom-btn" title="Zoom In Editor Font (Ctrl++)" data-tooltip="Zoom In (Ctrl++)" aria-label="Zoom In Editor Font">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 2a.75.75 0 0 1 .75.75v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5A.75.75 0 0 1 8 2z"/>
+                </svg>
+              </button>
+            </div>
+          </div>
           <div id="editor-container" class="editor-container"></div>
         </section>
 
@@ -601,11 +661,26 @@ export function initApp() {
         <section class="terminal-section">
           <div class="terminal-header">
             <span>Terminal</span>
-            <button id="btn-clear-term" class="icon-btn" title="Clear Terminal" data-tooltip="Clear Terminal" aria-label="Clear Terminal">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M5 2V1h6v1h4v1H1V2h4zm1 3v8h1V5H6zm3 0v8h1V5H9zm-6 0v9a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5H3z"/>
-              </svg>
-            </button>
+            <div class="terminal-actions">
+              <div class="pane-zoom-controls" id="terminal-zoom-controls">
+                <button id="btn-term-zoom-out" class="icon-btn zoom-btn" title="Zoom Out Terminal Font (Ctrl+-)" data-tooltip="Zoom Out (Ctrl+-)" aria-label="Zoom Out Terminal Font">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M2 8a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 8z"/>
+                  </svg>
+                </button>
+                <span id="term-font-size-label" class="zoom-size-label" title="Click to Reset Font Size (13px)" data-tooltip="Click to Reset (13px)">13px</span>
+                <button id="btn-term-zoom-in" class="icon-btn zoom-btn" title="Zoom In Terminal Font (Ctrl++)" data-tooltip="Zoom In (Ctrl++)" aria-label="Zoom In Terminal Font">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 2a.75.75 0 0 1 .75.75v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5A.75.75 0 0 1 8 2z"/>
+                  </svg>
+                </button>
+              </div>
+              <button id="btn-clear-term" class="icon-btn" title="Clear Terminal" data-tooltip="Clear Terminal" aria-label="Clear Terminal">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M5 2V1h6v1h4v1H1V2h4zm1 3v8h1V5H6zm3 0v8h1V5H9zm-6 0v9a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5H3z"/>
+                </svg>
+              </button>
+            </div>
           </div>
           <div id="terminal-container" class="terminal-container"></div>
         </section>
