@@ -80,8 +80,19 @@ export class App {
     this.initTerminalAndShell();
 
     // Initialize Toolchain
+    let wasmBasePath = '/sysroot/wasm';
+    if (typeof window !== 'undefined' && window.location) {
+      const baseUrl = import.meta.env?.BASE_URL || './';
+      let loc = new URL(window.location.href);
+      if (!loc.pathname.endsWith('/') && !loc.pathname.split('/').pop().includes('.')) {
+        loc.pathname += '/';
+      }
+      const resolvedBase = new URL(baseUrl, loc.href);
+      wasmBasePath = new URL('sysroot/wasm', resolvedBase).pathname.replace(/\/+$/, '');
+    }
+
     this.toolchain = new WasmToolchain({
-      basePath: '/sysroot/wasm',
+      basePath: wasmBasePath,
       vfs: this.vfs,
       hostWrite: (str) => {
         if (this.terminal) {

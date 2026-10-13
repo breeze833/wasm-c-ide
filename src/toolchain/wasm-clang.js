@@ -287,7 +287,7 @@ class AppInstance {
 
 export class WasmToolchain {
   constructor(options = {}) {
-    this.basePath = options.basePath || '/sysroot/wasm';
+    this.basePath = (options.basePath || '/sysroot/wasm').replace(/\/+$/, '');
     this.hostWrite = options.hostWrite || console.log;
     this.vfs = options.vfs || null;
     this.memfs = null;

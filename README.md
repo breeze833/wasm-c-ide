@@ -193,6 +193,7 @@ server {
     root /var/www/wasm-c-ide/dist;
     index index.html;
 
+    # Root deployment
     location / {
         add_header Cross-Origin-Opener-Policy "same-origin" always;
         add_header Cross-Origin-Embedder-Policy "require-corp" always;
@@ -200,6 +201,40 @@ server {
     }
 
     # Ensure WebAssembly MIME types are set
+    types {
+        application/wasm wasm;
+    }
+}
+```
+
+#### Sub-Path Deployment (e.g. `https://myhost/cpp-ide/`)
+
+The application supports sub-path hosting out-of-the-box using relative asset resolution. You can build with default relative paths (`./`) or an explicit `BASE_URL`:
+
+```bash
+# Relative paths (default)
+npm run build
+
+# Or with an explicit sub-path:
+BASE_URL=/cpp-ide/ npm run build
+```
+
+Nginx configuration for sub-path hosting:
+
+```nginx
+server {
+    listen 80;
+    server_name myhost;
+
+    location /cpp-ide/ {
+        alias /var/www/wasm-c-ide/dist/;
+        index index.html;
+        try_files $uri $uri/ /cpp-ide/index.html;
+
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        add_header Cross-Origin-Embedder-Policy "require-corp" always;
+    }
+
     types {
         application/wasm wasm;
     }
