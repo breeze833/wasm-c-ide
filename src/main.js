@@ -12,6 +12,9 @@ import { RuntimeManager } from './terminal/runtime.js';
 import { WasmToolchain } from './toolchain/wasm-clang.js';
 import { executeGccCommand } from './toolchain/driver.js';
 
+import { SettingsModal } from './components/settings.js';
+import { runMake } from './toolchain/make.js';
+
 export function checkIsolation() {
   const isIsolated = window.crossOriginIsolated === true;
   console.log(`[Wasm C IDE] Cross-Origin Isolation: ${isIsolated ? 'ENABLED' : 'DISABLED'}`);
@@ -28,6 +31,7 @@ export class App {
     this.runtimeManager = null;
     this.shellWorker = null;
     this.toolchain = null;
+    this.settingsModal = null;
     this.mode = 'c'; // 'c' or 'cpp'
     this.buildSystem = 'sh'; // 'sh' or 'make'
   }
@@ -215,8 +219,52 @@ export class App {
     }
 
     if (cmd === 'make') {
-      // Handled in Milestone 7
-      this.terminal.writeln('make: target complete');
+      const exitCode = await runMake({
+        targetName: args[0] || 'all',
+        vfs: this.vfs,
+        write: (str) => this.terminal.write(str.replace(/\r?\n/g, '\r\n')),
+        executeCommand: async (cmdLine) => {
+          const trimmed = cmdLine.trim();
+          if (!trimmed) return;
+
+          if (trimmed.startsWith('rm ')) {
+            const rmParts = trimmed.split(/\s+/).slice(1);
+            const rmTargets = rmParts.filter(p => !p.startsWith('-'));
+            for (const t of rmTargets) {
+              const norm = `/workspace/${t}`;
+              if (this.vfs.exists(norm)) this.vfs.remove(norm, true);
+            }
+            if (this.fileTreeUI) this.fileTreeUI.render();
+          } else if (trimmed.startsWith('mkdir ')) {
+            const dir = trimmed.split(/\s+/).pop();
+            this.vfs.mkdir(`/workspace/${dir}`, true);
+            if (this.fileTreeUI) this.fileTreeUI.render();
+          } else if (
+            trimmed.startsWith('gcc ') ||
+            trimmed.startsWith('clang ') ||
+            trimmed.startsWith('clang++ ') ||
+            trimmed.startsWith('$(CC)')
+          ) {
+            const subArgs = trimmed.split(/\s+/);
+            const subCmd = subArgs.shift();
+            await executeGccCommand({
+              cmd: subCmd,
+              args: subArgs,
+              cwd: cwd || '/workspace',
+              vfs: this.vfs,
+              toolchain: this.toolchain,
+              mode: this.mode,
+              write: (str) => this.terminal.write(str),
+            });
+            if (this.fileTreeUI) this.fileTreeUI.render();
+          }
+        },
+      });
+
+      if (this.fileTreeUI) this.fileTreeUI.render();
+      if (exitCode !== 0) {
+        throw new Error(`make: exit code ${exitCode}`);
+      }
       return true;
     }
 
@@ -244,8 +292,28 @@ export class App {
     const btnBuild = document.getElementById('btn-build');
     const btnRun = document.getElementById('btn-run');
     const btnStop = document.getElementById('btn-stop');
+    const btnSettings = document.getElementById('btn-settings');
     const modeSelect = document.getElementById('mode-select');
     const buildSystemSelect = document.getElementById('build-system-select');
+
+    if (btnSettings) {
+      this.settingsModal = new SettingsModal(
+        this.vfs,
+        { mode: this.mode, buildSystem: this.buildSystem },
+        (newConfig) => {
+          this.mode = newConfig.mode;
+          this.buildSystem = newConfig.buildSystem;
+          if (modeSelect) modeSelect.value = newConfig.mode;
+          if (buildSystemSelect) buildSystemSelect.value = newConfig.buildSystem;
+          if (this.fileTreeUI) this.fileTreeUI.render();
+          showToast('Settings saved & build files regenerated.', 'success', 3000);
+        }
+      );
+
+      btnSettings.addEventListener('click', () => {
+        this.settingsModal.show();
+      });
+    }
 
     if (modeSelect) {
       modeSelect.addEventListener('change', (e) => {
@@ -394,6 +462,7 @@ export function initApp() {
         <button id="btn-build" class="btn btn-primary" title="Build Project">Build</button>
         <button id="btn-run" class="btn btn-success" title="Run Executable">Run</button>
         <button id="btn-stop" class="btn btn-danger" title="Stop Execution">Stop</button>
+        <button id="btn-settings" class="btn" title="Project Settings">Settings</button>
       </div>
     </header>
 
