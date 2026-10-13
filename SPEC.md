@@ -150,13 +150,19 @@ Users can select between two build strategies in the Project Settings UI:
   - Export: Bundles `/workspace` exclusively into a `.zip` archive downloaded to the client.
   - Import: Extracts a user `.zip` archive directly into `/workspace`. System files outside `/workspace` cannot be overwritten.
 
-### 3.7 Static Hosting & Security Isolation
+### 3.7 Static Hosting, Security Isolation & Offline PWA Capabilities
 - **Cross-Origin Isolation**:
   - `SharedArrayBuffer` requires:
     - `Cross-Origin-Opener-Policy: same-origin`
     - `Cross-Origin-Embedder-Policy: require-corp`
-- **GitHub Pages / Zero-Config Static Server Compatibility**:
-  - Bundles `coi-serviceworker.js` in `public/coi-serviceworker.js` (loaded via `<script src="/coi-serviceworker.js">` in `index.html`) to dynamically register the Service Worker and enable cross-origin isolation on hosts that do not support custom HTTP response headers.
+- **GitHub Pages / Zero-Config Static Server Compatibility & Unified PWA Service Worker**:
+  - Bundles `coi-serviceworker.js` in `public/coi-serviceworker.js` (loaded via `<script src="/coi-serviceworker.js">` in `index.html`) which serves as a unified Service Worker providing both:
+    1. Cross-Origin Isolation header injection (`COOP: same-origin` and `COEP: require-corp`) across static hosting environments.
+    2. `CacheStorage` offline caching engine (Cache-First for App Shell and Wasm toolchain assets, with automatic fallback for navigation).
+- **Progressive Web App (PWA) & Offline Execution**:
+  - Provides `manifest.webmanifest` defining standalone display, theme colors, and icons.
+  - Supports desktop and mobile home screen installation via `#btn-install` and `beforeinstallprompt`.
+  - Enables 100% offline development: when disconnected, cached HTML, JS/CSS bundles, sysroot headers, and Wasm binaries (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar`) execute locally without network access.
 
 ---
 

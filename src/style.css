@@ -156,6 +156,16 @@ body, html {
   border-color: #a12323;
 }
 
+.btn-install {
+  background-color: #0d9488;
+  color: #fff;
+  border-color: #0d9488;
+}
+.btn-install:hover {
+  background-color: #0f766e;
+  border-color: #0f766e;
+}
+
 /* Main Workspace Layout */
 .main-layout {
   display: flex;

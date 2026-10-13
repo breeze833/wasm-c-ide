@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1e24" />
+      <stop offset="100%" stop-color="#121214" />
+    </linearGradient>
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="50%" stop-color="#7c3aed" />
+      <stop offset="100%" stop-color="#388a34" />
+    </linearGradient>
+    <linearGradient id="cGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+    <linearGradient id="plusGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background with subtle rounded corners -->
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#bgGrad)" stroke="url(#borderGrad)" stroke-width="12" />
+
+  <!-- Outer Wasm-inspired Hexagon Outline -->
+  <polygon points="256,64 420,160 420,352 256,448 92,352 92,160" fill="none" stroke="#334155" stroke-width="6" stroke-dasharray="12,12" />
+
+  <!-- Code brackets -->
+  <!-- Left Bracket < -->
+  <path d="M 120 216 L 80 256 L 120 296" fill="none" stroke="#64748b" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" />
+  <!-- Right Bracket > -->
+  <path d="M 400 216 L 440 256 L 400 296" fill="none" stroke="#64748b" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- C symbol -->
+  <path d="M 270 180 C 230 180 180 210 180 260 C 180 310 230 340 270 340 C 290 340 306 332 316 324" 
+        fill="none" stroke="url(#cGrad)" stroke-width="44" stroke-linecap="round" />
+
+  <!-- First Plus (+) -->
+  <path d="M 324 230 L 324 266 M 306 248 L 342 248" 
+        fill="none" stroke="url(#plusGrad)" stroke-width="16" stroke-linecap="round" />
+
+  <!-- Second Plus (+) -->
+  <path d="M 374 230 L 374 266 M 356 248 L 392 248" 
+        fill="none" stroke="url(#plusGrad)" stroke-width="16" stroke-linecap="round" />
+
+  <!-- Subtitle WASM Pill -->
+  <rect x="196" y="380" width="120" height="34" rx="17" fill="#0f172a" stroke="#38bdf8" stroke-width="3" />
+  <text x="256" y="403" font-family="'Cascadia Code', Consolas, monospace" font-size="18" font-weight="bold" fill="#38bdf8" text-anchor="middle">WASM</text>
+</svg>

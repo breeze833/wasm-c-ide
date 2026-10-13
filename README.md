@@ -107,6 +107,14 @@ This IDE is specifically engineered for **students and systems programming educa
 - **Zip Import & Export**: One-click export of `/workspace` into a standard `.zip` file using JSZip, and direct zip unpacking into the workspace.
 - **Sysroot Protection**: Read-only protection on system root paths (`/usr`, `/bin`).
 
+### 7. Progressive Web App (PWA) & Offline Execution
+- **Installable Desktop/Mobile App**: Certified PWA with Web App Manifest (`manifest.webmanifest`), dark theme colors, and icons.
+- **In-App Install Prompt**: Automatically reveals an **Install** button in the header toolbar when the browser detects installability.
+- **100% Offline Capability**:
+  - Unified Service Worker caches App Shell, fonts, editor modules, and WebAssembly compiler binaries (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar`).
+  - Seamless offline execution with retained `COOP: same-origin` and `COEP: require-corp` isolation headers so `SharedArrayBuffer` remains operational without an internet connection.
+  - Automatic connection status notifications when transitioning between online and offline modes.
+
 ---
 
 ## Getting Started & Local Development

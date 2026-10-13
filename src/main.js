@@ -34,6 +34,7 @@ export class App {
     this.settingsModal = null;
     this.mode = 'c'; // 'c' or 'cpp'
     this.buildSystem = 'sh'; // 'sh' or 'make'
+    this.deferredInstallPrompt = null;
   }
 
   async init() {
@@ -117,6 +118,33 @@ export class App {
 
     // Draggable Split Resizer between Editor and Terminal
     this.setupSplitResizer();
+
+    // PWA Install Prompt & Connection Status Listeners
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      this.deferredInstallPrompt = e;
+      const btnInstall = document.getElementById('btn-install');
+      if (btnInstall) {
+        btnInstall.style.display = 'inline-flex';
+      }
+    });
+
+    window.addEventListener('appinstalled', () => {
+      this.deferredInstallPrompt = null;
+      const btnInstall = document.getElementById('btn-install');
+      if (btnInstall) {
+        btnInstall.style.display = 'none';
+      }
+      showToast('Wasm C/C++ IDE successfully installed!', 'success', 3500);
+    });
+
+    window.addEventListener('online', () => {
+      showToast('Network restored: Online', 'info', 3000);
+    });
+
+    window.addEventListener('offline', () => {
+      showToast('Offline Mode: The IDE continues to run client-side.', 'warning', 4000);
+    });
   }
 
   initTerminalAndShell() {
@@ -411,6 +439,19 @@ export class App {
         }
       });
     }
+
+    const btnInstall = document.getElementById('btn-install');
+    if (btnInstall) {
+      btnInstall.addEventListener('click', async () => {
+        if (!this.deferredInstallPrompt) return;
+        this.deferredInstallPrompt.prompt();
+        const { outcome } = await this.deferredInstallPrompt.userChoice;
+        if (outcome === 'accepted') {
+          btnInstall.style.display = 'none';
+        }
+        this.deferredInstallPrompt = null;
+      });
+    }
   }
 
   setupSplitResizer() {
@@ -508,6 +549,13 @@ export function initApp() {
             <path d="M14 4h-1.1a2 2 0 0 0-3.8 0H2v1h7.1a2 2 0 0 0 3.8 0H14V4zm-3 1.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2zM14 11H8.9a2 2 0 0 0-3.8 0H2v1h3.1a2 2 0 0 0 3.8 0H14v-1zm-7 1.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/>
           </svg>
           <span>Settings</span>
+        </button>
+        <button id="btn-install" class="btn btn-install" title="Install App to Desktop/Home Screen" style="display: none;">
+          <svg class="btn-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+            <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+          </svg>
+          <span>Install</span>
         </button>
       </div>
     </header>
