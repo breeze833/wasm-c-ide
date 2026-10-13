@@ -7,6 +7,7 @@ import { EditorManager } from './editor/editor.js';
 import { TabsUI } from './editor/tabs.js';
 import { FileTreeUI } from './components/filetree.js';
 import { showToast } from './components/toast.js';
+import { TerminalManager } from './terminal/terminal.js';
 
 export function checkIsolation() {
   const isIsolated = window.crossOriginIsolated === true;
@@ -20,6 +21,10 @@ export class App {
     this.editorManager = null;
     this.tabsUI = null;
     this.fileTreeUI = null;
+    this.terminal = null;
+    this.shellWorker = null;
+    this.mode = 'c'; // 'c' or 'cpp'
+    this.buildSystem = 'sh'; // 'sh' or 'make'
   }
 
   async init() {
@@ -62,6 +67,9 @@ export class App {
 
     this.fileTreeUI.render();
 
+    // Initialize Terminal & Shell Worker
+    this.initTerminalAndShell();
+
     // Open default file main.c
     if (this.vfs.exists('/workspace/src/main.c')) {
       this.editorManager.openFile('/workspace/src/main.c');
@@ -75,12 +83,118 @@ export class App {
     this.setupSplitResizer();
   }
 
+  initTerminalAndShell() {
+    const termContainer = document.getElementById('terminal-container');
+    this.terminal = new TerminalManager(
+      termContainer,
+      (inputData) => {
+        if (this.shellWorker) {
+          this.shellWorker.postMessage({ type: 'input', data: inputData });
+        }
+      },
+      () => {
+        if (this.shellWorker) {
+          this.shellWorker.postMessage({ type: 'interrupt' });
+        }
+      }
+    );
+
+    // Instantiate Shell Worker as ES Module worker
+    this.shellWorker = new Worker(
+      new URL('./workers/shell.worker.js', import.meta.url),
+      { type: 'module' }
+    );
+
+    this.shellWorker.onmessage = async (event) => {
+      const msg = event.data;
+      if (!msg) return;
+
+      if (msg.type === 'term_write') {
+        this.terminal.write(msg.data);
+        return;
+      }
+
+      // Handle VFS RPC requests from shell worker
+      if (msg.type.startsWith('vfs_') || msg.type === 'exec_command') {
+        this.handleWorkerRpc(msg);
+      }
+    };
+
+    this.shellWorker.postMessage({ type: 'init', cwd: '/workspace' });
+
+    const btnClearTerm = document.getElementById('btn-clear-term');
+    if (btnClearTerm) {
+      btnClearTerm.addEventListener('click', () => {
+        this.terminal.clear();
+        this.terminal.injectCommand('clear');
+      });
+    }
+  }
+
+  async handleWorkerRpc(msg) {
+    const { id, type, payload } = msg;
+
+    try {
+      let result = null;
+      if (type === 'vfs_readDir') {
+        result = this.vfs.readDir(payload.path);
+      } else if (type === 'vfs_readFile') {
+        result = this.vfs.readFile(payload.path, payload.asText);
+      } else if (type === 'vfs_writeFile') {
+        this.vfs.writeFile(payload.path, payload.content);
+        result = true;
+      } else if (type === 'vfs_mkdir') {
+        this.vfs.mkdir(payload.path, payload.recursive);
+        result = true;
+      } else if (type === 'vfs_remove') {
+        this.vfs.remove(payload.path, payload.recursive);
+        result = true;
+      } else if (type === 'vfs_rename') {
+        this.vfs.rename(payload.oldPath, payload.newPath);
+        result = true;
+      } else if (type === 'vfs_stat') {
+        result = this.vfs.stat(payload.path);
+      } else if (type === 'vfs_exists') {
+        result = this.vfs.exists(payload.path);
+      } else if (type === 'exec_command') {
+        // Will be integrated in Milestones 5 & 6
+        result = await this.executeExternalCommand(payload);
+      }
+
+      this.shellWorker.postMessage({ type: 'rpc_response', id, result });
+    } catch (err) {
+      this.shellWorker.postMessage({ type: 'rpc_response', id, error: err.message });
+    }
+  }
+
+  async executeExternalCommand(payload) {
+    const { cmd, args, rawLine } = payload;
+    this.terminal.writeln(`Executing: ${rawLine}`);
+    // Fallback until toolchain worker is integrated in Milestone 5:
+    this.terminal.writeln(`[Command ${cmd} will be executed by toolchain/runtime worker]`);
+    return true;
+  }
+
   attachHeaderActions() {
     const btnSave = document.getElementById('btn-save');
     const btnCompile = document.getElementById('btn-compile');
     const btnBuild = document.getElementById('btn-build');
     const btnRun = document.getElementById('btn-run');
     const btnStop = document.getElementById('btn-stop');
+    const modeSelect = document.getElementById('mode-select');
+    const buildSystemSelect = document.getElementById('build-system-select');
+
+    if (modeSelect) {
+      modeSelect.addEventListener('change', (e) => {
+        this.mode = e.target.value;
+      });
+    }
+
+    if (buildSystemSelect) {
+      buildSystemSelect.addEventListener('change', (e) => {
+        this.buildSystem = e.target.value;
+      });
+    }
 
     if (btnSave) {
       btnSave.addEventListener('click', () => {
@@ -103,14 +217,51 @@ export class App {
     if (btnCompile) {
       btnCompile.addEventListener('click', () => {
         checkDirtyWarning();
-        // Dispatched to terminal in Milestone 4 & 5
+        const activePath = this.editorManager.getActivePath();
+        if (!activePath) {
+          showToast('No active file to compile', 'error', 3000);
+          return;
+        }
+
+        // Relative path under /workspace
+        const relPath = activePath.replace(/^\/workspace\/?/, '');
+        if (!relPath.endsWith('.c') && !relPath.endsWith('.cpp')) {
+          showToast('Active file is not a C/C++ source file', 'warning', 3000);
+          return;
+        }
+
+        const baseName = relPath.split('/').pop().replace(/\.(c|cpp)$/, '');
+        const objPath = `build/${baseName}.o`;
+
+        // Strict command bridge: Type into xterm
+        const cmd = `gcc -Iinclude -Wall -c ${relPath} -o ${objPath}`;
+        this.terminal.injectCommand(cmd);
       });
     }
 
     if (btnBuild) {
       btnBuild.addEventListener('click', () => {
         checkDirtyWarning();
-        // Dispatched to terminal in Milestone 4 & 7
+        // Strict command bridge: Type into xterm
+        if (this.buildSystem === 'make') {
+          this.terminal.injectCommand('make');
+        } else {
+          this.terminal.injectCommand('sh build.sh');
+        }
+      });
+    }
+
+    if (btnRun) {
+      btnRun.addEventListener('click', () => {
+        this.terminal.injectCommand('./a.out');
+      });
+    }
+
+    if (btnStop) {
+      btnStop.addEventListener('click', () => {
+        if (this.shellWorker) {
+          this.shellWorker.postMessage({ type: 'interrupt' });
+        }
       });
     }
   }
