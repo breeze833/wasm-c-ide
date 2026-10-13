@@ -63,21 +63,51 @@ The goal of this project is to build an installation-free, zero-backend, multi-f
 
 ### 3.2 Terminal & Shell Subsystem
 - **Terminal Emulator**: `xterm.js` with `xterm-addon-fit`.
-- **Shell**: `busybox-wasi` compiled to Wasm running inside a Dedicated Web Worker, or hybrid command execution worker.
-  - Execution Model (Hybrid / Intercepted Worker): Built-in shell capabilities (`ls`, `cd`, `pwd`, `cat`, `rm`, `mkdir`, `cp`, `mv`, `clear`, `sh`, pipelines, redirect) are serviced in the shell environment. External toolchain commands (`gcc`, `clang`, `wasm-ld`, `make`, `./a.out` or `./*`) are intercepted and dispatched to dedicated Wasm toolchain/runtime workers executing against the shared VFS.
-  - Interactive prompt (`$ `), command history (Up/Down arrows), autocompletion (Tab), line editing, and ANSI colors.
-- **UI Button Action Redirection (Strict Principle)**:
-  - GUI action buttons (Compile, Link, Build, Clean, Run) **MUST NOT** invoke hidden internal APIs.
-  - Instead, clicking any action button dynamically translates project settings into the exact shell command string and types/pastes it directly into `xterm.js` followed by `\r\n`.
-  - Example: Clicking "Compile Active File" pastes `gcc -Wall -c src/calc.c -o build/calc.o` into the shell.
+- **Shell**: Dedicated Web Worker running interactive POSIX-compatible shell.
+  - **Built-in CLI Utilities**: `sh`, `ls`, `cd`, `pwd`, `cat`, `rm`, `mkdir`, `cp`, `mv`, `clear`, `echo` (with `>` and `>>` output redirection), `which`, `pushd`, `popd`, and `dirs`.
+  - **External Toolchain Dispatch**: External commands (`gcc`, `clang`, `wasm-ld`, `make`, `./a.out` or `./*`) are delegated to Wasm toolchain and runtime worker execution sandboxes.
+  - **Interactive Features**: Interactive prompt (`$ ` with cwd display), command history (Up/Down arrows), autocompletion (Tab), line editing, and ANSI colors.
+  - **Directory Stack & Navigation**:
+    - `pushd <dir>`: Saves current working directory onto stack and navigates to target.
+    - `pushd .`: Pushes current directory onto stack.
+    - `pushd` (parameterless): Swaps current directory with top of directory stack.
+    - `popd`: Pops the top directory from stack and restores working directory.
+    - `dirs`: Displays current directory stack formatted with `~` representing `/workspace`.
+    - `cd -`: Swaps to the previous working directory (`oldPwd`).
+  - **Command Chaining & Operators**:
+    - The shell command interpreter supports operator chaining: sequential `;`, conditional `&&`, and conditional `||`, properly respecting quoted strings.
+  - **Glob Pattern Expansion**:
+    - Unquoted command arguments containing glob wildcards (`*`, `?`) are recursively expanded against the VFS file tree before command execution. Unmatched patterns are preserved as literal strings.
+  - **File-Aware & Multi-Target `ls`**:
+    - Supports multiple target paths, listing individual files directly with metadata and directory contents under section headers.
+  - **File Operations (`mv` and `cp`) Semantics**:
+    - **Directory Destination Variants**: `mv <src> <dest_dir>` and `mv <src> <dest_dir>/` move `<src>` inside `<dest_dir>` using the source basename.
+    - **Multi-Source Support**: `mv file1 file2 <dest_dir>/` and `cp file1 file2 <dest_dir>/`.
+    - **Trailing Slash Enforcement**: If a target ends with `/`, it must exist and be a directory.
+    - **Atomic File Overwriting**: Moving a file onto an existing regular file replaces it cleanly without error.
+    - **Directory Safety**: Prohibits overwriting directories with non-directories, non-empty directories, or moving a directory into a subdirectory of itself.
+    - **Recursive Copy**: `cp -r` / `cp -R` recursively copies directory hierarchies.
+- **UI Button Action Redirection (Strict Principle & Working Directory Transparency)**:
+  - GUI action buttons (Compile, Build, Run, Stop) **MUST NOT** invoke hidden internal APIs.
+  - Action buttons dynamically construct shell command sequences and inject them directly into `xterm.js` via `terminal.injectCommand(cmd)`.
+  - **Directory Stack Preservation**: Because the student may be navigating arbitrary directories in the shell (e.g. `src/` or `/usr/include`), UI action buttons MUST transparently switch to `/workspace` and restore the user's directory upon completion using the directory stack:
+    - **Compile**: `pushd . && cd /workspace && gcc -Iinclude -Wall -c <relPath> -o <objPath>; popd`
+    - **Build**: `pushd . && cd /workspace && make; popd` (or `pushd . && cd /workspace && sh build.sh; popd`)
+    - **Run**: `pushd . && cd /workspace && ./a.out; popd`
+  - The `; popd` delimiter ensures the user's working directory is always restored even when compilation or program execution fails with a non-zero exit code.
 
 ### 3.3 C/C++ Toolchain & Sysroot
-- **Prebuilt Binaries**: Open-source prebuilt WebAssembly binaries are utilized for Clang, `wasm-ld`, Make, and BusyBox (built from source if prebuilt unavailable).
-- **Compiler**: Clang / LLVM Wasm build mapped to command `gcc` / `clang`.
+- **Prebuilt Binaries**: Open-source prebuilt WebAssembly binaries are utilized for Clang, `wasm-ld`, Make, and BusyBox.
+- **Compiler**: Clang / LLVM Wasm build mapped to commands `gcc` and `clang`.
 - **Linker**: `wasm-ld` mapped to handle object linking.
 - **Sysroot & Standard Libraries**:
-  - Bundles minimal `wasi-libc` (`libc.a`, `crt1.o`, Musl libc headers under `/usr/include`).
-  - Full C++ standard library support (`libc++.a`, `libc++abi.a`, C++ standard library headers `<iostream>`, `<vector>`, `<string>`, etc.).
+  - Bundles minimal `wasi-libc` (`libc.a`, `crt1.o`, Musl libc headers under `/usr/include`, static libraries under `/usr/lib`).
+  - Full C++ standard library support (`libc++.a`, `libc++abi.a`, C++ headers under `/usr/include/c++/v1`).
+- **Toolchain MemFS Lifecycle & Ancestor Directory Auto-Creation**:
+  - The toolchain initializes an in-memory virtual filesystem (`MemFS`) for Clang/LLD execution.
+  - Toolchain initialization is pre-warmed on application boot and guarded against re-entrance.
+  - Adding files or directories to MemFS automatically ensures all ancestor parent directory nodes are created sequentially to prevent WebAssembly `unreachable` assertion traps.
+  - Missing-file probes safely return without trapping.
 - **Language Dialects**:
   - **Pure C Mode**: Automatically injects `-x c -std=c11 -pedantic-errors -Wall -Wextra`. Forbids C++ syntax extensions and disallows `#include <iostream>`, `<vector>`, etc.
   - **C++ Mode**: Injects `-x c++ -std=c++17 -Wall -Wextra` linking against `libc++`.
@@ -88,31 +118,36 @@ Users can select between two build strategies in the Project Settings UI:
 
 1. **Default Track: Shell Script (`build.sh`)**
    - The UI generates `/workspace/build.sh` reflecting compiler flags, source files, and output paths.
-   - Triggering "Build" sends `sh build.sh` to the terminal.
-2. **Alternative Track: Makefile & Lightweight Make**
+   - Triggering "Build" injects `pushd . && cd /workspace && sh build.sh; popd` to the terminal.
+2. **Alternative Track: Makefile & Incremental Make**
    - The UI generates a standard `/workspace/Makefile` defining explicit targets (`all`, `clean`, `%.o: %.c`).
-   - A lightweight `make` Wasm binary (or `pdmake`) is invoked.
-   - Triggering "Build" sends `make` to the terminal. Triggering "Clean" sends `make clean`.
+   - Incremental Makefile runner evaluates file modification timestamps (`mtime`) to rebuild only stale prerequisites.
+   - Triggering "Build" injects `pushd . && cd /workspace && make; popd` to the terminal.
 
 ### 3.5 Runtime & Interactive Standard I/O
 - Target binaries (`.wasm` executables, e.g., `./a.out` or `./bin/app`) run in a dedicated Web Worker instance.
 - **Blocking Standard Input (`stdin`)**:
   - Handled via `SharedArrayBuffer` and `Atomics.wait()`.
-  - When the runtime executes WASI `fd_read` on file descriptor 0, the worker pauses until `xterm.js` receives input and signals the `SharedArrayBuffer` via `Atomics.notify()`.
+  - When the runtime executes WASI `fd_read` on file descriptor 0, the worker pauses without blocking the browser main UI thread until `xterm.js` receives user input and signals `SharedArrayBuffer` via `Atomics.notify()`.
 - **Execution Interruption**:
-  - `Ctrl+C` in the terminal or a GUI "Stop / Kill" button immediately issues `worker.terminate()` and resets terminal state.
+  - `Ctrl+C` in the terminal or GUI "Stop" button immediately issues worker interruption/termination and resets terminal state.
 
 ### 3.6 Virtual File System (VFS) & Storage
-- Single Source of Truth shared across Editor, BusyBox Shell, and Toolchain.
+- Single Source of Truth shared across Editor, Shell Worker, and Toolchain.
 - **Directory Layout**:
-  - `/usr/include`: Read-only. Holds C standard library headers (Musl/WASI libc) and C++ headers. Hidden from the user workspace file tree.
-  - `/usr/lib`: Read-only. Holds `libc.a`, `crt1.o`, `libc++.a`, `libc++abi.a`. Hidden from workspace file tree.
-  - `/workspace`: Root of the user project.
+  - `/workspace`: Root of the user project (Read-Write, persisted in IndexedDB).
+  - `/usr/include`: Read-only sysroot standard C and C++ headers.
+  - `/usr/lib`: Read-only Musl/libc/libc++ static runtime archives (`crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libm.a`, `libpthread.a`).
+  - `/bin`: Read-only POSIX utilities (`sh`, `ls`, `cat`, `rm`, `mkdir`, `cp`, `mv`, `pwd`, `clear`, `echo`, `pushd`, `popd`, `dirs`).
+  - `/usr/bin`: Read-only toolchain binaries (`gcc`, `clang`, `make`, `wasm-ld`).
+- **File System Operations**:
+  - `rename(oldPath, newPath)`: Supports directory target resolution (moving into existing destination folder), atomic replacement when overwriting existing files, and circular directory protection.
+  - `writeFile(path, content)`: Protected against replacing existing directory nodes.
 - **Persistence**:
   - Synchronized with browser `IndexedDB`. Survives page refreshes.
 - **Import / Export**:
   - Export: Bundles `/workspace` exclusively into a `.zip` archive downloaded to the client.
-  - Import: Extracts a user `.zip` archive directly into `/workspace` (erasing or merging existing contents upon confirmation). System files outside `/workspace` cannot be overwritten.
+  - Import: Extracts a user `.zip` archive directly into `/workspace`. System files outside `/workspace` cannot be overwritten.
 
 ### 3.7 Static Hosting & Security Isolation
 - **Cross-Origin Isolation**:
@@ -120,28 +155,49 @@ Users can select between two build strategies in the Project Settings UI:
     - `Cross-Origin-Opener-Policy: same-origin`
     - `Cross-Origin-Embedder-Policy: require-corp`
 - **GitHub Pages / Zero-Config Static Server Compatibility**:
-  - Must bundle `coi-serviceworker.js` in `public/coi-serviceworker.js` (loaded via `<script src="/coi-serviceworker.js">` in `index.html` to align with Vite's static asset pipeline) to dynamically spoof these headers on hosts that do not support custom HTTP response headers.
-  - Provide sample configurations for Nginx and Caddy in documentation.
+  - Bundles `coi-serviceworker.js` in `public/coi-serviceworker.js` (loaded via `<script src="/coi-serviceworker.js">` in `index.html`) to dynamically register the Service Worker and enable cross-origin isolation on hosts that do not support custom HTTP response headers.
 
 ---
 
 ## 4. UI Layout & User Experience
 +---------------------------------------------------------------------------+
 | [Header] App Title | Mode: [Pure C | C++] | Build System: [sh | make]     |
-| [Actions] [Save] [Compile File] [Build] [Run] [Stop] | [Project Settings] |
+| [Actions] [💾 Save] [⚙ Compile] [🔨 Build] [▶ Run] [⏹ Stop] | [⚙ Settings] |
 +-----------------------+---------------------------------------------------+
 | Workspace File Tree   | Editor Tabs: [main.c *] [calc.c] [calc.h]         |
-| - src/                +---------------------------------------------------+
-|   - main.c            | 1 | #include <stdio.h>                            |
-|   - calc.c            | 2 | #include "calc.h"                             |
+| [📄+] [📁+] [📥] [📤]   +---------------------------------------------------+
+| - src/                | 1 | #include <stdio.h>                            |
+|   - main.c            | 2 | #include "calc.h"                             |
 | - include/            | 3 | int main() { ... }                            |
 |   - calc.h            |                                                   |
 | - build/              +---------------------------------------------------+
 |   - calc.o            | Integrated Terminal (xterm.js)                    |
-|   - main.o            | $ gcc -Iinclude -Wall -c src/main.c -o build/main.o|
-| - a.out               | $ ./a.out                                         |
+|   - main.o            | ide:~$ pushd . && cd /workspace && gcc ...; popd  |
+| - a.out               | ide:~$ ./a.out                                    |
 | - build.sh / Makefile | Enter number: 42_                                 |
 +-----------------------+---------------------------------------------------+
+
+### UI Controls & Ergonomics:
+1. **Sidebar Action Buttons (Icon-Only with Tooltips)**:
+   - **Add File**: Displayed as file-plus icon, with tooltip `New File`.
+   - **Add Folder**: Displayed as folder-plus icon, with tooltip `New Folder`.
+   - **Import Zip**: Displayed as archive upload icon, with tooltip `Import Zip`.
+   - **Export Zip**: Displayed as archive download icon, with tooltip `Export Zip`.
+   - Tooltips are provided via native `title`, `aria-label`, and styled dark-themed CSS tooltips (`data-tooltip`).
+2. **Primary Header Action Buttons (Icon & Text Label)**:
+   - All primary action buttons feature both an SVG icon and a descriptive text label:
+     - **Save**: Floppy disk icon + "Save" (`#btn-save`)
+     - **Compile**: Translation/gear icon + "Compile" (`#btn-compile`)
+     - **Build**: Hammer icon + "Build" (`#btn-build`)
+     - **Run**: Play triangle icon + "Run" (`#btn-run`)
+     - **Stop**: Stop square icon + "Stop" (`#btn-stop`)
+     - **Settings**: Sliders icon + "Settings" (`#btn-settings`)
+3. **Visual Color Hierarchy**:
+   - **Save**: Sky blue / cyan (`#0284c7`)
+   - **Compile**: Violet / purple (`#7c3aed`)
+   - **Build**: Primary blue (`#0e639c`)
+   - **Run**: Success green (`#388a34`)
+   - **Stop**: Danger red (`#c72e2e`)
 
 ---
 
