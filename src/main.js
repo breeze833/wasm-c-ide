@@ -8,7 +8,7 @@ import { TabsUI } from './editor/tabs.js';
 import { FileTreeUI } from './components/filetree.js';
 import { showToast } from './components/toast.js';
 import { TerminalManager } from './terminal/terminal.js';
-
+import { RuntimeManager } from './terminal/runtime.js';
 import { WasmToolchain } from './toolchain/wasm-clang.js';
 import { executeGccCommand } from './toolchain/driver.js';
 
@@ -25,6 +25,7 @@ export class App {
     this.tabsUI = null;
     this.fileTreeUI = null;
     this.terminal = null;
+    this.runtimeManager = null;
     this.shellWorker = null;
     this.toolchain = null;
     this.mode = 'c'; // 'c' or 'cpp'
@@ -40,16 +41,6 @@ export class App {
     // Load workspace from IndexedDB
     await loadWorkspace(this.vfs);
     setupAutoSync(this.vfs);
-
-    // Initialize Toolchain
-    this.toolchain = new WasmToolchain({
-      basePath: '/sysroot/wasm',
-      hostWrite: (str) => {
-        if (this.terminal) {
-          this.terminal.write(str.replace(/\r?\n/g, '\r\n'));
-        }
-      },
-    });
 
     // Initialize Monaco Editor
     const editorContainer = document.getElementById('editor-container');
@@ -81,8 +72,18 @@ export class App {
 
     this.fileTreeUI.render();
 
-    // Initialize Terminal & Shell Worker
+    // Initialize Terminal, Shell Worker & Runtime
     this.initTerminalAndShell();
+
+    // Initialize Toolchain
+    this.toolchain = new WasmToolchain({
+      basePath: '/sysroot/wasm',
+      hostWrite: (str) => {
+        if (this.terminal) {
+          this.terminal.write(str.replace(/\r?\n/g, '\r\n'));
+        }
+      },
+    });
 
     // Open default file main.c
     if (this.vfs.exists('/workspace/src/main.c')) {
@@ -102,16 +103,28 @@ export class App {
     this.terminal = new TerminalManager(
       termContainer,
       (inputData) => {
+        // If runtime worker is active and waiting for stdin (scanf), route to runtime
+        if (this.runtimeManager && this.runtimeManager.handleTerminalInput(inputData)) {
+          return;
+        }
         if (this.shellWorker) {
           this.shellWorker.postMessage({ type: 'input', data: inputData });
         }
       },
       () => {
-        if (this.shellWorker) {
+        // Ctrl+C handling: interrupt active runtime process or shell
+        if (this.runtimeManager && this.runtimeManager.isRunning) {
+          this.runtimeManager.kill();
+          if (this.shellWorker) {
+            this.shellWorker.postMessage({ type: 'interrupt' });
+          }
+        } else if (this.shellWorker) {
           this.shellWorker.postMessage({ type: 'interrupt' });
         }
       }
     );
+
+    this.runtimeManager = new RuntimeManager(this.terminal);
 
     // Instantiate Shell Worker as ES Module worker
     this.shellWorker = new Worker(
@@ -207,9 +220,18 @@ export class App {
       return true;
     }
 
-    if (cmd === './a.out' || cmd.startsWith('./')) {
-      // Runtime handled in Milestone 6
-      this.terminal.writeln(`Executing target application: ${cmd}`);
+    // Binary execution: ./a.out or executable paths
+    if (cmd === './a.out' || cmd.startsWith('./') || cmd.startsWith('/')) {
+      const resolved = cmd.startsWith('/') ? cmd : `${cwd}/${cmd.replace(/^\.\//, '')}`;
+      if (!this.vfs.exists(resolved)) {
+        throw new Error(`${cmd}: no such file or directory`);
+      }
+
+      const wasmBytes = this.vfs.readFile(resolved, false);
+      const exitCode = await this.runtimeManager.runBinary(wasmBytes, [cmd, ...args]);
+      if (exitCode !== 0) {
+        throw new Error(`Process exited with code ${exitCode}`);
+      }
       return true;
     }
 
