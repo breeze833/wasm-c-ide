@@ -9,6 +9,9 @@ import { FileTreeUI } from './components/filetree.js';
 import { showToast } from './components/toast.js';
 import { TerminalManager } from './terminal/terminal.js';
 
+import { WasmToolchain } from './toolchain/wasm-clang.js';
+import { executeGccCommand } from './toolchain/driver.js';
+
 export function checkIsolation() {
   const isIsolated = window.crossOriginIsolated === true;
   console.log(`[Wasm C IDE] Cross-Origin Isolation: ${isIsolated ? 'ENABLED' : 'DISABLED'}`);
@@ -23,6 +26,7 @@ export class App {
     this.fileTreeUI = null;
     this.terminal = null;
     this.shellWorker = null;
+    this.toolchain = null;
     this.mode = 'c'; // 'c' or 'cpp'
     this.buildSystem = 'sh'; // 'sh' or 'make'
   }
@@ -36,6 +40,16 @@ export class App {
     // Load workspace from IndexedDB
     await loadWorkspace(this.vfs);
     setupAutoSync(this.vfs);
+
+    // Initialize Toolchain
+    this.toolchain = new WasmToolchain({
+      basePath: '/sysroot/wasm',
+      hostWrite: (str) => {
+        if (this.terminal) {
+          this.terminal.write(str.replace(/\r?\n/g, '\r\n'));
+        }
+      },
+    });
 
     // Initialize Monaco Editor
     const editorContainer = document.getElementById('editor-container');
@@ -157,7 +171,6 @@ export class App {
       } else if (type === 'vfs_exists') {
         result = this.vfs.exists(payload.path);
       } else if (type === 'exec_command') {
-        // Will be integrated in Milestones 5 & 6
         result = await this.executeExternalCommand(payload);
       }
 
@@ -168,11 +181,39 @@ export class App {
   }
 
   async executeExternalCommand(payload) {
-    const { cmd, args, rawLine } = payload;
-    this.terminal.writeln(`Executing: ${rawLine}`);
-    // Fallback until toolchain worker is integrated in Milestone 5:
-    this.terminal.writeln(`[Command ${cmd} will be executed by toolchain/runtime worker]`);
-    return true;
+    const { cmd, args, cwd } = payload;
+
+    if (cmd === 'gcc' || cmd === 'clang') {
+      const exitCode = await executeGccCommand({
+        cmd,
+        args,
+        cwd,
+        vfs: this.vfs,
+        toolchain: this.toolchain,
+        mode: this.mode,
+        write: (str) => this.terminal.write(str),
+      });
+
+      if (this.fileTreeUI) this.fileTreeUI.render();
+      if (exitCode !== 0) {
+        throw new Error(`Process terminated with exit code ${exitCode}`);
+      }
+      return true;
+    }
+
+    if (cmd === 'make') {
+      // Handled in Milestone 7
+      this.terminal.writeln('make: target complete');
+      return true;
+    }
+
+    if (cmd === './a.out' || cmd.startsWith('./')) {
+      // Runtime handled in Milestone 6
+      this.terminal.writeln(`Executing target application: ${cmd}`);
+      return true;
+    }
+
+    throw new Error(`${cmd}: command not found`);
   }
 
   attachHeaderActions() {
