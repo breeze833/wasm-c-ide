@@ -15,34 +15,35 @@ The goal of this project is to build an installation-free, zero-backend, multi-f
 |                               Browser UI                                |
 |  +---------------------------+  +------------------------------------+  |
 |  | Multi-tab Code Editor     |  | Project Settings & Build Action Bar|  |
-|  | (Monaco / CodeMirror 6)   |  | (Build / Link / Compile Active)    |  |
+|  | (Monaco Editor)           |  | (Save / Compile / Build / Run)     |  |
 |  +-------------+-------------+  +-----------------+------------------+  |
-|                |                                  | (Inject command)    |
-|                v (Sync on Save / Dirty marker)    v                     |
+|                |                                  | (Transparent        |
+|                v (Explicit Save / Dirty Marker)   v  pushd/cd/popd cmd) |
 |  +-------------+----------------------------------+------------------+  |
 |  |                     xterm.js Virtual Terminal                     |  |
 |  +------------------------------------+------------------------------+  |
 +---------------------------------------|---------------------------------+
-| (Pty / Stdin / Stdout stream)
+                                        | (Pty Stdin / Stdout stream)
 +---------------------------------------v---------------------------------+
 |                         Web Worker Execution Sandboxes                  |
 |                                                                         |
 |  +--------------------------+          +-----------------------------+  |
-|  |   BusyBox-Wasi Shell     |          |  Wasm Runtime (Target App)  |  |
-|  |   - CLI history & Tab    |          |  - SharedArrayBuffer        |  |
-|  |   - Built-in posix tools |          |  - Atomics.wait blocking IO |  |
+|  |    POSIX Shell Worker    |          |  Wasm Runtime (Target App)  |  |
+|  |  - History & Autocomplete|          |  - SharedArrayBuffer        |  |
+|  |  - Directory Stack & Globs          |  - Atomics.wait blocking IO |  |
 |  +-------------+------------+          +--------------+--------------+  |
-|                | (executes toolchain)                 |                 |
+|                | (executes commands)                  |                 |
 |                v                                      v                 |
 |  +-------------------------------------------------------------------+  |
-|  |  Clang / LLD / Make Wasm Toolchain                                 |  |
+|  |  Clang / LLD / Make Wasm Toolchain (with MemFS synchronization)   |  |
 |  +------------------------------------+------------------------------+  |
 |                                       |                                 |
 |                                       v                                 |
 |  +------------------------------------+------------------------------+  |
-|  | Virtual File System (Single Source of Truth)                      |  |
-|  | - /usr/include (Read-Only Headers)                                |  |
+|  | Virtual File System (VFS - Single Source of Truth)                 |  |
 |  | - /workspace (Read-Write, IndexedDB Sync, .zip Export/Import)     |  |
+|  | - /usr/include & /usr/lib (Read-Only Headers and Static Libraries)|  |
+|  | - /bin & /usr/bin (Read-Only POSIX and Toolchain Binaries)        |  |
 |  +-------------------------------------------------------------------+  |
 +-------------------------------------------------------------------------+
 

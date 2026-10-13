@@ -3,8 +3,8 @@
 A zero-backend, installation-free, multi-file C/C++ development and learning environment running entirely client-side in the browser via WebAssembly (Wasm).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Cross-Origin Isolated](https://img.shields.io/badge/Cross--Origin_Isolation-COOP%2FCOEP-green.svg)](#cross-origin-isolation--deployment)
-[![Client-Side Wasm](https://img.shields.io/badge/Architecture-100%25_Static_Wasm-orange.svg)](#architecture)
+[![Cross-Origin Isolated](https://img.shields.io/badge/Cross--Origin_Isolation-COOP%2FCOEP-green.svg)](#cross-origin-isolation--security-requirements)
+[![Client-Side Wasm](https://img.shields.io/badge/Architecture-100%25_Static_Wasm-orange.svg)](#purpose--pedagogical-vision)
 
 ---
 
@@ -18,7 +18,6 @@ A zero-backend, installation-free, multi-file C/C++ development and learning env
   - [Dual Build Systems (Shell Script & Makefile)](#4-dual-build-systems-shell-script--makefile)
   - [Execution Sandbox with Synchronous Stdin](#5-execution-sandbox-with-synchronous-stdin)
   - [Virtual File System & Storage](#6-virtual-file-system--storage)
-- [Architecture](#architecture)
 - [Getting Started & Local Development](#getting-started--local-development)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
@@ -30,8 +29,8 @@ A zero-backend, installation-free, multi-file C/C++ development and learning env
   - [Nginx](#nginx)
   - [Caddy](#caddy)
   - [Cloudflare Pages / Vercel](#cloudflare-pages--vercel)
-- [Cross-Origin Isolation & Security Requirements](#cross-origin-isolation--security-requirements)
-- [Directory Structure](#directory-structure)
+  - [Cross-Origin Isolation & Security Requirements](#cross-origin-isolation--security-requirements)
+- [License](#license)
 
 ---
 
@@ -107,48 +106,6 @@ This IDE is specifically engineered for **students and systems programming educa
 - **IndexedDB Persistence**: Automatically persists `/workspace` across browser sessions and page refreshes.
 - **Zip Import & Export**: One-click export of `/workspace` into a standard `.zip` file using JSZip, and direct zip unpacking into the workspace.
 - **Sysroot Protection**: Read-only protection on system root paths (`/usr`, `/bin`).
-
----
-
-## Architecture
-
-```
-+-------------------------------------------------------------------------+
-|                               Browser UI                                |
-|  +---------------------------+  +------------------------------------+  |
-|  | Multi-tab Code Editor     |  | Project Settings & Build Action Bar|  |
-|  | (Monaco Editor)           |  | (Save / Compile / Build / Run)     |  |
-|  +-------------+-------------+  +-----------------+------------------+  |
-|                |                                  | (Transparent        |
-|                v (Explicit Save / Dirty Marker)   v  pushd/cd/popd cmd) |
-|  +-------------+----------------------------------+------------------+  |
-|  |                     xterm.js Virtual Terminal                     |  |
-|  +------------------------------------+------------------------------+  |
-+---------------------------------------|---------------------------------+
-                                        | (Pty Stdin / Stdout stream)
-+---------------------------------------v---------------------------------+
-|                         Web Worker Execution Sandboxes                  |
-|                                                                         |
-|  +--------------------------+          +-----------------------------+  |
-|  |    POSIX Shell Worker    |          |  Wasm Runtime (Target App)  |  |
-|  |  - History & Autocomplete|          |  - SharedArrayBuffer        |  |
-|  |  - Directory Stack & Globs          |  - Atomics.wait blocking IO |  |
-|  +-------------+------------+          +--------------+--------------+  |
-|                | (executes commands)                  |                 |
-|                v                                      v                 |
-|  +-------------------------------------------------------------------+  |
-|  |  Clang / LLD / Make Wasm Toolchain (with MemFS synchronization)   |  |
-|  +------------------------------------+------------------------------+  |
-|                                       |                                 |
-|                                       v                                 |
-|  +------------------------------------+------------------------------+  |
-|  | Virtual File System (VFS - Single Source of Truth)                 |  |
-|  | - /workspace (Read-Write, IndexedDB Sync, .zip Export/Import)     |  |
-|  | - /usr/include & /usr/lib (Read-Only Headers and Static Libraries)|  |
-|  | - /bin & /usr/bin (Read-Only POSIX and Toolchain Binaries)        |  |
-|  +-------------------------------------------------------------------+  |
-+-------------------------------------------------------------------------+
-```
 
 ---
 
@@ -275,58 +232,6 @@ Add a `_headers` file to `public/` (or configure in dashboard):
 /*
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
-```
-
----
-
-## Directory Structure
-
-```
-/
-├── SPEC.md                    # Technical specification & architectural ground truth
-├── AGENTS.md                  # Development and operational protocols for agents
-├── README.md                  # Project overview, features, and deployment instructions
-├── index.html                 # Main entry point (loads coi-serviceworker.js)
-├── package.json               # Development tooling, dependencies, and test scripts
-├── vite.config.js             # Vite configuration (COOP/COEP headers, workers)
-├── src/
-│   ├── main.js                # Application bootstrap, DOM scaffolding, and UI event binding
-│   ├── style.css              # Dark theme styling, button color hierarchy, tooltips
-│   ├── components/
-│   │   ├── filetree.js        # File tree sidebar, directory expansion, file operations
-│   │   ├── settings.js        # Project settings modal, build.sh & Makefile generation
-│   │   └── toast.js           # Non-blocking notification toasts
-│   ├── editor/
-│   │   ├── editor.js          # Monaco editor instance controller and save actions
-│   │   ├── monaco-setup.js    # Monaco worker environment setup
-│   │   └── tabs.js            # Tab bar manager and dirty mark (*) tracking
-│   ├── terminal/
-│   │   ├── terminal.js        # xterm.js wrapper and command injection bridge
-│   │   └── runtime.js         # Host-side runtime manager and SharedArrayBuffer coordinator
-│   ├── toolchain/
-│   │   ├── driver.js          # gcc / clang command parser and execution coordinator
-│   │   ├── make.js            # Incremental Makefile runner evaluating mtimes
-│   │   ├── tar.js             # Sysroot tarball extractor
-│   │   └── wasm-clang.js      # Clang, LLD, and MemFS WebAssembly wrappers
-│   ├── vfs/
-│   │   ├── archive.js         # JSZip project export and import routines
-│   │   ├── storage.js         # IndexedDB synchronization and default project seed
-│   │   ├── sysroot.js         # Standard C/C++ sysroot header and binary mount definitions
-│   │   └── vfs.js             # In-memory virtual filesystem with path normalization
-│   └── workers/
-│       ├── runtime.worker.js  # WASI host executing user binaries with Atomics stdin
-│       └── shell.worker.js    # Interactive POSIX shell worker (pushd/popd, globs, mv/cp)
-├── public/
-│   ├── coi-serviceworker.js   # Service worker providing cross-origin isolation fallback
-│   └── sysroot/
-│       ├── wasm/              # Prebuilt clang.wasm, lld.wasm, memfs.wasm, sysroot.tar
-│       └── include/           # Minimal fallback libc headers
-└── test/
-    ├── make.test.js           # Makefile parsing and incremental build tests
-    ├── runtime.test.js        # SharedArrayBuffer Atomics protocol tests
-    ├── shell.test.js          # Shell argument parsing, globs, pushd/popd, and mv/cp tests
-    ├── toolchain.test.js      # Toolchain driver, MemFS directory, and libc library tests
-    └── vfs.test.js            # VFS hierarchy, permissions, and zip round-trip tests
 ```
 
 ---
