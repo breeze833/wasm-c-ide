@@ -560,6 +560,9 @@ export const BIN_COMMANDS = [
   'pwd',
   'clear',
   'echo',
+  'pushd',
+  'popd',
+  'dirs',
 ];
 
 export const USR_BIN_COMMANDS = [

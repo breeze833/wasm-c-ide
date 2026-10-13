@@ -370,8 +370,8 @@ export class App {
         const baseName = relPath.split('/').pop().replace(/\.(c|cpp)$/, '');
         const objPath = `build/${baseName}.o`;
 
-        // Strict command bridge: Type into xterm
-        const cmd = `gcc -Iinclude -Wall -c ${relPath} -o ${objPath}`;
+        // Strict command bridge: Type into xterm with directory stack preservation
+        const cmd = `pushd . && cd /workspace && gcc -Iinclude -Wall -c ${relPath} -o ${objPath}; popd`;
         this.terminal.injectCommand(cmd);
       });
     }
@@ -379,18 +379,17 @@ export class App {
     if (btnBuild) {
       btnBuild.addEventListener('click', () => {
         checkDirtyWarning();
-        // Strict command bridge: Type into xterm
-        if (this.buildSystem === 'make') {
-          this.terminal.injectCommand('make');
-        } else {
-          this.terminal.injectCommand('sh build.sh');
-        }
+        // Strict command bridge: Type into xterm with directory stack preservation
+        const buildCmd = this.buildSystem === 'make' ? 'make' : 'sh build.sh';
+        const cmd = `pushd . && cd /workspace && ${buildCmd}; popd`;
+        this.terminal.injectCommand(cmd);
       });
     }
 
     if (btnRun) {
       btnRun.addEventListener('click', () => {
-        this.terminal.injectCommand('./a.out');
+        const cmd = 'pushd . && cd /workspace && ./a.out; popd';
+        this.terminal.injectCommand(cmd);
       });
     }
 

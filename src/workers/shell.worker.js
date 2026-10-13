@@ -176,29 +176,115 @@ async function expandGlobToken(token, currentDir) {
   return expanded.sort();
 }
 
+const dirStack = [];
+let oldPwd = '/workspace';
+
+function formatStackPath(p) {
+  return p === '/workspace' ? '~' : p.replace(/^\/workspace/, '~');
+}
+
+function printDirStack() {
+  const all = [cwd, ...dirStack.slice().reverse()].map(formatStackPath);
+  writeln(all.join(' '));
+}
+
 // Built-in POSIX CLI Commands
 const builtins = {
   pwd: async () => {
     writeln(cwd);
+    return 0;
   },
 
   cd: async (args) => {
-    const target = args[0] ? resolvePath(args[0]) : '/workspace';
+    let target = args[0];
+    if (!target) {
+      target = '/workspace';
+    } else if (target === '-') {
+      target = oldPwd;
+      writeln(target);
+    } else {
+      target = resolvePath(target);
+    }
+
     try {
       const exists = await callHost('vfs_exists', { path: target });
       if (!exists) {
         writeln(`cd: no such file or directory: ${args[0]}`);
-        return;
+        return 1;
       }
       const stat = await callHost('vfs_stat', { path: target });
       if (!stat || !stat.isDir) {
         writeln(`cd: not a directory: ${args[0]}`);
-        return;
+        return 1;
       }
+      oldPwd = cwd;
       cwd = target;
+      return 0;
     } catch (err) {
       writeln(`cd: ${err.message}`);
+      return 1;
     }
+  },
+
+  pushd: async (args) => {
+    let target = args[0];
+    if (!target) {
+      if (dirStack.length === 0) {
+        writeln('pushd: no other directory');
+        return 1;
+      }
+      const top = dirStack.pop();
+      dirStack.push(cwd);
+      oldPwd = cwd;
+      cwd = top;
+      printDirStack();
+      return 0;
+    }
+
+    if (target === '.') {
+      dirStack.push(cwd);
+      printDirStack();
+      return 0;
+    }
+
+    const resolved = resolvePath(target);
+    try {
+      const exists = await callHost('vfs_exists', { path: resolved });
+      if (!exists) {
+        writeln(`pushd: ${target}: No such file or directory`);
+        return 1;
+      }
+      const stat = await callHost('vfs_stat', { path: resolved });
+      if (!stat || !stat.isDir) {
+        writeln(`pushd: ${target}: Not a directory`);
+        return 1;
+      }
+      dirStack.push(cwd);
+      oldPwd = cwd;
+      cwd = resolved;
+      printDirStack();
+      return 0;
+    } catch (err) {
+      writeln(`pushd: ${err.message}`);
+      return 1;
+    }
+  },
+
+  popd: async () => {
+    if (dirStack.length === 0) {
+      writeln('popd: directory stack empty');
+      return 1;
+    }
+    const popped = dirStack.pop();
+    oldPwd = cwd;
+    cwd = popped;
+    printDirStack();
+    return 0;
+  },
+
+  dirs: async () => {
+    printDirStack();
+    return 0;
   },
 
   ls: async (args) => {
@@ -435,9 +521,9 @@ const builtins = {
   },
 
   which: async (args) => {
-    if (args.length === 0) return;
+    if (args.length === 0) return 0;
     for (const name of args) {
-      if (['sh', 'ls', 'cat', 'rm', 'mkdir', 'cp', 'mv', 'pwd', 'clear', 'echo'].includes(name)) {
+      if (['sh', 'ls', 'cat', 'rm', 'mkdir', 'cp', 'mv', 'pwd', 'clear', 'echo', 'pushd', 'popd', 'dirs', 'push', 'pop'].includes(name)) {
         writeln(`/bin/${name}`);
       } else if (['gcc', 'clang', 'make', 'wasm-ld'].includes(name)) {
         writeln(`/usr/bin/${name}`);
@@ -451,8 +537,49 @@ const builtins = {
         }
       }
     }
+    return 0;
   },
 };
+
+builtins.push = builtins.pushd;
+builtins.pop = builtins.popd;
+
+// Parser for chained shell commands with &&, ||, and ;
+function parseCommandChain(line) {
+  const commands = [];
+  let current = '';
+  let inQuotes = null;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === inQuotes) inQuotes = null;
+      current += ch;
+    } else if (ch === '"' || ch === "'") {
+      inQuotes = ch;
+      current += ch;
+    } else if (ch === '&' && line[i + 1] === '&') {
+      commands.push({ cmd: current.trim(), op: '&&' });
+      current = '';
+      i++;
+    } else if (ch === '|' && line[i + 1] === '|') {
+      commands.push({ cmd: current.trim(), op: '||' });
+      current = '';
+      i++;
+    } else if (ch === ';') {
+      commands.push({ cmd: current.trim(), op: ';' });
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+
+  if (current.trim()) {
+    commands.push({ cmd: current.trim(), op: null });
+  }
+
+  return commands;
+}
 
 // Autocompletion
 async function handleTabCompletion() {
@@ -487,15 +614,30 @@ async function handleTabCompletion() {
   } catch {}
 }
 
-// Execute single command line
+// Execute single command line with operator chaining (&&, ||, ;)
 async function executeCommandLine(commandStr) {
-  const parts = commandStr.split('&&');
-  for (const part of parts) {
-    const trimmed = part.trim();
-    if (!trimmed) continue;
+  const commands = parseCommandChain(commandStr);
+  let lastExitCode = 0;
+  let prevOp = null;
 
-    const tokens = parseTokens(trimmed);
-    if (tokens.length === 0) continue;
+  for (let i = 0; i < commands.length; i++) {
+    const { cmd: rawCmd, op } = commands[i];
+    if (!rawCmd) continue;
+
+    if (prevOp === '&&' && lastExitCode !== 0) {
+      prevOp = op;
+      continue;
+    }
+    if (prevOp === '||' && lastExitCode === 0) {
+      prevOp = op;
+      continue;
+    }
+
+    const tokens = parseTokens(rawCmd);
+    if (tokens.length === 0) {
+      prevOp = op;
+      continue;
+    }
 
     const cmdToken = tokens.shift();
     let cmd = cmdToken.text;
@@ -516,18 +658,24 @@ async function executeCommandLine(commandStr) {
       ? cmd.split('/').pop()
       : cmd;
 
-    if (builtins[cmd]) {
-      await builtins[cmd](args);
-    } else if (builtins[baseCmd]) {
-      await builtins[baseCmd](args);
-    } else {
-      // Delegate external command (gcc, clang, make, ./a.out) to host
-      try {
-        await callHost('exec_command', { cmd: baseCmd, args, rawLine: trimmed, cwd });
-      } catch (err) {
-        writeln(err.message || `${cmd}: command not found`);
+    try {
+      if (builtins[cmd]) {
+        const res = await builtins[cmd](args);
+        lastExitCode = typeof res === 'number' ? res : 0;
+      } else if (builtins[baseCmd]) {
+        const res = await builtins[baseCmd](args);
+        lastExitCode = typeof res === 'number' ? res : 0;
+      } else {
+        // Delegate external command (gcc, clang, make, ./a.out) to host
+        await callHost('exec_command', { cmd: baseCmd, args, rawLine: rawCmd, cwd });
+        lastExitCode = 0;
       }
+    } catch (err) {
+      writeln(err.message || `${cmd}: command not found`);
+      lastExitCode = 1;
     }
+
+    prevOp = op;
   }
 }
 

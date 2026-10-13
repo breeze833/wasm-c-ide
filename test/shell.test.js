@@ -215,4 +215,211 @@ async function expandGlobToken(token, currentDir, vfs) {
   console.log('✓ Glob expansion against VFS passed');
 }
 
+// Test 8: parseCommandChain
+function parseCommandChain(line) {
+  const commands = [];
+  let current = '';
+  let inQuotes = null;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === inQuotes) inQuotes = null;
+      current += ch;
+    } else if (ch === '"' || ch === "'") {
+      inQuotes = ch;
+      current += ch;
+    } else if (ch === '&' && line[i + 1] === '&') {
+      commands.push({ cmd: current.trim(), op: '&&' });
+      current = '';
+      i++;
+    } else if (ch === '|' && line[i + 1] === '|') {
+      commands.push({ cmd: current.trim(), op: '||' });
+      current = '';
+      i++;
+    } else if (ch === ';') {
+      commands.push({ cmd: current.trim(), op: ';' });
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+
+  if (current.trim()) {
+    commands.push({ cmd: current.trim(), op: null });
+  }
+
+  return commands;
+}
+
+const chain1 = parseCommandChain('pushd . && cd /workspace && gcc -c src/main.c -o build/main.o; popd');
+assert.deepStrictEqual(chain1, [
+  { cmd: 'pushd .', op: '&&' },
+  { cmd: 'cd /workspace', op: '&&' },
+  { cmd: 'gcc -c src/main.c -o build/main.o', op: ';' },
+  { cmd: 'popd', op: null },
+]);
+
+const chain2 = parseCommandChain('echo "hello && world"; echo done');
+assert.deepStrictEqual(chain2, [
+  { cmd: 'echo "hello && world"', op: ';' },
+  { cmd: 'echo done', op: null },
+]);
+console.log('✓ parseCommandChain passed');
+
+// Test 9: Directory stack operations (pushd, popd, dirs, cd -)
+{
+  const vfs = new VFS();
+  mountSysroot(vfs);
+  vfs.mkdir('/workspace/src');
+  vfs.mkdir('/workspace/build');
+
+  let cwd = '/workspace/src';
+  let oldPwd = '/workspace';
+  const dirStack = [];
+
+  function formatStackPath(p) {
+    return p === '/workspace' ? '~' : p.replace(/^\/workspace/, '~');
+  }
+
+  function getDirs() {
+    return [cwd, ...dirStack.slice().reverse()].map(formatStackPath).join(' ');
+  }
+
+  function pushd(target) {
+    if (!target) {
+      if (dirStack.length === 0) return 1;
+      const top = dirStack.pop();
+      dirStack.push(cwd);
+      oldPwd = cwd;
+      cwd = top;
+      return 0;
+    }
+    if (target === '.') {
+      dirStack.push(cwd);
+      return 0;
+    }
+    const resolved = target.startsWith('/') ? target : `${cwd}/${target}`;
+    if (!vfs.exists(resolved)) return 1;
+    dirStack.push(cwd);
+    oldPwd = cwd;
+    cwd = resolved;
+    return 0;
+  }
+
+  function popd() {
+    if (dirStack.length === 0) return 1;
+    const popped = dirStack.pop();
+    oldPwd = cwd;
+    cwd = popped;
+    return 0;
+  }
+
+  // Initial state in /workspace/src
+  assert.strictEqual(cwd, '/workspace/src');
+  assert.strictEqual(getDirs(), '~/src');
+
+  // pushd .
+  assert.strictEqual(pushd('.'), 0);
+  assert.strictEqual(cwd, '/workspace/src');
+  assert.strictEqual(dirStack.length, 1);
+  assert.strictEqual(dirStack[0], '/workspace/src');
+  assert.strictEqual(getDirs(), '~/src ~/src');
+
+  // cd /workspace
+  cwd = '/workspace';
+  assert.strictEqual(getDirs(), '~ ~/src');
+
+  // popd
+  assert.strictEqual(popd(), 0);
+  assert.strictEqual(cwd, '/workspace/src');
+  assert.strictEqual(dirStack.length, 0);
+  assert.strictEqual(getDirs(), '~/src');
+
+  // pushd build
+  assert.strictEqual(pushd('/workspace/build'), 0);
+  assert.strictEqual(cwd, '/workspace/build');
+  assert.strictEqual(dirStack.length, 1);
+  assert.strictEqual(getDirs(), '~/build ~/src');
+
+  // popd
+  assert.strictEqual(popd(), 0);
+  assert.strictEqual(cwd, '/workspace/src');
+  assert.strictEqual(getDirs(), '~/src');
+
+  console.log('✓ Directory stack operations passed');
+}
+
+// Test 10: Chained command execution simulation with exit codes
+{
+  async function simulatePipeline(chainStr, cmdHandlers) {
+    const commands = parseCommandChain(chainStr);
+    let lastExitCode = 0;
+    let prevOp = null;
+    const executed = [];
+
+    for (let i = 0; i < commands.length; i++) {
+      const { cmd: rawCmd, op } = commands[i];
+      if (!rawCmd) continue;
+
+      if (prevOp === '&&' && lastExitCode !== 0) {
+        prevOp = op;
+        continue;
+      }
+      if (prevOp === '||' && lastExitCode === 0) {
+        prevOp = op;
+        continue;
+      }
+
+      executed.push(rawCmd);
+      const handler = cmdHandlers[rawCmd] || (() => 0);
+      lastExitCode = handler();
+      prevOp = op;
+    }
+    return { executed, lastExitCode };
+  }
+
+  // Case A: GCC succeeds -> pushd, cd, gcc, popd all run
+  let stack = [];
+  let currentDir = '/workspace/src';
+  const handlersA = {
+    'pushd .': () => { stack.push(currentDir); return 0; },
+    'cd /workspace': () => { currentDir = '/workspace'; return 0; },
+    'gcc -c main.c -o build/main.o': () => 0,
+    'popd': () => { currentDir = stack.pop(); return 0; },
+  };
+
+  const resA = await simulatePipeline('pushd . && cd /workspace && gcc -c main.c -o build/main.o; popd', handlersA);
+  assert.deepStrictEqual(resA.executed, [
+    'pushd .',
+    'cd /workspace',
+    'gcc -c main.c -o build/main.o',
+    'popd',
+  ]);
+  assert.strictEqual(currentDir, '/workspace/src');
+  assert.strictEqual(stack.length, 0);
+
+  // Case B: GCC FAILS (exit code 1) -> pushd, cd, gcc run; popd still runs because of ';' delimiter!
+  currentDir = '/workspace/src';
+  stack = [];
+  const handlersB = {
+    'pushd .': () => { stack.push(currentDir); return 0; },
+    'cd /workspace': () => { currentDir = '/workspace'; return 0; },
+    'gcc -c bad.c -o build/bad.o': () => 1, // fails!
+    'popd': () => { currentDir = stack.pop(); return 0; },
+  };
+
+  const resB = await simulatePipeline('pushd . && cd /workspace && gcc -c bad.c -o build/bad.o; popd', handlersB);
+  assert.deepStrictEqual(resB.executed, [
+    'pushd .',
+    'cd /workspace',
+    'gcc -c bad.c -o build/bad.o',
+    'popd',
+  ]);
+  assert.strictEqual(currentDir, '/workspace/src', 'Working directory must be restored even when gcc fails');
+  assert.strictEqual(stack.length, 0);
+
+  console.log('✓ Command chaining execution with error recovery passed');
+}
+
 console.log('--- ALL SHELL TESTS PASSED ---');
