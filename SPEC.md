@@ -120,7 +120,7 @@ Users can select between two build strategies in the Project Settings UI:
     - `Cross-Origin-Opener-Policy: same-origin`
     - `Cross-Origin-Embedder-Policy: require-corp`
 - **GitHub Pages / Zero-Config Static Server Compatibility**:
-  - Must bundle `coi-serviceworker.js` in root `index.html` to dynamically spoof these headers on hosts that do not support custom HTTP response headers.
+  - Must bundle `coi-serviceworker.js` in `public/coi-serviceworker.js` (loaded via `<script src="/coi-serviceworker.js">` in `index.html` to align with Vite's static asset pipeline) to dynamically spoof these headers on hosts that do not support custom HTTP response headers.
   - Provide sample configurations for Nginx and Caddy in documentation.
 
 ---

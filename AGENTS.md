@@ -19,8 +19,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 /
 ├── SPEC.md                    # Technical specification & architectural ground truth
 ├── AGENTS.md                  # Agent operating protocols (this file)
-├── index.html                 # Main entry point (loads coi-serviceworker.js)
-├── coi-serviceworker.js       # Cross-origin isolation shim for GitHub Pages
+├── index.html                 # Main entry point (loads /coi-serviceworker.js)
 ├── package.json               # Development tooling & build scripts
 ├── vite.config.js             # Vite configuration (headers, workers, wasm support)
 ├── src/
@@ -34,9 +33,10 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   └── runtime.worker.js  # User app execution sandbox (Atomics stdin handler)
 │   └── toolchain/             # Wasm toolchain wrappers (clang, wasm-ld, make)
 └── public/
-└── sysroot/               # Read-only libc headers and pre-built wasm binaries
-├── include/           # Standard C/C++ headers
-└── wasm/              # Clang, LLD, Busybox, and Make Wasm modules
+    ├── coi-serviceworker.js   # Cross-origin isolation shim for GitHub Pages
+    └── sysroot/               # Read-only libc headers and pre-built wasm binaries
+        ├── include/           # Standard C/C++ headers
+        └── wasm/              # Clang, LLD, Busybox, and Make Wasm modules
 
 ---
 
