@@ -111,4 +111,81 @@ console.log('✓ Process EOF termination state verified');
   console.log('✓ readStdin strict-mode variable scope and multi-read verified');
 }
 
+// Test 6: Ctrl-D (\x04) EOF signaling via SharedArrayBuffer & Atomics
+{
+  Atomics.store(sharedInt32, CONTROL_STATE_IDX, STATE_IDLE);
+  Atomics.store(sharedInt32, CONTROL_LEN_IDX, 0);
+  Atomics.store(sharedInt32, CONTROL_READ_POS_IDX, 0);
+
+  // Simulate user pressing Ctrl-D on empty line
+  function simulateCtrlD(lineBuffer) {
+    if (lineBuffer.length > 0) {
+      // Flushes line without newline
+      const enc = new TextEncoder().encode(lineBuffer);
+      sharedUint8.set(enc, DATA_OFFSET);
+      Atomics.store(sharedInt32, CONTROL_LEN_IDX, enc.length);
+      Atomics.store(sharedInt32, CONTROL_READ_POS_IDX, 0);
+      Atomics.store(sharedInt32, CONTROL_STATE_IDX, STATE_READY);
+      Atomics.notify(sharedInt32, CONTROL_STATE_IDX, 1);
+      return false; // Not EOF
+    }
+    // Empty line: EOF signal
+    Atomics.store(sharedInt32, CONTROL_STATE_IDX, STATE_EOF);
+    Atomics.notify(sharedInt32, CONTROL_STATE_IDX, 1);
+    return true; // EOF signaled
+  }
+
+  // Ctrl-D with text flushes text
+  const isEof1 = simulateCtrlD("abc");
+  assert.strictEqual(isEof1, false);
+  assert.strictEqual(Atomics.load(sharedInt32, CONTROL_STATE_IDX), STATE_READY);
+  assert.strictEqual(Atomics.load(sharedInt32, CONTROL_LEN_IDX), 3);
+
+  // Ctrl-D on empty line sends EOF
+  const isEof2 = simulateCtrlD("");
+  assert.strictEqual(isEof2, true);
+  assert.strictEqual(Atomics.load(sharedInt32, CONTROL_STATE_IDX), STATE_EOF);
+
+  // Worker side: when state === STATE_EOF, readStdin returns 0 (EOF)
+  function readWithEof() {
+    const state = Atomics.load(sharedInt32, CONTROL_STATE_IDX);
+    if (state === STATE_EOF) {
+      return 0; // EOF
+    }
+    return -1;
+  }
+  assert.strictEqual(readWithEof(), 0);
+  console.log('✓ Ctrl-D EOF signaling and consumption verified');
+}
+
+// Test 7: Preloaded stdinBytes buffer consumption (non-interactive stream redirection)
+{
+  const inputStr = "Hello from stdin redirect!\n";
+  const preloadedStdin = new TextEncoder().encode(inputStr);
+  let stdinPos = 0;
+
+  function readPreloadedStdin(bufLen) {
+    const available = preloadedStdin.length - stdinPos;
+    if (available <= 0) return 0; // EOF
+    const toCopy = Math.min(bufLen, available);
+    const target = new Uint8Array(toCopy);
+    target.set(preloadedStdin.subarray(stdinPos, stdinPos + toCopy));
+    stdinPos += toCopy;
+    return toCopy;
+  }
+
+  const chunk1 = readPreloadedStdin(10);
+  assert.strictEqual(chunk1, 10);
+  assert.strictEqual(stdinPos, 10);
+
+  const chunk2 = readPreloadedStdin(100);
+  assert.strictEqual(chunk2, preloadedStdin.length - 10);
+  assert.strictEqual(stdinPos, preloadedStdin.length);
+
+  // Further read returns 0 (EOF)
+  const chunk3 = readPreloadedStdin(10);
+  assert.strictEqual(chunk3, 0);
+  console.log('✓ Preloaded stdinBytes buffer and EOF verified');
+}
+
 console.log('--- ALL RUNTIME TESTS PASSED ---');

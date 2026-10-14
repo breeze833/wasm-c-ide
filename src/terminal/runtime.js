@@ -30,7 +30,7 @@ export class RuntimeManager {
     }
   }
 
-  runBinary(wasmBytes, argv = ['./a.out']) {
+  runBinary(wasmBytes, argv = ['./a.out'], options = {}) {
     return new Promise((resolve, reject) => {
       if (this.isRunning) {
         this.kill();
@@ -39,6 +39,7 @@ export class RuntimeManager {
       this.isRunning = true;
       this.isWaitingForStdin = false;
       this.stdinLineBuffer = '';
+      let capturedStdout = '';
 
       if (this.sharedInt32) {
         Atomics.store(this.sharedInt32, CONTROL_STATE_IDX, STATE_IDLE);
@@ -56,30 +57,56 @@ export class RuntimeManager {
         if (!msg) return;
 
         if (msg.type === 'stdout') {
-          this.terminal.write(msg.data.replace(/\r?\n/g, '\r\n'));
+          if (options.captureStdout) {
+            capturedStdout += msg.data;
+          }
+          if (typeof options.onStdout === 'function') {
+            options.onStdout(msg.data);
+          } else if (!options.captureStdout) {
+            this.terminal.write(msg.data.replace(/\r?\n/g, '\r\n'));
+          }
         } else if (msg.type === 'stdin_request') {
           this.isWaitingForStdin = true;
         } else if (msg.type === 'done') {
           this.cleanUp();
-          resolve(msg.exitCode);
+          if (options.captureStdout) {
+            resolve({ exitCode: msg.exitCode, stdout: capturedStdout });
+          } else {
+            resolve(msg.exitCode);
+          }
         } else if (msg.type === 'error') {
           this.cleanUp();
           this.terminal.writeln(`\r\n\x1b[31mRuntime Error: ${msg.error}\x1b[0m`);
-          resolve(1);
+          if (options.captureStdout) {
+            resolve({ exitCode: 1, stdout: capturedStdout });
+          } else {
+            resolve(1);
+          }
         }
       };
 
       this.worker.onerror = (err) => {
         this.cleanUp();
         this.terminal.writeln(`\r\n\x1b[31mRuntime Worker Error: ${err.message}\x1b[0m`);
-        resolve(1);
+        if (options.captureStdout) {
+          resolve({ exitCode: 1, stdout: capturedStdout });
+        } else {
+          resolve(1);
+        }
       };
+
+      const stdinBytes = options.stdinBytes
+        ? (typeof options.stdinBytes === 'string'
+            ? new TextEncoder().encode(options.stdinBytes)
+            : options.stdinBytes)
+        : null;
 
       this.worker.postMessage({
         type: 'run',
         wasmBytes,
         sharedBuffer: this.sharedBuffer,
         argv,
+        stdinBytes,
       });
     });
   }
@@ -87,6 +114,39 @@ export class RuntimeManager {
   handleTerminalInput(key) {
     if (!this.isRunning || !this.isWaitingForStdin) {
       return false;
+    }
+
+    // Ctrl-D (EOT: \x04)
+    if (key === '\x04') {
+      if (this.stdinLineBuffer.length > 0) {
+        // Flush line buffer without newline
+        const lineWithoutNewline = this.stdinLineBuffer;
+        this.stdinLineBuffer = '';
+
+        if (this.sharedInt32 && this.sharedUint8) {
+          const encoded = new TextEncoder().encode(lineWithoutNewline);
+          const toWrite = Math.min(encoded.length, this.sharedBuffer.byteLength - DATA_OFFSET);
+
+          this.sharedUint8.set(encoded.subarray(0, toWrite), DATA_OFFSET);
+          Atomics.store(this.sharedInt32, CONTROL_LEN_IDX, toWrite);
+          Atomics.store(this.sharedInt32, CONTROL_READ_POS_IDX, 0);
+
+          Atomics.store(this.sharedInt32, CONTROL_STATE_IDX, STATE_READY);
+          Atomics.notify(this.sharedInt32, CONTROL_STATE_IDX, 1);
+        }
+
+        this.isWaitingForStdin = false;
+        return true;
+      }
+
+      // Empty buffer: signal EOF
+      if (this.sharedInt32) {
+        Atomics.store(this.sharedInt32, CONTROL_STATE_IDX, STATE_EOF);
+        Atomics.notify(this.sharedInt32, CONTROL_STATE_IDX, 1);
+      }
+
+      this.isWaitingForStdin = false;
+      return true;
     }
 
     // Enter

@@ -79,6 +79,13 @@ The goal of this project is to build an installation-free, zero-backend, multi-f
     - `cd -`: Swaps to the previous working directory (`oldPwd`).
   - **Command Chaining & Operators**:
     - The shell command interpreter supports operator chaining: sequential `;`, conditional `&&`, and conditional `||`, properly respecting quoted strings.
+    - **Pipes (`|`)**: Supports multi-stage pipeline command chaining (`cmd1 | cmd2 | cmd3`), connecting stdout of stage $k$ to stdin of stage $k+1$ across both built-in utilities and external binaries via deterministic sequential buffer staging.
+    - **Stream Redirections (`<`, `>`, `>>`)**:
+      - Output Redirection: `> target` (truncate/overwrite) and `>> target` (append) capture stdout of builtins (`echo`, `ls`, `cat`, etc.) and external commands (`./a.out`, `gcc`, `make`) to files in the VFS.
+      - Input Redirection: `< source` feeds files from the VFS directly into the standard input of commands (`./a.out < input.txt`, `cat < input.txt`).
+      - Operators within quoted strings are preserved as literal characters.
+  - **Standard Input Closure (`Ctrl-D` / EOF)**:
+    - Pressing `Ctrl-D` (`\x04`) while standard input is active cleanly transmits End-of-File (EOF) to the executing process without terminating the process or shell.
   - **Glob Pattern Expansion**:
     - Unquoted command arguments containing glob wildcards (`*`, `?`) are recursively expanded against the VFS file tree before command execution. Unmatched patterns are preserved as literal strings.
   - **File-Aware & Multi-Target `ls`**:
@@ -129,9 +136,13 @@ Users can select between two build strategies in the Project Settings UI:
 
 ### 3.5 Runtime & Interactive Standard I/O
 - Target binaries (`.wasm` executables, e.g., `./a.out` or `./bin/app`) run in a dedicated Web Worker instance.
-- **Blocking Standard Input (`stdin`)**:
-  - Handled via `SharedArrayBuffer` and `Atomics.wait()`.
-  - When the runtime executes WASI `fd_read` on file descriptor 0, the worker pauses without blocking the browser main UI thread until `xterm.js` receives user input and signals `SharedArrayBuffer` via `Atomics.notify()`.
+- **Standard Input (`stdin`) Handling**:
+  - **Interactive Blocking Input**: Handled via `SharedArrayBuffer` and `Atomics.wait()`. When the runtime executes WASI `fd_read` on file descriptor 0, the worker pauses without blocking the browser main UI thread until `xterm.js` receives user input and signals `SharedArrayBuffer` via `Atomics.notify()`.
+  - **Non-Interactive Stream Redirection**: When stdin is redirected from a file (`<`) or pipeline (`|`), input bytes are preloaded into memory and consumed synchronously by `fd_read` without entering `Atomics.wait()`.
+  - **End-of-File Signaling (`Ctrl-D` / `\x04`)**:
+    - Pressing `Ctrl-D` (`\x04`) in `xterm.js` while input is pending flushes existing buffer content or signals `STATE_EOF` (`-1`) to `SharedArrayBuffer`.
+    - `Atomics.notify()` immediately resumes the waiting worker.
+    - WASI `fd_read` sets `*nread = 0` and returns `ESUCCESS` (0), allowing standard C library functions (`scanf`, `getchar`, `fgets`, `cin`) to recognize EOF and terminate input loops cleanly.
 - **Execution Interruption**:
   - `Ctrl+C` in the terminal or GUI "Stop" button immediately issues worker interruption/termination and resets terminal state.
 
@@ -210,6 +221,38 @@ Users can select between two build strategies in the Project Settings UI:
 - **Portable Offline Zip Packaging**:
   - Dedicated script `npm run pack` builds and packages `dist/` into `wasm-c-ide.zip`.
   - CI workflow uploads the zip archive as a GitHub Actions artifact and publishes it to the repository's **Latest Release** (`softprops/action-gh-release@v2`), allowing users to run the IDE fully offline with any local web server.
+
+### 3.9 Milestone 9: Advanced Shell Pipelines, Stream Redirections & EOF Handling
+
+#### 3.9.1 Pipeline Architecture (`|`)
+- **Sequential Buffer Staging**: Multi-stage pipelines (`cmd1 | cmd2 | cmd3`) are executed sequentially by running stage $k$ to completion, capturing its standard output stream in an in-memory buffer (`Uint8Array` / string), and feeding it as standard input into stage $k+1$.
+- **Cross-Component Composition**: Pipelines seamlessly interleave built-in POSIX utilities and WebAssembly binaries:
+  - `echo "42" | ./a.out` (feeding input directly into a compiled executable)
+  - `cat input.txt | ./a.out` (piping file content to binary standard input)
+  - `./a.out | cat` (piping binary stdout to built-in pager/utility)
+  - `./producer | ./consumer` (chaining two compiled binaries)
+- **Pipeline Exit Status**: The return code of a pipeline is governed by the exit status of its final stage, determining `&&` and `||` branch execution.
+
+#### 3.9.2 Stream Redirections (`<`, `>`, `>>`)
+- **Output Redirection (`>` and `>>`)**:
+  - `> target`: Captures stdout of a built-in or external command and writes it to `target` in the VFS, truncating or creating the file.
+  - `>> target`: Appends stdout to existing file content in the VFS, or creates the file if it does not exist.
+  - VFS file tree UI dynamically re-renders when files in `/workspace` are created or modified via redirection.
+- **Input Redirection (`<`)**:
+  - `< source`: Reads `source` from the VFS and feeds its bytes directly into the command's standard input.
+  - If `source` does not exist in the VFS, command execution aborts immediately with an appropriate error diagnostic (`<source>: No such file or directory`) and non-zero exit code.
+- **Grammar & Quoting Precision**:
+  - Unquoted redirection operators `<`, `>`, and `>>` are extracted during command line parsing without polluting argument arrays.
+  - Redirection operators enclosed within single or double quotes are treated as literal arguments.
+
+#### 3.9.3 Interactive Standard Input Termination (`Ctrl-D` / EOF)
+- **Signal Handling (`\x04`)**:
+  - When the terminal captures `\x04` (`Ctrl-D`) during active `stdin` wait:
+    - If characters exist in `stdinLineBuffer`, the buffer is flushed immediately to the running process without an appended newline.
+    - If `stdinLineBuffer` is empty, `SharedArrayBuffer` control word transitions to `STATE_EOF` (`-1`) followed by `Atomics.notify()`.
+- **WASI Compliance**:
+  - WASI `fd_read` returns `nread = 0` and status `ESUCCESS` (0).
+  - Standard C/C++ interactive loops (`while (scanf(...) == 1)`, `while (cin >> x)`, `getchar() != EOF`) terminate predictably without hanging or UI lockup.
 
 ---
 

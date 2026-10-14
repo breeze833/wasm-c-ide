@@ -38,7 +38,7 @@ self.onmessage = async (event) => {
   if (!msg) return;
 
   if (msg.type === 'run') {
-    const { wasmBytes, sharedBuffer, argv = ['./a.out'], environ = {} } = msg;
+    const { wasmBytes, sharedBuffer, argv = ['./a.out'], environ = {}, stdinBytes } = msg;
 
     if (sharedBuffer) {
       sharedInt32 = new Int32Array(sharedBuffer);
@@ -46,7 +46,7 @@ self.onmessage = async (event) => {
     }
 
     try {
-      await runWasm(wasmBytes, argv, environ);
+      await runWasm(wasmBytes, argv, environ, stdinBytes);
       self.postMessage({ type: 'done', exitCode: 0 });
     } catch (err) {
       if (err instanceof ProcExit) {
@@ -58,8 +58,10 @@ self.onmessage = async (event) => {
   }
 };
 
-async function runWasm(wasmBytes, argv, environ) {
+async function runWasm(wasmBytes, argv, environ, stdinBytes = null) {
   let memoryInstance = null;
+  let stdinPos = 0;
+  const preloadedStdin = stdinBytes ? (stdinBytes instanceof Uint8Array ? stdinBytes : new Uint8Array(stdinBytes)) : null;
 
   function memU8() {
     return new Uint8Array(memoryInstance.buffer);
@@ -68,8 +70,26 @@ async function runWasm(wasmBytes, argv, environ) {
     return new Uint32Array(memoryInstance.buffer);
   }
 
-  // Blocking synchronous stdin handler using Atomics
+  // Blocking synchronous stdin handler using Atomics or preloaded buffer
   function readStdin(iovs, iovs_len, nread_out) {
+    if (preloadedStdin) {
+      let totalRead = 0;
+      for (let i = 0; i < iovs_len; i++) {
+        const bufPtr = memU32()[(iovs >> 2) + i * 2];
+        const bufLen = memU32()[(iovs >> 2) + i * 2 + 1];
+        const available = preloadedStdin.length - stdinPos;
+        if (available > 0) {
+          const toCopy = Math.min(bufLen, available);
+          memU8().set(preloadedStdin.subarray(stdinPos, stdinPos + toCopy), bufPtr);
+          stdinPos += toCopy;
+          totalRead += toCopy;
+          break;
+        }
+      }
+      memU32()[nread_out >> 2] = totalRead;
+      return ESUCCESS;
+    }
+
     let totalRead = 0;
 
     for (let i = 0; i < iovs_len; i++) {

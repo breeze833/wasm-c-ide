@@ -246,7 +246,30 @@ export class App {
   }
 
   async executeExternalCommand(payload) {
-    const { cmd, args, cwd } = payload;
+    const { cmd, args, cwd, stdinData, captureStdout, stdoutRedirect } = payload;
+    let capturedStdout = '';
+    const shouldCapture = Boolean(captureStdout || stdoutRedirect);
+
+    const writeFn = (str) => {
+      if (shouldCapture) {
+        capturedStdout += str;
+      }
+      if (!stdoutRedirect) {
+        this.terminal.write(str);
+      }
+    };
+
+    const flushStdoutRedirect = async () => {
+      if (stdoutRedirect && stdoutRedirect.path) {
+        let content = capturedStdout;
+        if (stdoutRedirect.append && this.vfs.exists(stdoutRedirect.path)) {
+          const existing = this.vfs.readFile(stdoutRedirect.path, true);
+          content = existing + capturedStdout;
+        }
+        this.vfs.writeFile(stdoutRedirect.path, content);
+        if (this.fileTreeUI) this.fileTreeUI.render();
+      }
+    };
 
     if (cmd === 'gcc' || cmd === 'clang') {
       const exitCode = await executeGccCommand({
@@ -256,10 +279,15 @@ export class App {
         vfs: this.vfs,
         toolchain: this.toolchain,
         mode: this.mode,
-        write: (str) => this.terminal.write(str),
+        write: writeFn,
       });
 
       if (this.fileTreeUI) this.fileTreeUI.render();
+      await flushStdoutRedirect();
+
+      if (captureStdout) {
+        return { exitCode, stdout: capturedStdout };
+      }
       if (exitCode !== 0) {
         throw new Error(`Process terminated with exit code ${exitCode}`);
       }
@@ -270,7 +298,7 @@ export class App {
       const exitCode = await runMake({
         targetName: args[0] || 'all',
         vfs: this.vfs,
-        write: (str) => this.terminal.write(str.replace(/\r?\n/g, '\r\n')),
+        write: (str) => writeFn(str.replace(/\r?\n/g, '\r\n')),
         executeCommand: async (cmdLine) => {
           const trimmed = cmdLine.trim();
           if (!trimmed) return;
@@ -302,7 +330,7 @@ export class App {
               vfs: this.vfs,
               toolchain: this.toolchain,
               mode: this.mode,
-              write: (str) => this.terminal.write(str),
+              write: writeFn,
             });
             if (this.fileTreeUI) this.fileTreeUI.render();
           }
@@ -310,6 +338,11 @@ export class App {
       });
 
       if (this.fileTreeUI) this.fileTreeUI.render();
+      await flushStdoutRedirect();
+
+      if (captureStdout) {
+        return { exitCode, stdout: capturedStdout };
+      }
       if (exitCode !== 0) {
         throw new Error(`make: exit code ${exitCode}`);
       }
@@ -324,7 +357,22 @@ export class App {
       }
 
       const wasmBytes = this.vfs.readFile(resolved, false);
-      const exitCode = await this.runtimeManager.runBinary(wasmBytes, [cmd, ...args]);
+      const res = await this.runtimeManager.runBinary(wasmBytes, [cmd, ...args], {
+        stdinBytes: stdinData,
+        captureStdout: shouldCapture,
+        onStdout: stdoutRedirect ? ((data) => { capturedStdout += data; }) : null,
+      });
+
+      const exitCode = typeof res === 'object' ? res.exitCode : res;
+      if (typeof res === 'object') {
+        capturedStdout = res.stdout;
+      }
+
+      await flushStdoutRedirect();
+
+      if (captureStdout) {
+        return { exitCode, stdout: capturedStdout };
+      }
       if (exitCode !== 0) {
         throw new Error(`Process exited with code ${exitCode}`);
       }

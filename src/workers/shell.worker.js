@@ -20,13 +20,24 @@ function callHost(type, payload = {}) {
   });
 }
 
-// Shell output helpers
+// Shell output & input stream helpers
+let currentStdout = null;
+let currentStdin = null;
+
 function write(str) {
-  self.postMessage({ type: 'term_write', data: str });
+  if (currentStdout !== null) {
+    currentStdout.data += str;
+  } else {
+    self.postMessage({ type: 'term_write', data: str });
+  }
 }
 
 function writeln(str = '') {
-  self.postMessage({ type: 'term_write', data: str + '\r\n' });
+  if (currentStdout !== null) {
+    currentStdout.data += str + '\n';
+  } else {
+    self.postMessage({ type: 'term_write', data: str + '\r\n' });
+  }
 }
 
 function getPrompt() {
@@ -78,6 +89,21 @@ function parseTokens(line) {
     } else if (ch === '"' || ch === "'") {
       inQuotes = ch;
       isQuoted = true;
+    } else if (ch === '>' && line[i + 1] === '>') {
+      if (current.length > 0 || isQuoted) {
+        tokens.push({ text: current, quoted: isQuoted });
+        current = '';
+        isQuoted = false;
+      }
+      tokens.push({ text: '>>', quoted: false });
+      i++;
+    } else if (ch === '>' || ch === '<') {
+      if (current.length > 0 || isQuoted) {
+        tokens.push({ text: current, quoted: isQuoted });
+        current = '';
+        isQuoted = false;
+      }
+      tokens.push({ text: ch, quoted: false });
     } else if (/\s/.test(ch)) {
       if (current.length > 0 || isQuoted) {
         tokens.push({ text: current, quoted: isQuoted });
@@ -396,39 +422,35 @@ const builtins = {
   },
 
   cat: async (args) => {
-    if (args.length === 0) return;
+    if (args.length === 0) {
+      if (currentStdin !== null) {
+        write(currentStdin);
+      }
+      return 0;
+    }
+    let hasError = false;
     for (const arg of args) {
+      if (arg === '-') {
+        if (currentStdin !== null) {
+          write(currentStdin);
+        }
+        continue;
+      }
       const target = resolvePath(arg);
       try {
         const content = await callHost('vfs_readFile', { path: target, asText: true });
-        write(content.endsWith('\n') ? content : content + '\r\n');
+        write(content.endsWith('\n') ? content : content + '\n');
       } catch (err) {
         writeln(`cat: ${arg}: No such file or directory`);
+        hasError = true;
       }
     }
+    return hasError ? 1 : 0;
   },
 
   echo: async (args) => {
-    // Check for redirection > or >>
-    const redirectIdx = args.findIndex(a => a === '>' || a === '>>');
-    if (redirectIdx !== -1 && redirectIdx < args.length - 1) {
-      const text = args.slice(0, redirectIdx).join(' ') + '\n';
-      const isAppend = args[redirectIdx] === '>>';
-      const targetPath = resolvePath(args[redirectIdx + 1]);
-      try {
-        let content = text;
-        if (isAppend) {
-          const existing = await callHost('vfs_readFile', { path: targetPath, asText: true }).catch(() => '');
-          content = existing + text;
-        }
-        await callHost('vfs_writeFile', { path: targetPath, content });
-      } catch (err) {
-        writeln(`echo: cannot write to '${args[redirectIdx + 1]}': ${err.message}`);
-      }
-      return;
-    }
-
     writeln(args.join(' '));
+    return 0;
   },
 
   mkdir: async (args) => {
@@ -786,7 +808,74 @@ async function handleTabCompletion() {
   } catch {}
 }
 
-// Execute single command line with operator chaining (&&, ||, ;)
+// Parser for pipeline stages split by | (excluding || and quoted pipes)
+function splitPipeline(line) {
+  const stages = [];
+  let current = '';
+  let inQuotes = null;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === inQuotes) inQuotes = null;
+      current += ch;
+    } else if (ch === '"' || ch === "'") {
+      inQuotes = ch;
+      current += ch;
+    } else if (ch === '|' && line[i + 1] !== '|' && (i === 0 || line[i - 1] !== '|')) {
+      stages.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+
+  if (current.trim()) {
+    stages.push(current.trim());
+  }
+
+  return stages;
+}
+
+// Parse redirections (<, >, >>) out of stage tokens
+function parseStageRedirections(stageTokens) {
+  const cleanTokens = [];
+  let stdinRedirect = null;
+  let stdoutRedirect = null; // { path: string, append: boolean }
+
+  for (let i = 0; i < stageTokens.length; i++) {
+    const token = stageTokens[i];
+    if (!token.quoted) {
+      if (token.text === '<') {
+        const next = stageTokens[i + 1];
+        if (next) {
+          stdinRedirect = next.text;
+          i++;
+          continue;
+        }
+      } else if (token.text === '>') {
+        const next = stageTokens[i + 1];
+        if (next) {
+          stdoutRedirect = { path: next.text, append: false };
+          i++;
+          continue;
+        }
+      } else if (token.text === '>>') {
+        const next = stageTokens[i + 1];
+        if (next) {
+          stdoutRedirect = { path: next.text, append: true };
+          i++;
+          continue;
+        }
+      }
+    }
+    cleanTokens.push(token);
+  }
+
+  return { cleanTokens, stdinRedirect, stdoutRedirect };
+}
+
+// Execute single command line with operator chaining (&&, ||, ;) and pipelines (|)
 async function executeCommandLine(commandStr) {
   const commands = parseCommandChain(commandStr);
   let lastExitCode = 0;
@@ -805,48 +894,125 @@ async function executeCommandLine(commandStr) {
       continue;
     }
 
-    const tokens = parseTokens(rawCmd);
-    if (tokens.length === 0) {
-      prevOp = op;
-      continue;
-    }
+    const stages = splitPipeline(rawCmd);
+    let stageInput = null;
+    let pipelineExitCode = 0;
 
-    const cmdToken = tokens.shift();
-    let cmd = cmdToken.text;
+    for (let s = 0; s < stages.length; s++) {
+      const stageStr = stages[s];
+      const isLast = (s === stages.length - 1);
+      const stageTokens = parseTokens(stageStr);
+      if (stageTokens.length === 0) continue;
 
-    // Expand globs in arguments
-    const args = [];
-    for (const token of tokens) {
-      if (token.quoted || !hasGlob(token.text)) {
-        args.push(token.text);
-      } else {
-        const expanded = await expandGlobToken(token.text, cwd);
-        args.push(...expanded);
+      const { cleanTokens, stdinRedirect, stdoutRedirect } = parseStageRedirections(stageTokens);
+      if (cleanTokens.length === 0) continue;
+
+      const cmdToken = cleanTokens.shift();
+      let cmd = cmdToken.text;
+
+      // Expand globs in arguments
+      const args = [];
+      for (const token of cleanTokens) {
+        if (token.quoted || !hasGlob(token.text)) {
+          args.push(token.text);
+        } else {
+          const expanded = await expandGlobToken(token.text, cwd);
+          args.push(...expanded);
+        }
+      }
+
+      // Map path-prefixed commands like /bin/ls or /usr/bin/gcc
+      const baseCmd = (cmd.startsWith('/bin/') || cmd.startsWith('/usr/bin/'))
+        ? cmd.split('/').pop()
+        : cmd;
+
+      // Determine stdin data for this stage
+      let currentStdinData = null;
+      if (stdinRedirect) {
+        const inPath = resolvePath(stdinRedirect);
+        const exists = await callHost('vfs_exists', { path: inPath });
+        if (!exists) {
+          writeln(`${stdinRedirect}: No such file or directory`);
+          pipelineExitCode = 1;
+          break;
+        }
+        try {
+          currentStdinData = await callHost('vfs_readFile', { path: inPath, asText: true });
+        } catch (err) {
+          writeln(`${stdinRedirect}: ${err.message}`);
+          pipelineExitCode = 1;
+          break;
+        }
+      } else if (stageInput !== null) {
+        currentStdinData = stageInput;
+      }
+
+      // Determine stdout capturing
+      const shouldCapture = !isLast || Boolean(stdoutRedirect);
+      let captured = '';
+
+      if (shouldCapture) {
+        currentStdout = { data: '' };
+      }
+      currentStdin = currentStdinData;
+
+      try {
+        if (builtins[cmd] || builtins[baseCmd]) {
+          const fn = builtins[cmd] || builtins[baseCmd];
+          const res = await fn(args);
+          pipelineExitCode = typeof res === 'number' ? res : 0;
+          if (shouldCapture) {
+            captured = currentStdout.data;
+          }
+        } else {
+          const res = await callHost('exec_command', {
+            cmd: baseCmd,
+            args,
+            rawLine: stageStr,
+            cwd,
+            stdinData: currentStdinData,
+            captureStdout: shouldCapture,
+            stdoutRedirect: null,
+          });
+
+          if (typeof res === 'object' && res !== null) {
+            pipelineExitCode = res.exitCode;
+            captured = res.stdout || '';
+          } else {
+            pipelineExitCode = 0;
+          }
+        }
+
+        if (stdoutRedirect) {
+          const outPath = resolvePath(stdoutRedirect.path);
+          let fileContent = captured;
+          if (stdoutRedirect.append) {
+            try {
+              const existing = await callHost('vfs_readFile', { path: outPath, asText: true });
+              fileContent = existing + captured;
+            } catch {
+              fileContent = captured;
+            }
+          }
+          await callHost('vfs_writeFile', { path: outPath, content: fileContent });
+        }
+
+        stageInput = captured;
+      } catch (err) {
+        writeln(err.message || `${cmd}: command not found`);
+        pipelineExitCode = 1;
+        break;
+      } finally {
+        currentStdout = null;
+        currentStdin = null;
+      }
+
+      if (pipelineExitCode !== 0 && !isLast) {
+        break;
       }
     }
 
-    // Map path-prefixed commands like /bin/ls or /usr/bin/gcc
-    const baseCmd = (cmd.startsWith('/bin/') || cmd.startsWith('/usr/bin/'))
-      ? cmd.split('/').pop()
-      : cmd;
-
-    try {
-      if (builtins[cmd]) {
-        const res = await builtins[cmd](args);
-        lastExitCode = typeof res === 'number' ? res : 0;
-      } else if (builtins[baseCmd]) {
-        const res = await builtins[baseCmd](args);
-        lastExitCode = typeof res === 'number' ? res : 0;
-      } else {
-        // Delegate external command (gcc, clang, make, ./a.out) to host
-        await callHost('exec_command', { cmd: baseCmd, args, rawLine: rawCmd, cwd });
-        lastExitCode = 0;
-      }
-    } catch (err) {
-      writeln(err.message || `${cmd}: command not found`);
-      lastExitCode = 1;
-    }
-
+    lastExitCode = pipelineExitCode;
     prevOp = op;
   }
 }
@@ -902,6 +1068,15 @@ async function handleKey(key) {
   if (key === '\x03') {
     writeln('^C');
     showPrompt();
+    return;
+  }
+
+  // Ctrl+D (EOF on empty prompt)
+  if (key === '\x04') {
+    if (lineBuffer.length === 0) {
+      writeln('exit');
+      showPrompt();
+    }
     return;
   }
 

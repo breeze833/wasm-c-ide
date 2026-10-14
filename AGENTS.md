@@ -59,7 +59,8 @@ You are an autonomous senior systems and web engineer implementing the project s
 │       └── include/           # Minimal fallback libc headers
 └── test/
     ├── make.test.js           # Makefile parsing and incremental build tests
-    ├── runtime.test.js        # SharedArrayBuffer Atomics protocol tests
+    ├── pipeline.test.js       # Command pipeline (|) and file redirection (<, >, >>) tests
+    ├── runtime.test.js        # SharedArrayBuffer Atomics protocol and Ctrl-D EOF tests
     ├── shell.test.js          # Shell argument parsing, globs, pushd/popd, and mv/cp tests
     ├── sw.test.js             # Service Worker, PWA manifest, and offline COOP/COEP tests
     ├── toolchain.test.js      # Toolchain driver, MemFS directory, and libc library tests
@@ -129,6 +130,12 @@ Agents executing this project should proceed milestone-by-milestone:
 - Set up PWA Web App Manifest, in-app install prompt (`beforeinstallprompt`), and Cache-First offline caching in `coi-serviceworker.js`.
 - Implement production packaging (`npm run pack` generating `wasm-c-ide.zip`) and GitHub Actions CI/CD workflow for automated tests, GitHub Pages deployment, and GitHub Releases publication.
 
+### Milestone 9: Advanced Shell Pipelines, Stream Redirections & EOF Handling
+- Implement pipeline execution (`|`) with sequential buffer staging connecting stages.
+- Implement stream redirections (`<`, `>`, `>>`) for built-in utilities and external binaries.
+- Implement `Ctrl-D` (`\x04`) handling in `RuntimeManager` sending `STATE_EOF` via `SharedArrayBuffer` for clean EOF in `scanf`, `cin`, and `getchar`.
+- Support preloaded `stdinBytes` in `runtime.worker.js` for synchronous stream feeding without `Atomics.wait`.
+
 ---
 
 ## 4. Verification & Testing Checklist
@@ -142,6 +149,10 @@ Before marking any task complete, agents must verify:
 | **Unsaved Edits** | Clicking Build without saving produces a dirty warning; output binary reflects disk state, not editor state. |
 | **Multi-File Linkage** | Separately compiled `.o` files link into an executable without symbol resolution errors. |
 | **Interactive `scanf`** | Program halts at `scanf("%d", &v)`, accepts typing from terminal, and proceeds upon Enter without UI freeze. |
+| **Interactive `Ctrl-D` (EOF)** | Pressing `Ctrl-D` while waiting for input triggers EOF (`nread = 0`), exiting input loops cleanly. |
+| **Output Redirection (`>`, `>>`)** | `echo "hi" > file.txt` writes to file; `>>` appends to file without clobbering existing content. |
+| **Input Redirection (`<`)** | `./a.out < input.txt` reads directly from VFS file without interactive terminal prompt. |
+| **Command Pipelines (`|`)** | `cat input.txt | ./a.out` and `./a.out | cat` pipe output to input across stages. |
 | **Infinite Loop Interruption** | `while(1);` can be interrupted via `Ctrl+C` or UI Stop button; terminal returns to prompt. |
 | **Refresh Persistence** | Modifying files, closing tab, and reopening keeps files intact via IndexedDB. |
 | **Zip Round-Trip** | Exporting project to zip and re-importing preserves directory hierarchy. |
