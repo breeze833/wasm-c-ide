@@ -50,7 +50,7 @@ const args3 = parseArgs('echo "int a = 10;" > test.c');
 assert.deepStrictEqual(args3, ['echo', 'int a = 10;', '>', 'test.c']);
 console.log('✓ parseArgs redirection passed');
 
-// Test 4: Command path normalization (/bin/ls -> ls, /usr/bin/gcc -> gcc)
+// Test 4: Command path normalization (/bin/ls -> ls, /usr/bin/gcc -> gcc, /usr/bin/g++ -> g++)
 function normalizeCommand(cmd) {
   if (cmd.startsWith('/bin/') || cmd.startsWith('/usr/bin/')) {
     return cmd.split('/').pop();
@@ -59,6 +59,8 @@ function normalizeCommand(cmd) {
 }
 assert.strictEqual(normalizeCommand('/bin/ls'), 'ls');
 assert.strictEqual(normalizeCommand('/usr/bin/gcc'), 'gcc');
+assert.strictEqual(normalizeCommand('/usr/bin/g++'), 'g++');
+assert.strictEqual(normalizeCommand('/usr/bin/clang++'), 'clang++');
 assert.strictEqual(normalizeCommand('make'), 'make');
 console.log('✓ Command path normalization passed');
 
@@ -66,19 +68,31 @@ console.log('✓ Command path normalization passed');
 function resolveWhich(name) {
   if (['sh', 'ls', 'cat', 'rm', 'mkdir', 'cp', 'mv', 'pwd', 'clear', 'echo'].includes(name)) {
     return `/bin/${name}`;
-  } else if (['gcc', 'clang', 'make', 'wasm-ld'].includes(name)) {
+  } else if (['gcc', 'clang', 'g++', 'clang++', 'make', 'wasm-ld'].includes(name)) {
     return `/usr/bin/${name}`;
   }
   return null;
 }
 assert.strictEqual(resolveWhich('ls'), '/bin/ls');
 assert.strictEqual(resolveWhich('gcc'), '/usr/bin/gcc');
+assert.strictEqual(resolveWhich('g++'), '/usr/bin/g++');
+assert.strictEqual(resolveWhich('clang++'), '/usr/bin/clang++');
 assert.strictEqual(resolveWhich('make'), '/usr/bin/make');
 assert.strictEqual(resolveWhich('sh'), '/bin/sh');
 console.log('✓ which path resolution passed');
 
 import { VFS } from '../src/vfs/vfs.js';
 import { mountSysroot } from '../src/vfs/sysroot.js';
+
+// Test 5.1: Sysroot mounts g++ and clang++
+{
+  const vfs = new VFS();
+  mountSysroot(vfs);
+  assert.strictEqual(vfs.exists('/usr/bin/gcc'), true);
+  assert.strictEqual(vfs.exists('/usr/bin/g++'), true);
+  assert.strictEqual(vfs.exists('/usr/bin/clang++'), true);
+  console.log('✓ sysroot mounts g++ and clang++ under /usr/bin');
+}
 
 // Test 6: parseTokens distinguishing quoted vs unquoted tokens
 function parseTokens(line) {

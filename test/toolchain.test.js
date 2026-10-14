@@ -119,6 +119,66 @@ console.log('✓ Direct compile & link argument parsing passed');
   console.log('✓ executeGccCommand initializes uninitialized toolchain (regression fix verified)');
 }
 
+// Test 4.1: executeGccCommand with g++ and clang++ selects cpp mode and reports correct command name
+{
+  const vfs = new VFS();
+  vfs.writeFile('/workspace/main.cpp', '#include <iostream>\nint main() { return 0; }');
+
+  let passedMode = null;
+  const mockToolchain = {
+    initialized: true,
+    async init() {},
+    async syncFileToMemfs() {},
+    getFileFromMemfs() { return new Uint8Array([0]); },
+    async compile(src, obj, mode) {
+      passedMode = mode;
+      return 0;
+    },
+    async link() { return 0; }
+  };
+
+  let writeOutput = '';
+  const exitCode = await executeGccCommand({
+    cmd: 'g++',
+    args: ['-c', 'main.cpp', '-o', 'main.o'],
+    cwd: '/workspace',
+    vfs,
+    toolchain: mockToolchain,
+    mode: 'c', // Even if base mode is 'c', cmd 'g++' must override to 'cpp'
+    write: (msg) => { writeOutput += msg; }
+  });
+
+  assert.strictEqual(exitCode, 0);
+  assert.strictEqual(passedMode, 'cpp', 'g++ command must execute compilation in cpp mode');
+
+  // Verify clang++ also selects cpp mode
+  await executeGccCommand({
+    cmd: 'clang++',
+    args: ['-c', 'main.cpp', '-o', 'main.o'],
+    cwd: '/workspace',
+    vfs,
+    toolchain: mockToolchain,
+    mode: 'c',
+    write: (msg) => { writeOutput += msg; }
+  });
+  assert.strictEqual(passedMode, 'cpp', 'clang++ command must execute compilation in cpp mode');
+
+  // Verify error output uses cmd name
+  writeOutput = '';
+  const errCode = await executeGccCommand({
+    cmd: 'g++',
+    args: ['-c'],
+    cwd: '/workspace',
+    vfs,
+    toolchain: mockToolchain,
+    mode: 'cpp',
+    write: (msg) => { writeOutput += msg; }
+  });
+  assert.strictEqual(errCode, 1);
+  assert.strictEqual(writeOutput.includes('g++: fatal error: no input files'), true, 'Error message must reflect g++');
+  console.log('✓ executeGccCommand supports g++ and clang++ with automatic C++ mode');
+}
+
 // Test 5: WasmToolchain syncFileToMemfs initializes when uninitialized
 {
   const toolchain = new WasmToolchain();

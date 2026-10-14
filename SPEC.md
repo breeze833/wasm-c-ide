@@ -68,7 +68,7 @@ The goal of this project is to build an installation-free, zero-backend, multi-f
 - **Terminal Emulator**: `xterm.js` with `xterm-addon-fit`.
 - **Shell**: Dedicated Web Worker running interactive POSIX-compatible shell.
   - **Built-in CLI Utilities**: `sh`, `ls`, `cd`, `pwd`, `cat`, `rm`, `mkdir`, `cp`, `mv`, `clear`, `echo` (with `>` and `>>` output redirection), `which`, `pushd`, `popd`, and `dirs`.
-  - **External Toolchain Dispatch**: External commands (`gcc`, `clang`, `wasm-ld`, `make`, `./a.out` or `./*`) are delegated to Wasm toolchain and runtime worker execution sandboxes.
+  - **External Toolchain Dispatch**: External commands (`gcc`, `clang`, `g++`, `clang++`, `wasm-ld`, `make`, `./a.out` or `./*`) are delegated to Wasm toolchain and runtime worker execution sandboxes.
   - **Interactive Features**: Interactive prompt (`$ ` with cwd display), command history (Up/Down arrows), autocompletion (Tab), line editing, and ANSI colors.
   - **Directory Stack & Navigation**:
     - `pushd <dir>`: Saves current working directory onto stack and navigates to target.
@@ -101,14 +101,14 @@ The goal of this project is to build an installation-free, zero-backend, multi-f
   - GUI action buttons (Compile, Build, Run, Stop) **MUST NOT** invoke hidden internal APIs.
   - Action buttons dynamically construct shell command sequences and inject them directly into `xterm.js` via `terminal.injectCommand(cmd)`.
   - **Directory Stack Preservation**: Because the student may be navigating arbitrary directories in the shell (e.g. `src/` or `/usr/include`), UI action buttons MUST transparently switch to `/workspace` and restore the user's directory upon completion using the directory stack:
-    - **Compile**: `pushd . && cd /workspace && gcc -Iinclude -Wall -c <relPath> -o <objPath>; popd`
+    - **Compile**: `pushd . && cd /workspace && gcc -Iinclude -Wall -c <relPath> -o <objPath>; popd` (or `g++` when active project is in C++ mode)
     - **Build**: `pushd . && cd /workspace && make; popd` (or `pushd . && cd /workspace && sh build.sh; popd`)
     - **Run**: `pushd . && cd /workspace && ./a.out; popd`
   - The `; popd` delimiter ensures the user's working directory is always restored even when compilation or program execution fails with a non-zero exit code.
 
 ### 3.3 C/C++ Toolchain & Sysroot
 - **Prebuilt Binaries**: Open-source prebuilt WebAssembly binaries are utilized for Clang, `wasm-ld`, Make, and BusyBox.
-- **Compiler**: Clang / LLVM Wasm build mapped to commands `gcc` and `clang`.
+- **Compiler**: Clang / LLVM Wasm build mapped to commands `gcc`, `clang`, `g++`, and `clang++`. In C++ mode or when invoked via `g++` / `clang++`, C++ compilation flags and `libc++` linkage are automatically selected.
 - **Linker**: `wasm-ld` mapped to handle object linking.
 - **Sysroot & Standard Libraries**:
   - Bundles minimal `wasi-libc` (`libc.a`, `crt1.o`, Musl libc headers under `/usr/include`, static libraries under `/usr/lib`).
@@ -120,17 +120,17 @@ The goal of this project is to build an installation-free, zero-backend, multi-f
   - Missing-file probes safely return without trapping.
 - **Language Dialects**:
   - **Pure C Mode**: Automatically injects `-x c -std=c11 -pedantic-errors -Wall -Wextra`. Forbids C++ syntax extensions and disallows `#include <iostream>`, `<vector>`, etc.
-  - **C++ Mode**: Injects `-x c++ -std=c++17 -Wall -Wextra` linking against `libc++`.
+  - **C++ Mode**: Injects `-x c++ -std=c++17 -Wall -Wextra` linking against `libc++`. Preferred wrapper command is `g++`.
 - **Include Paths**: Default configuration includes `-I/workspace/include -I/workspace`. System headers resolve to `/usr/include` and `/usr/include/c++/v1`.
 
 ### 3.4 Build Systems (Dual-Track Mechanism)
 Users can select between two build strategies in the Project Settings UI:
 
 1. **Default Track: Shell Script (`build.sh`)**
-   - The UI generates `/workspace/build.sh` reflecting compiler flags, source files, and output paths.
+   - The UI generates `/workspace/build.sh` reflecting compiler command (`gcc` in Pure C mode, `g++` in C++ mode), compiler flags, source files, and output paths.
    - Triggering "Build" injects `pushd . && cd /workspace && sh build.sh; popd` to the terminal.
 2. **Alternative Track: Makefile & Incremental Make**
-   - The UI generates a standard `/workspace/Makefile` defining explicit targets (`all`, `clean`, `%.o: %.c`).
+   - The UI generates a standard `/workspace/Makefile` defining explicit targets (`all`, `clean`, `%.o: %.c` or `%.o: %.cpp`) using `CC = gcc` in Pure C mode and `CXX = g++` in C++ mode.
    - Incremental Makefile runner evaluates file modification timestamps (`mtime`) to rebuild only stale prerequisites.
    - Triggering "Build" injects `pushd . && cd /workspace && make; popd` to the terminal.
 
@@ -153,7 +153,7 @@ Users can select between two build strategies in the Project Settings UI:
   - `/usr/include`: Read-only sysroot standard C and C++ headers.
   - `/usr/lib`: Read-only Musl/libc/libc++ static runtime archives (`crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libm.a`, `libpthread.a`).
   - `/bin`: Read-only POSIX utilities (`sh`, `ls`, `cat`, `rm`, `mkdir`, `cp`, `mv`, `pwd`, `clear`, `echo`, `pushd`, `popd`, `dirs`).
-  - `/usr/bin`: Read-only toolchain binaries (`gcc`, `clang`, `make`, `wasm-ld`).
+  - `/usr/bin`: Read-only toolchain binaries (`gcc`, `clang`, `g++`, `clang++`, `make`, `wasm-ld`).
 - **File System Operations**:
   - `rename(oldPath, newPath)`: Supports directory target resolution (moving into existing destination folder), atomic replacement when overwriting existing files, and circular directory protection.
   - `writeFile(path, content)`: Protected against replacing existing directory nodes.

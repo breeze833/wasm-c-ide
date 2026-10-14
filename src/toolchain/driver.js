@@ -72,10 +72,12 @@ export async function executeGccCommand({
     }
   }
 
+  const effectiveMode = (cmd === 'g++' || cmd === 'clang++') ? 'cpp' : (mode || 'c');
+
   // Compile-only mode: gcc -c src/calc.c -o build/calc.o
   if (compileOnly) {
     if (sources.length === 0) {
-      write('gcc: fatal error: no input files\r\n');
+      write(`${cmd || 'gcc'}: fatal error: no input files\r\n`);
       return 1;
     }
 
@@ -90,7 +92,7 @@ export async function executeGccCommand({
       const exitCode = await toolchain.compile(
         srcResolved,
         objResolved,
-        mode,
+        effectiveMode,
         flags
       );
 
@@ -118,7 +120,7 @@ export async function executeGccCommand({
     const exitCode = await toolchain.compile(
       srcResolved,
       objResolved,
-      mode,
+      effectiveMode,
       flags
     );
 
@@ -135,7 +137,7 @@ export async function executeGccCommand({
 
   // Link step
   if (generatedObjects.length === 0) {
-    write('gcc: fatal error: no input files\r\n');
+    write(`${cmd || 'gcc'}: fatal error: no input files\r\n`);
     return 1;
   }
 

@@ -271,14 +271,15 @@ export class App {
       }
     };
 
-    if (cmd === 'gcc' || cmd === 'clang') {
+    if (cmd === 'gcc' || cmd === 'clang' || cmd === 'g++' || cmd === 'clang++') {
+      const effectiveMode = (cmd === 'g++' || cmd === 'clang++') ? 'cpp' : this.mode;
       const exitCode = await executeGccCommand({
         cmd,
         args,
         cwd,
         vfs: this.vfs,
         toolchain: this.toolchain,
-        mode: this.mode,
+        mode: effectiveMode,
         write: writeFn,
       });
 
@@ -318,18 +319,21 @@ export class App {
           } else if (
             trimmed.startsWith('gcc ') ||
             trimmed.startsWith('clang ') ||
+            trimmed.startsWith('g++ ') ||
             trimmed.startsWith('clang++ ') ||
-            trimmed.startsWith('$(CC)')
+            trimmed.startsWith('$(CC)') ||
+            trimmed.startsWith('$(CXX)')
           ) {
             const subArgs = trimmed.split(/\s+/);
             const subCmd = subArgs.shift();
+            const subMode = (subCmd === 'g++' || subCmd === 'clang++' || subCmd === '$(CXX)') ? 'cpp' : this.mode;
             await executeGccCommand({
               cmd: subCmd,
               args: subArgs,
               cwd: cwd || '/workspace',
               vfs: this.vfs,
               toolchain: this.toolchain,
-              mode: this.mode,
+              mode: subMode,
               write: writeFn,
             });
             if (this.fileTreeUI) this.fileTreeUI.render();
@@ -414,12 +418,18 @@ export class App {
     if (modeSelect) {
       modeSelect.addEventListener('change', (e) => {
         this.mode = e.target.value;
+        if (this.settingsModal) {
+          this.settingsModal.config.mode = this.mode;
+        }
       });
     }
 
     if (buildSystemSelect) {
       buildSystemSelect.addEventListener('change', (e) => {
         this.buildSystem = e.target.value;
+        if (this.settingsModal) {
+          this.settingsModal.config.buildSystem = this.buildSystem;
+        }
       });
     }
 
@@ -459,9 +469,10 @@ export class App {
 
         const baseName = relPath.split('/').pop().replace(/\.(c|cpp)$/, '');
         const objPath = `build/${baseName}.o`;
+        const compiler = this.mode === 'cpp' ? 'g++' : 'gcc';
 
         // Strict command bridge: Type into xterm with directory stack preservation
-        const cmd = `pushd . && cd /workspace && gcc -Iinclude -Wall -c ${relPath} -o ${objPath}; popd`;
+        const cmd = `pushd . && cd /workspace && ${compiler} -Iinclude -Wall -c ${relPath} -o ${objPath}; popd`;
         this.terminal.injectCommand(cmd);
       });
     }

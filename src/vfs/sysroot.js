@@ -567,7 +567,9 @@ export const BIN_COMMANDS = [
 
 export const USR_BIN_COMMANDS = [
   'gcc',
+  'g++',
   'clang',
+  'clang++',
   'make',
   'wasm-ld',
 ];

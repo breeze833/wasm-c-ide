@@ -96,7 +96,7 @@ export class SettingsModal {
   regenerateBuildFiles() {
     const incFlags = this.config.includePaths.map(p => `-I${p}`).join(' ');
     const extraFlags = this.config.compilerFlags.join(' ');
-    const compiler = this.config.mode === 'cpp' ? 'clang++' : 'gcc';
+    const compiler = this.config.mode === 'cpp' ? 'g++' : 'gcc';
 
     // Scan workspace for C/C++ source files
     let sources = [];
