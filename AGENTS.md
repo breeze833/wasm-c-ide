@@ -16,6 +16,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 
 ## 2. Directory Structure & Conventions
 
+```
 /
 ├── SPEC.md                    # Technical specification & architectural ground truth
 ├── AGENTS.md                  # Agent operating protocols (this file)
@@ -66,6 +67,7 @@ You are an autonomous senior systems and web engineer implementing the project s
     ├── toolchain.test.js      # Toolchain driver, MemFS directory, and libc library tests
     ├── vfs.test.js            # VFS hierarchy, permissions, and zip round-trip tests
     └── zoom.test.js           # Editor & terminal font zoom, clamping, and persistence tests
+```
 
 ---
 
