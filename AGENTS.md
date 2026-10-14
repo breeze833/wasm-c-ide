@@ -51,7 +51,9 @@ You are an autonomous senior systems and web engineer implementing the project s
 │       ├── runtime.worker.js  # WASI host executing user binaries with Atomics stdin
 │       └── shell.worker.js    # Interactive POSIX shell worker (pushd/popd, globs, mv/cp)
 ├── public/
-│   ├── coi-serviceworker.js   # Cross-origin isolation shim for GitHub Pages
+│   ├── coi-serviceworker.js   # Unified cross-origin isolation and CacheStorage offline worker
+│   ├── manifest.webmanifest   # Web App Manifest for PWA installation
+│   ├── icons/                 # PWA application icons (192, 512, svg)
 │   └── sysroot/
 │       ├── wasm/              # Prebuilt clang.wasm, lld.wasm, memfs.wasm, sysroot.tar
 │       └── include/           # Minimal fallback libc headers
@@ -59,8 +61,10 @@ You are an autonomous senior systems and web engineer implementing the project s
     ├── make.test.js           # Makefile parsing and incremental build tests
     ├── runtime.test.js        # SharedArrayBuffer Atomics protocol tests
     ├── shell.test.js          # Shell argument parsing, globs, pushd/popd, and mv/cp tests
+    ├── sw.test.js             # Service Worker, PWA manifest, and offline COOP/COEP tests
     ├── toolchain.test.js      # Toolchain driver, MemFS directory, and libc library tests
-    └── vfs.test.js            # VFS hierarchy, permissions, and zip round-trip tests
+    ├── vfs.test.js            # VFS hierarchy, permissions, and zip round-trip tests
+    └── zoom.test.js           # Editor & terminal font zoom, clamping, and persistence tests
 
 ---
 
@@ -118,6 +122,13 @@ Agents executing this project should proceed milestone-by-milestone:
 - Generate `/workspace/Makefile` and integrate lightweight `make.wasm`.
 - Link UI "Build" button to inject either `sh build.sh` or `make`.
 
+### Milestone 8: Usability Enhancements, Sub-Path Hosting & Production Packaging
+- Implement independent pane font zoom controls (+, -, reset label) and shortcuts (`Ctrl+=`, `Ctrl+-`, `Ctrl+0`) for Monaco and xterm.js with clamping (9px–36px) and `localStorage` persistence.
+- Implement seamless sub-path deployment (`base: process.env.BASE_URL || './'`) and relative asset paths for manifest, icons, service worker, and Wasm assets.
+- Refactor toolchain compilation to use async `WebAssembly.instantiate` / `compile` bypassing the 8MB main-thread limit.
+- Set up PWA Web App Manifest, in-app install prompt (`beforeinstallprompt`), and Cache-First offline caching in `coi-serviceworker.js`.
+- Implement production packaging (`npm run pack` generating `wasm-c-ide.zip`) and GitHub Actions CI/CD workflow for automated tests, GitHub Pages deployment, and GitHub Releases publication.
+
 ---
 
 ## 4. Verification & Testing Checklist
@@ -134,4 +145,10 @@ Before marking any task complete, agents must verify:
 | **Infinite Loop Interruption** | `while(1);` can be interrupted via `Ctrl+C` or UI Stop button; terminal returns to prompt. |
 | **Refresh Persistence** | Modifying files, closing tab, and reopening keeps files intact via IndexedDB. |
 | **Zip Round-Trip** | Exporting project to zip and re-importing preserves directory hierarchy. |
+| **Font Zoom & Clamping** | Clicking +/- or pressing Ctrl+=/- zooms font size within 9px–36px limits; clicking label resets. |
+| **Font Zoom Persistence** | Reloading page preserves configured font size for editor and terminal via localStorage. |
+| **Sub-Path Asset Resolution** | Serving application under a sub-path resolves all assets without broken root `/` requests. |
+| **Async Wasm Loading (8MB Limit)** | Clang (~20MB+) compiles and instantiates asynchronously without triggering main-thread synchronous size errors. |
+| **Offline PWA Installation** | Application provides valid manifest, registers service worker with COOP/COEP headers, and operates offline. |
+| **Portable Zip Distribution** | `npm run pack` creates a standalone `wasm-c-ide.zip` that runs in any static web server document root. |
 

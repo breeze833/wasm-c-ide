@@ -15,12 +15,12 @@ The goal of this project is to build an installation-free, zero-backend, multi-f
 |                               Browser UI                                |
 |  +---------------------------+  +------------------------------------+  |
 |  | Multi-tab Code Editor     |  | Project Settings & Build Action Bar|  |
-|  | (Monaco Editor)           |  | (Save / Compile / Build / Run)     |  |
+|  | (Monaco Editor & Zoom +/-)|  | (Save/Compile/Build/Run/Install PWA|  |
 |  +-------------+-------------+  +-----------------+------------------+  |
 |                |                                  | (Transparent        |
 |                v (Explicit Save / Dirty Marker)   v  pushd/cd/popd cmd) |
 |  +-------------+----------------------------------+------------------+  |
-|  |                     xterm.js Virtual Terminal                     |  |
+|  |               xterm.js Virtual Terminal & Zoom (+/-)              |  |
 |  +------------------------------------+------------------------------+  |
 +---------------------------------------|---------------------------------+
                                         | (Pty Stdin / Stdout stream)
@@ -35,7 +35,7 @@ The goal of this project is to build an installation-free, zero-backend, multi-f
 |                | (executes commands)                  |                 |
 |                v                                      v                 |
 |  +-------------------------------------------------------------------+  |
-|  |  Clang / LLD / Make Wasm Toolchain (with MemFS synchronization)   |  |
+|  |  Clang / LLD / Make Wasm Toolchain (Async instantiate / MemFS sync)|  |
 |  +------------------------------------+------------------------------+  |
 |                                       |                                 |
 |                                       v                                 |
@@ -45,6 +45,8 @@ The goal of this project is to build an installation-free, zero-backend, multi-f
 |  | - /usr/include & /usr/lib (Read-Only Headers and Static Libraries)|  |
 |  | - /bin & /usr/bin (Read-Only POSIX and Toolchain Binaries)        |  |
 |  +-------------------------------------------------------------------+  |
++-------------------------------------------------------------------------+
+| Offline Engine: Unified PWA Service Worker (COOP/COEP & CacheStorage)   |
 +-------------------------------------------------------------------------+
 
 ---
@@ -164,21 +166,67 @@ Users can select between two build strategies in the Project Settings UI:
   - Supports desktop and mobile home screen installation via `#btn-install` and `beforeinstallprompt`.
   - Enables 100% offline development: when disconnected, cached HTML, JS/CSS bundles, sysroot headers, and Wasm binaries (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar`) execute locally without network access.
 
+### 3.8 Milestone 8: Usability Enhancements, Sub-Path Hosting & Production Delivery
+
+#### 3.8.1 Independent Pane Font Zoom & Scaling
+- **Multi-Pane Independence**: Monaco Editor and `xterm.js` terminal maintain isolated font scaling configurations rather than a shared global IDE zoom.
+- **Header Control Bar Integration**:
+  - **Editor**: Zoom controls are positioned on the right side of `.editor-header-bar` (`.pane-zoom-controls`) adjacent to editor tabs.
+  - **Terminal**: Zoom controls are embedded in `.terminal-header` within `.terminal-actions` alongside the clear terminal button (`#btn-clear-term`).
+- **Interactive UI Controls**:
+  - **Zoom In (`+`)**: Buttons `#btn-editor-zoom-in` and `#btn-term-zoom-in` increase font size by 1px.
+  - **Zoom Out (`-`)**: Buttons `#btn-editor-zoom-out` and `#btn-term-zoom-out` decrease font size by 1px.
+  - **Font Size Display & Reset**: Current size is rendered inside `#editor-font-size-label` and `#term-font-size-label` (e.g., `14px`, `13px`). Clicking the label resets the pane to its default font size (14px for Monaco, 13px for xterm.js).
+- **Keyboard Shortcuts**:
+  - **Zoom In**: `Ctrl+=` / `Cmd+=` (including `+` and `NumpadAdd`).
+  - **Zoom Out**: `Ctrl+-` / `Cmd+-` (including `NumpadSubtract`).
+  - **Reset Zoom**: `Ctrl+0` / `Cmd+0`.
+  - Terminal shortcuts are captured via `term.attachCustomKeyEventHandler` to override browser defaults and xterm.js interception.
+- **Clamping Boundaries**: Font sizes are strictly bounded between `9px` (minimum readability) and `36px` (maximum upper bound). Values are rounded to integers.
+- **LocalStorage Persistence**: Font size selections persist across sessions using keys `wasm_ide_editor_font_size` and `wasm_ide_term_font_size`.
+- **Dynamic Geometry Synchronization**: Font changes in terminal dynamically trigger `fitAddon.fit()` and notify listeners; Monaco updates via `editor.updateOptions({ fontSize })`.
+
+#### 3.8.2 Sub-Path Deployment & Relative Asset Resolution
+- **Zero-Config Sub-Path Portability**: The application supports root (`/`) or arbitrary sub-path deployments (e.g., `https://<owner>.github.io/<repo>/` or reverse-proxied paths like `/cpp-ide/`) without code modification.
+- **Base Configuration**: Vite build configuration sets `base: process.env.BASE_URL || './'`.
+- **Relative Resource Addressing**:
+  - Script and stylesheet links in `index.html` resolve relatively (`./src/style.css`, `./src/main.js`).
+  - Web App Manifest specifies `start_url: './'` and `scope: './'`.
+  - Toolchain and Sysroot asset fetches (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar`) dynamically calculate the root path based on base paths rather than hardcoded `/sysroot/wasm/...`.
+
+#### 3.8.3 Asynchronous Toolchain WebAssembly Instantiation
+- **V8 / Chromium 8MB Main-Thread Limit Mitigation**: Modern browser engines (e.g., Chromium / V8) reject synchronous WebAssembly compilation (`new WebAssembly.Module()` or `new WebAssembly.Instance()`) on the main thread if the buffer exceeds 8MB.
+- **Asynchronous Pipeline**:
+  - Clang (~20MB+), LLD, and MemFS are fetched and instantiated using `WebAssembly.instantiate(buffer, imports)` and `WebAssembly.compile(buf)` asynchronously.
+  - `MemFS.create(memfsBuffer, hostWrite)` and `AppInstance.create(module, memfs, name, ...args)` provide async factory initializers.
+  - Background pre-warming (`toolchain.init()`) begins on application load without freezing UI interactivity.
+
+#### 3.8.4 Production CI/CD Pipeline & Automated Release Packaging
+- **Automated Continuous Integration & Deployment**:
+  - GitHub Actions workflow (`.github/workflows/deploy.yml`) triggers on push to `main`.
+  - Verifies all unit test suites (`npm test`).
+  - Builds the production bundle (`npm run build`).
+  - Deploys static build to GitHub Pages via `actions/deploy-pages`.
+- **Portable Offline Zip Packaging**:
+  - Dedicated script `npm run pack` builds and packages `dist/` into `wasm-c-ide.zip`.
+  - CI workflow uploads the zip archive as a GitHub Actions artifact and publishes it to the repository's **Latest Release** (`softprops/action-gh-release@v2`), allowing users to run the IDE fully offline with any local web server.
+
 ---
 
 ## 4. UI Layout & User Experience
 +---------------------------------------------------------------------------+
 | [Header] App Title | Mode: [Pure C | C++] | Build System: [sh | make]     |
 | [Actions] [💾 Save] [⚙ Compile] [🔨 Build] [▶ Run] [⏹ Stop] | [⚙ Settings] |
+|                                                    [📲 Install PWA (opt)] |
 +-----------------------+---------------------------------------------------+
-| Workspace File Tree   | Editor Tabs: [main.c *] [calc.c] [calc.h]         |
+| Workspace File Tree   | Editor Tabs: [main.c *] [calc.c]      [- 14px +]  |
 | [📄+] [📁+] [📥] [📤]   +---------------------------------------------------+
 | - src/                | 1 | #include <stdio.h>                            |
 |   - main.c            | 2 | #include "calc.h"                             |
 | - include/            | 3 | int main() { ... }                            |
 |   - calc.h            |                                                   |
 | - build/              +---------------------------------------------------+
-|   - calc.o            | Integrated Terminal (xterm.js)                    |
+|   - calc.o            | Integrated Terminal (xterm.js)        [- 13px +]  |
 |   - main.o            | ide:~$ pushd . && cd /workspace && gcc ...; popd  |
 | - a.out               | ide:~$ ./a.out                                    |
 | - build.sh / Makefile | Enter number: 42_                                 |
@@ -205,6 +253,14 @@ Users can select between two build strategies in the Project Settings UI:
    - **Build**: Primary blue (`#0e639c`)
    - **Run**: Success green (`#388a34`)
    - **Stop**: Danger red (`#c72e2e`)
+4. **Pane Font Zoom Widgets**:
+   - Visual `+` / `-` buttons and clickable font size label displayed in editor tab bar (`.pane-zoom-controls`) and terminal header (`.terminal-actions`).
+   - Clicking size label resets to default size (`14px` for editor, `13px` for terminal).
+5. **Progressive Web App (PWA) Install Prompt**:
+   - In-app install button (`#btn-install`) conditionally rendered in the top header upon receiving browser `beforeinstallprompt` event.
+   - Disappears upon successful installation (`appinstalled` event).
+6. **Draggable Pane Splitter**:
+   - Draggable horizontal separator (`#split-resizer`) between editor and terminal permitting dynamic vertical pane height adjustment.
 
 ---
 
@@ -212,4 +268,7 @@ Users can select between two build strategies in the Project Settings UI:
 - **Bundle Size Optimization**: Toolchain and assets must be lazy-loaded with clear progress indicators during initial initialization.
 - **Clean Browser Compatibility**: Tested and operable on recent Chromium, Firefox, and Safari (Safari 15.2+ supporting `SharedArrayBuffer`).
 - **No Remote Telemetry**: Strict local client execution; zero remote code telemetry or cloud dependencies.
+- **Sub-Path Hosting Compatibility**: Ready for zero-config sub-directory hosting without hardcoded absolute URLs.
+- **Main-Thread Asynchronous Wasm Compilation**: Zero synchronous instantiation of Wasm modules >8MB on the main thread, ensuring compliance with browser performance constraints.
+- **100% Offline Autonomy**: Full offline PWA execution with Cache-First Service Worker and offline COOP/COEP isolation injection.
 
