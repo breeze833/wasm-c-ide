@@ -425,6 +425,10 @@ const builtins = {
     if (args.length === 0) {
       if (currentStdin !== null) {
         write(currentStdin);
+      } else {
+        await readInteractiveStdin((line) => {
+          write(line);
+        });
       }
       return 0;
     }
@@ -433,6 +437,10 @@ const builtins = {
       if (arg === '-') {
         if (currentStdin !== null) {
           write(currentStdin);
+        } else {
+          await readInteractiveStdin((line) => {
+            write(line);
+          });
         }
         continue;
       }
@@ -1017,9 +1025,92 @@ async function executeCommandLine(commandStr) {
   }
 }
 
+let activeStdinReader = null;
+
+function readInteractiveStdin(onLine) {
+  return new Promise((resolve, reject) => {
+    activeStdinReader = {
+      currentLine: '',
+      allText: '',
+      onLine,
+      resolve: (val) => {
+        activeStdinReader = null;
+        resolve(val);
+      },
+      reject: (err) => {
+        activeStdinReader = null;
+        reject(err);
+      },
+    };
+  });
+}
+
+function handleInteractiveStdinKey(key) {
+  if (!activeStdinReader) return;
+
+  for (let i = 0; i < key.length; i++) {
+    if (!activeStdinReader) return;
+    const ch = key[i];
+
+    // Ctrl+C
+    if (ch === '\x03') {
+      self.postMessage({ type: 'term_write', data: '^C\r\n' });
+      activeStdinReader.reject(new Error('Interrupted'));
+      return;
+    }
+
+    // Ctrl+D (EOF)
+    if (ch === '\x04') {
+      if (activeStdinReader.currentLine.length > 0) {
+        const line = activeStdinReader.currentLine;
+        activeStdinReader.currentLine = '';
+        activeStdinReader.allText += line;
+        if (activeStdinReader.onLine) {
+          activeStdinReader.onLine(line);
+        }
+      } else {
+        activeStdinReader.resolve(activeStdinReader.allText);
+      }
+      return;
+    }
+
+    // Enter
+    if (ch === '\r' || ch === '\n') {
+      self.postMessage({ type: 'term_write', data: '\r\n' });
+      const lineWithNl = activeStdinReader.currentLine + '\n';
+      activeStdinReader.currentLine = '';
+      activeStdinReader.allText += lineWithNl;
+      if (activeStdinReader.onLine) {
+        activeStdinReader.onLine(lineWithNl);
+      }
+      continue;
+    }
+
+    // Backspace
+    if (ch === '\x7f' || ch === '\x08') {
+      if (activeStdinReader.currentLine.length > 0) {
+        activeStdinReader.currentLine = activeStdinReader.currentLine.slice(0, -1);
+        self.postMessage({ type: 'term_write', data: '\b \b' });
+      }
+      continue;
+    }
+
+    // Printable characters
+    if (ch >= ' ') {
+      activeStdinReader.currentLine += ch;
+      self.postMessage({ type: 'term_write', data: ch });
+    }
+  }
+}
+
 // Input key handler
 async function handleKey(key) {
-  if (isExecuting) return;
+  if (isExecuting) {
+    if (activeStdinReader) {
+      handleInteractiveStdinKey(key);
+    }
+    return;
+  }
 
   // Enter
   if (key === '\r' || key === '\n') {
@@ -1171,6 +1262,10 @@ self.onmessage = async (event) => {
   }
 
   if (msg.type === 'interrupt') {
+    if (activeStdinReader) {
+      activeStdinReader.reject(new Error('Interrupted'));
+      activeStdinReader = null;
+    }
     isExecuting = false;
     writeln('\r\n\x1b[31m[Process interrupted]\x1b[0m');
     showPrompt();

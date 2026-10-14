@@ -205,6 +205,79 @@ function parseStageRedirections(stageTokens) {
     }
   }
 
+  let activeStdinReader = null;
+
+  function readInteractiveStdin(onLine) {
+    return new Promise((resolve, reject) => {
+      activeStdinReader = {
+        currentLine: '',
+        allText: '',
+        onLine,
+        resolve: (val) => {
+          activeStdinReader = null;
+          resolve(val);
+        },
+        reject: (err) => {
+          activeStdinReader = null;
+          reject(err);
+        },
+      };
+    });
+  }
+
+  function handleInteractiveStdinKey(key) {
+    if (!activeStdinReader) return;
+
+    for (let i = 0; i < key.length; i++) {
+      if (!activeStdinReader) return;
+      const ch = key[i];
+
+      if (ch === '\x03') {
+        terminalOutput += '^C\r\n';
+        activeStdinReader.reject(new Error('Interrupted'));
+        return;
+      }
+
+      if (ch === '\x04') {
+        if (activeStdinReader.currentLine.length > 0) {
+          const line = activeStdinReader.currentLine;
+          activeStdinReader.currentLine = '';
+          activeStdinReader.allText += line;
+          if (activeStdinReader.onLine) {
+            activeStdinReader.onLine(line);
+          }
+        } else {
+          activeStdinReader.resolve(activeStdinReader.allText);
+        }
+        return;
+      }
+
+      if (ch === '\r' || ch === '\n') {
+        terminalOutput += '\r\n';
+        const lineWithNl = activeStdinReader.currentLine + '\n';
+        activeStdinReader.currentLine = '';
+        activeStdinReader.allText += lineWithNl;
+        if (activeStdinReader.onLine) {
+          activeStdinReader.onLine(lineWithNl);
+        }
+        continue;
+      }
+
+      if (ch === '\x7f' || ch === '\x08') {
+        if (activeStdinReader.currentLine.length > 0) {
+          activeStdinReader.currentLine = activeStdinReader.currentLine.slice(0, -1);
+          terminalOutput += '\b \b';
+        }
+        continue;
+      }
+
+      if (ch >= ' ') {
+        activeStdinReader.currentLine += ch;
+        terminalOutput += ch;
+      }
+    }
+  }
+
   const builtins = {
     echo: async (args) => {
       writeln(args.join(' '));
@@ -214,12 +287,22 @@ function parseStageRedirections(stageTokens) {
       if (args.length === 0) {
         if (currentStdin !== null) {
           write(currentStdin);
+        } else {
+          await readInteractiveStdin((line) => {
+            write(line);
+          });
         }
         return 0;
       }
       for (const arg of args) {
         if (arg === '-') {
-          if (currentStdin !== null) write(currentStdin);
+          if (currentStdin !== null) {
+            write(currentStdin);
+          } else {
+            await readInteractiveStdin((line) => {
+              write(line);
+            });
+          }
           continue;
         }
         const target = resolvePath(arg);
@@ -361,6 +444,37 @@ function parseStageRedirections(stageTokens) {
   assert.strictEqual(code, 1);
   assert.strictEqual(terminalOutput.includes('missing.txt: No such file or directory'), true);
   console.log('✓ Missing input file error handling verified');
+
+  // Subtest 4.9: Interactive cat reading until Ctrl-D
+  terminalOutput = '';
+  const catPromise = runCommandLine('cat');
+  // Simulate user typing "hello\nworld\n" and pressing Ctrl-D
+  assert.notStrictEqual(activeStdinReader, null);
+  handleInteractiveStdinKey('hello\n');
+  handleInteractiveStdinKey('world\n');
+  handleInteractiveStdinKey('\x04'); // Ctrl-D EOF
+  await catPromise;
+  assert.strictEqual(terminalOutput.includes('hello'), true);
+  assert.strictEqual(terminalOutput.includes('world'), true);
+  console.log('✓ Interactive cat reads stdin until Ctrl-D');
+
+  // Subtest 4.10: Interactive cat - reading until Ctrl-D
+  terminalOutput = '';
+  const catDashPromise = runCommandLine('cat -');
+  assert.notStrictEqual(activeStdinReader, null);
+  handleInteractiveStdinKey('dash stdin\n\x04');
+  await catDashPromise;
+  assert.strictEqual(terminalOutput.includes('dash stdin'), true);
+  console.log('✓ Interactive cat - reads stdin until Ctrl-D');
+
+  // Subtest 4.11: Interactive cat > file reading until Ctrl-D
+  terminalOutput = '';
+  const catRedirectPromise = runCommandLine('cat > /workspace/interactive.txt');
+  assert.notStrictEqual(activeStdinReader, null);
+  handleInteractiveStdinKey('Line A\nLine B\n\x04');
+  await catRedirectPromise;
+  assert.strictEqual(vfs.readFile('/workspace/interactive.txt', true), 'Line A\nLine B\n');
+  console.log('✓ Interactive cat > file writes stdin to file until Ctrl-D');
 }
 
 console.log('--- ALL SHELL PIPELINE & REDIRECTION TESTS PASSED ---');
