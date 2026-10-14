@@ -11,6 +11,7 @@ The goal of this project is to build an installation-free, zero-backend, multi-f
 ---
 
 ## 2. System Architecture
+```
 +-------------------------------------------------------------------------+
 |                               Browser UI                                |
 |  +---------------------------+  +------------------------------------+  |
@@ -48,6 +49,7 @@ The goal of this project is to build an installation-free, zero-backend, multi-f
 +-------------------------------------------------------------------------+
 | Offline Engine: Unified PWA Service Worker (COOP/COEP & CacheStorage)   |
 +-------------------------------------------------------------------------+
+```
 
 ---
 
@@ -257,6 +259,7 @@ Users can select between two build strategies in the Project Settings UI:
 ---
 
 ## 4. UI Layout & User Experience
+```
 +---------------------------------------------------------------------------+
 | [Header] App Title | Mode: [Pure C | C++] | Build System: [sh | make]     |
 | [Actions] [💾 Save] [⚙ Compile] [🔨 Build] [▶ Run] [⏹ Stop] | [⚙ Settings] |
@@ -274,6 +277,7 @@ Users can select between two build strategies in the Project Settings UI:
 | - a.out               | ide:~$ ./a.out                                    |
 | - build.sh / Makefile | Enter number: 42_                                 |
 +-----------------------+---------------------------------------------------+
+```
 
 ### UI Controls & Ergonomics:
 1. **Sidebar Action Buttons (Icon-Only with Tooltips)**:
