@@ -32,9 +32,9 @@ export class GraphicsWindowUI {
       el = document.createElement('div');
       el.id = 'graphics-window';
       el.className = 'graphics-window';
-      el.style.display = 'none';
       document.body.appendChild(el);
     }
+    el.style.display = 'none';
     this.container = el;
 
     this.container.innerHTML = `
@@ -57,7 +57,16 @@ export class GraphicsWindowUI {
     `;
 
     this.canvas = this.container.querySelector('#raylib-canvas');
-    this.ctx = this.canvas.getContext('bitmaprenderer');
+    try {
+      this.ctx = this.canvas.getContext('bitmaprenderer');
+    } catch (_) {
+      this.ctx = null;
+    }
+    if (!this.ctx && typeof this.canvas.getContext === 'function') {
+      try {
+        this.ctx = this.canvas.getContext('2d');
+      } catch (_) {}
+    }
     this.titleText = this.container.querySelector('#graphics-title-text');
     this.resBadge = this.container.querySelector('#graphics-res-badge');
     this.fpsBadge = this.container.querySelector('#graphics-fps-badge');
@@ -162,6 +171,17 @@ export class GraphicsWindowUI {
 
     this.show();
     this.canvas.focus();
+  }
+
+  open(width, height, title) {
+    this.initWindow(width || this.width, height || this.height, title || this.title);
+  }
+
+  isOpen() {
+    if (this.isPoppedOut && this.popupWindow && !this.popupWindow.closed) {
+      return true;
+    }
+    return Boolean(this.container && this.container.style.display !== 'none');
   }
 
   show() {
@@ -295,21 +315,34 @@ export class GraphicsWindowUI {
   renderBitmap(bitmap) {
     if (!bitmap) return;
     try {
-      if (this.isPoppedOut && this.popupCtx && this.popupCanvas) {
-        this.popupCtx.transferFromImageBitmap(bitmap);
-      } else if (this.ctx && this.canvas) {
-        this.ctx.transferFromImageBitmap(bitmap);
-      } else {
-        bitmap.close();
+      const activeCtx = (this.isPoppedOut && this.popupCtx) ? this.popupCtx : this.ctx;
+      if (activeCtx) {
+        if (typeof activeCtx.transferFromImageBitmap === 'function') {
+          activeCtx.transferFromImageBitmap(bitmap);
+          return;
+        } else if (typeof activeCtx.drawImage === 'function') {
+          activeCtx.drawImage(bitmap, 0, 0);
+          bitmap.close();
+          return;
+        }
       }
+      bitmap.close();
     } catch (_) {
       try { bitmap.close(); } catch {}
     }
+  }
+
+  renderFrame(bitmap) {
+    this.renderBitmap(bitmap);
   }
 
   updateFps(fps) {
     if (this.fpsBadge) {
       this.fpsBadge.textContent = `${Math.round(fps)} FPS`;
     }
+  }
+
+  updateFPS(fps) {
+    this.updateFps(fps);
   }
 }

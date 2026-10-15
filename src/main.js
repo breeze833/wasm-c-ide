@@ -360,14 +360,20 @@ export class App {
       return true;
     }
 
-    // Binary execution: ./a.out or executable paths
-    if (cmd === './a.out' || cmd.startsWith('./') || cmd.startsWith('/')) {
-      const resolved = cmd.startsWith('/') ? cmd : `${cwd}/${cmd.replace(/^\.\//, '')}`;
-      if (!this.vfs.exists(resolved)) {
+    // Binary execution: ./a.out, a.out, or executable paths
+    let execPath = null;
+    if (cmd === './a.out' || cmd === 'a.out' || cmd.startsWith('./') || cmd.startsWith('/')) {
+      execPath = cmd.startsWith('/') ? cmd : `${cwd}/${cmd.replace(/^\.\//, '')}`;
+    } else if (this.vfs.exists(`${cwd}/${cmd}`)) {
+      execPath = `${cwd}/${cmd}`;
+    }
+
+    if (execPath) {
+      if (!this.vfs.exists(execPath)) {
         throw new Error(`${cmd}: no such file or directory`);
       }
 
-      const wasmBytes = this.vfs.readFile(resolved, false);
+      const wasmBytes = this.vfs.readFile(execPath, false);
       const res = await this.runtimeManager.runBinary(wasmBytes, [cmd, ...args], {
         stdinBytes: stdinData,
         captureStdout: shouldCapture,
@@ -446,10 +452,10 @@ export class App {
     if (btnGraphicsWindow) {
       btnGraphicsWindow.addEventListener('click', () => {
         if (this.graphicsWindow) {
-          if (this.graphicsWindow.container && this.graphicsWindow.container.style.display === 'none') {
-            this.graphicsWindow.open(800, 450, 'Raylib Display');
-          } else {
+          if (this.graphicsWindow.isOpen()) {
             this.graphicsWindow.close();
+          } else {
+            this.graphicsWindow.open(800, 450, 'Raylib Display');
           }
         }
       });

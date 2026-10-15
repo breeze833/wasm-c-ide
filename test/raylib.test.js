@@ -261,4 +261,78 @@ assert.strictEqual(stdoutOutput.includes('Initializing Raylib window'), true);
 assert.strictEqual(stdoutOutput.includes('Window closed successfully'), true);
 console.log('✓ Runtime execution with WASI Preview 1 (path_open, getcwd, etc.) verified');
 
+// Test 7: GraphicsWindowUI lifecycle, open(), isOpen(), renderFrame(), updateFPS(), close()
+const elements = new Map();
+function createMockElement(tag, id = '') {
+  const el = {
+    tagName: tag.toUpperCase(),
+    id,
+    className: '',
+    style: {},
+    classList: {
+      _classes: new Set(),
+      add(c) { this._classes.add(c); },
+      remove(c) { this._classes.delete(c); },
+      contains(c) { return this._classes.has(c); }
+    },
+    children: [],
+    innerHTML: '',
+    textContent: '',
+    addEventListener() {},
+    removeEventListener() {},
+    querySelector(sel) {
+      if (sel.startsWith('#')) {
+        const targetId = sel.slice(1);
+        if (!elements.has(targetId)) {
+          elements.set(targetId, createMockElement('div', targetId));
+        }
+        return elements.get(targetId);
+      }
+      return createMockElement('div');
+    },
+    getContext(type) {
+      return {
+        transferFromImageBitmap() {},
+        drawImage() {}
+      };
+    },
+    focus() {}
+  };
+  if (id) elements.set(id, el);
+  return el;
+}
+
+const mockDoc = {
+  getElementById(id) {
+    if (!elements.has(id)) {
+      elements.set(id, createMockElement('div', id));
+    }
+    return elements.get(id);
+  },
+  createElement(tag) {
+    return createMockElement(tag);
+  },
+  body: createMockElement('body')
+};
+
+globalThis.document = mockDoc;
+const { GraphicsWindowUI } = await import('../src/components/graphics-window.js');
+const gw = new GraphicsWindowUI();
+assert.strictEqual(gw.isOpen(), false, 'Window should initially be closed');
+
+gw.open(640, 480, 'Test Game');
+assert.strictEqual(gw.isOpen(), true, 'Window should be open after open()');
+assert.strictEqual(gw.width, 640);
+assert.strictEqual(gw.height, 480);
+assert.strictEqual(gw.title, 'Test Game');
+
+gw.updateFPS(59.8);
+assert.strictEqual(gw.fpsBadge.textContent, '60 FPS');
+
+gw.renderFrame({ close() {} });
+
+gw.close();
+assert.strictEqual(gw.isOpen(), false, 'Window should be closed after close()');
+console.log('✓ GraphicsWindowUI open, isOpen, renderFrame, updateFPS, and close verified');
+
 console.log('--- ALL RAYLIB TESTS PASSED ---');
