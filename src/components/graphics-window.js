@@ -158,19 +158,39 @@ export class GraphicsWindowUI {
     this.height = height || 450;
     this.title = title || 'Raylib Display';
 
-    this.canvas.width = this.width;
-    this.canvas.height = this.height;
-    this.titleText.textContent = this.title;
-    this.resBadge.textContent = `${this.width}x${this.height}`;
+    if (this.canvas) {
+      this.canvas.width = this.width;
+      this.canvas.height = this.height;
+      this.canvas.style.width = `${this.width}px`;
+      this.canvas.style.height = `${this.height}px`;
+    }
+    if (this.titleText) {
+      this.titleText.textContent = this.title;
+    }
+    if (this.resBadge) {
+      this.resBadge.textContent = `${this.width}x${this.height}`;
+    }
+
+    if (this.inputCoordinator) {
+      this.inputCoordinator.windowWidth = this.width;
+      this.inputCoordinator.windowHeight = this.height;
+      this.inputCoordinator.renderWidth = this.width;
+      this.inputCoordinator.renderHeight = this.height;
+      this.inputCoordinator.updateSharedState();
+    }
 
     if (this.popupWindow && !this.popupWindow.closed && this.popupCanvas) {
       this.popupCanvas.width = this.width;
       this.popupCanvas.height = this.height;
+      this.popupCanvas.style.width = `${this.width}px`;
+      this.popupCanvas.style.height = `${this.height}px`;
       this.popupWindow.document.title = `${this.title} (${this.width}x${this.height})`;
     }
 
     this.show();
-    this.canvas.focus();
+    if (this.canvas && typeof this.canvas.focus === 'function') {
+      this.canvas.focus();
+    }
   }
 
   open(width, height, title) {
@@ -232,8 +252,8 @@ export class GraphicsWindowUI {
   }
 
   popOut() {
-    const popWidth = Math.max(640, this.width + 32);
-    const popHeight = Math.max(480, this.height + 64);
+    const popWidth = Math.max(320, this.width + 32);
+    const popHeight = Math.max(240, this.height + 64);
 
     try {
       this.popupWindow = window.open(

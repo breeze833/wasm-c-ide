@@ -380,6 +380,10 @@ async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibShared
     importObject.raylib = new Proxy({
       ...raylibImports.raylib,
       raylib_host_init_window: (w, h, titlePtr) => {
+        if (offscreen) {
+          offscreen.width = w;
+          offscreen.height = h;
+        }
         const res = raylibImports.raylib.raylib_host_init_window(w, h, titlePtr);
         let titleStr = 'Raylib Display';
         try {

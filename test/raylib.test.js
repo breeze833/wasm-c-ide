@@ -338,7 +338,23 @@ gw.open(640, 480, 'Test Game');
 assert.strictEqual(gw.isOpen(), true, 'Window should be open after open()');
 assert.strictEqual(gw.width, 640);
 assert.strictEqual(gw.height, 480);
+assert.strictEqual(gw.canvas.width, 640);
+assert.strictEqual(gw.canvas.height, 480);
+assert.strictEqual(gw.canvas.style.width, '640px');
+assert.strictEqual(gw.canvas.style.height, '480px');
+assert.strictEqual(gw.resBadge.textContent, '640x480');
 assert.strictEqual(gw.title, 'Test Game');
+
+// Test dynamic resizing on subsequent InitWindow call with different dimensions
+gw.open(400, 300, 'Small Window');
+assert.strictEqual(gw.width, 400);
+assert.strictEqual(gw.height, 300);
+assert.strictEqual(gw.canvas.width, 400);
+assert.strictEqual(gw.canvas.height, 300);
+assert.strictEqual(gw.canvas.style.width, '400px');
+assert.strictEqual(gw.canvas.style.height, '300px');
+assert.strictEqual(gw.resBadge.textContent, '400x300');
+assert.strictEqual(gw.title, 'Small Window');
 
 gw.updateFPS(59.8);
 assert.strictEqual(gw.fpsBadge.textContent, '60 FPS');
@@ -347,6 +363,6 @@ gw.renderFrame({ close() {} });
 
 gw.close();
 assert.strictEqual(gw.isOpen(), false, 'Window should be closed after close()');
-console.log('✓ GraphicsWindowUI open, isOpen, renderFrame, updateFPS, and close verified');
+console.log('✓ GraphicsWindowUI open, isOpen, dynamic resizing, renderFrame, updateFPS, and close verified');
 
 console.log('--- ALL RAYLIB TESTS PASSED ---');

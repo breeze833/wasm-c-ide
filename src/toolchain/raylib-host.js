@@ -1075,8 +1075,8 @@ function createRaylibHost(options = {}) {
     raylib_host_init_window: (width, height, titlePtr) => {
       const title = decodeString(titlePtr);
       if (canvas) {
-        if (!canvas.width) canvas.width = width;
-        if (!canvas.height) canvas.height = height;
+        canvas.width = width;
+        canvas.height = height;
       }
       input.windowWidth = width;
       input.windowHeight = height;
