@@ -73,3 +73,30 @@ If an `HTMLCanvasElement` is transferred to a worker via `canvas.transferControl
 - The **Web Worker** creates an independent `OffscreenCanvas` (`new OffscreenCanvas(width, height)`).
 - On each frame swap, `canvas.transferToImageBitmap()` captures a GPU `ImageBitmap` and transfers it via `postMessage({ type: 'frame', bitmap }, [bitmap])` (zero-copy GPU buffer transfer).
 - The main thread immediately renders the bitmap via `ctx.transferFromImageBitmap(bitmap)`.
+
+---
+
+## 4. MemFS (`memfs.wasm`) Inode Memory Reuse on Unlink
+
+### Context & Impact
+`memfs.wasm` acts as the in-memory virtual filesystem for `clang.wasm` and `lld.wasm`.
+
+When a file inside MemFS is deleted using WASI's `path_unlink_file`, `memfs.wasm` frees the corresponding inode structure. However, upon subsequent creation (`path_open` with `O_CREAT` / write mode) at that same path, `memfs.wasm`'s internal memory allocator reuses the freed node without resetting its internal write head/offset or zeroing its buffer pointers properly.
+
+Consequently, when Clang compiles a file whose output object path was previously unlinked in MemFS:
+1. Clang writes WebAssembly object bytes into the reused node starting from a corrupted offset.
+2. The initial 4 bytes of the emitted `.o` file become `[ 136, 128, 128, 128 ]` instead of the required WebAssembly magic header `\0asm` (`[ 0, 97, 115, 109 ]`).
+3. Later invocations of `wasm-ld` fail with:
+   ```
+   wasm-ld: error: unknown file type: workspace/build/calc.o
+   ```
+4. Querying non-existent files via internal `FindNode` triggers an unreachable trap:
+   ```
+   [memfs] Assertion failed: lookup.node
+   ```
+
+### Architectural Guardrails & Resolution
+1. **Never Unlink Workspace Files in MemFS**: Workspace build files (`workspace/*.o`, `workspace/a.out`) must **not** be unlinked in `memfs.wasm` when deleted from the IDE's VFS. Clang and LLD overwrite existing inodes cleanly without memory corruption when paths are not unlinked.
+2. **Unlink Reserved Exclusively for Sysroot Modules**: `toolchain.removeFileFromMemfs` (`path_unlink_file`) is strictly reserved for unmounting global sysroot headers and libraries (such as `include/raylib.h` and `usr/lib/libraylib.a`) during mode toggles.
+3. **Safe File Lookups**: Always verify existence via `toolchain.hasFileInMemfs(path)` (checking `memfs.files.has(...)`) prior to calling `getFileFromMemfs` to prevent triggering `lookup.node` assertion traps.
+
