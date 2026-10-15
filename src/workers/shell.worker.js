@@ -702,23 +702,29 @@ const builtins = {
     write('\x1b[2J\x1b[H');
   },
 
-    sh: async (args) => {
+  sh: async (args) => {
     if (args.length === 0) {
       writeln('sh: script file required');
-      return;
+      return 1;
     }
     const scriptPath = resolvePath(args[0]);
     try {
       const scriptContent = await callHost('vfs_readFile', { path: scriptPath, asText: true });
       const lines = scriptContent.split('\n');
+      let scriptExitCode = 0;
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('#')) continue;
         writeln(`$ ${trimmed}`);
-        await executeCommandLine(trimmed);
+        const code = await executeCommandLine(trimmed);
+        if (typeof code === 'number') {
+          scriptExitCode = code;
+        }
       }
+      return scriptExitCode;
     } catch (err) {
       writeln(`sh: ${args[0]}: ${err.message}`);
+      return 1;
     }
   },
 
@@ -965,7 +971,31 @@ async function executeCommandLine(commandStr) {
       currentStdin = currentStdinData;
 
       try {
-        if (builtins[cmd] || builtins[baseCmd]) {
+        let isScript = false;
+        let scriptPathToRun = null;
+        if (cmd.startsWith('./') || cmd.startsWith('/') || cmd.endsWith('.sh')) {
+          const targetPath = resolvePath(cmd);
+          const fileExists = await callHost('vfs_exists', { path: targetPath });
+          if (fileExists) {
+            try {
+              const content = await callHost('vfs_readFile', { path: targetPath, asText: true });
+              if (content.startsWith('#!') || cmd.endsWith('.sh')) {
+                isScript = true;
+                scriptPathToRun = targetPath;
+              }
+            } catch {
+              // Ignore read errors and fall through to external execution
+            }
+          }
+        }
+
+        if (isScript && scriptPathToRun) {
+          const res = await builtins.sh([scriptPathToRun, ...args]);
+          pipelineExitCode = typeof res === 'number' ? res : 0;
+          if (shouldCapture) {
+            captured = currentStdout.data;
+          }
+        } else if (builtins[cmd] || builtins[baseCmd]) {
           const fn = builtins[cmd] || builtins[baseCmd];
           const res = await fn(args);
           pipelineExitCode = typeof res === 'number' ? res : 0;
@@ -1023,6 +1053,7 @@ async function executeCommandLine(commandStr) {
     lastExitCode = pipelineExitCode;
     prevOp = op;
   }
+  return lastExitCode;
 }
 
 let activeStdinReader = null;

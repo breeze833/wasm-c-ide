@@ -631,4 +631,108 @@ console.log('✓ parseCommandChain passed');
   console.log('✓ mv and cp directory destination variants passed');
 }
 
+// Test 14: Direct script execution (./build.sh, /workspace/test.sh, custom.sh)
+{
+  const vfs = new VFS();
+  let executedCmds = [];
+
+  const mockExecuteCommandLine = async (line) => {
+    executedCmds.push(line);
+    return 0;
+  };
+
+  const resolvePath = (p, currentCwd = '/workspace') => {
+    if (!p) return currentCwd;
+    let target = p.startsWith('/') ? p : `${currentCwd}/${p}`;
+    const parts = target.split('/').filter(Boolean);
+    const resolved = [];
+    for (const part of parts) {
+      if (part === '.') continue;
+      if (part === '..') {
+        if (resolved.length > 0) resolved.pop();
+      } else {
+        resolved.push(part);
+      }
+    }
+    return '/' + resolved.join('/');
+  };
+
+  const mockSh = async (args) => {
+    if (args.length === 0) return 1;
+    const scriptPath = resolvePath(args[0]);
+    try {
+      const scriptContent = vfs.readFile(scriptPath, true);
+      const lines = scriptContent.split('\n');
+      let code = 0;
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        code = await mockExecuteCommandLine(trimmed);
+      }
+      return code;
+    } catch {
+      return 1;
+    }
+  };
+
+  const mockDispatch = async (cmd, args, currentCwd = '/workspace') => {
+    let isScript = false;
+    let scriptPathToRun = null;
+    if (cmd.startsWith('./') || cmd.startsWith('/') || cmd.endsWith('.sh')) {
+      const targetPath = resolvePath(cmd, currentCwd);
+      const fileExists = vfs.exists(targetPath);
+      if (fileExists) {
+        try {
+          const content = vfs.readFile(targetPath, true);
+          if (content.startsWith('#!') || cmd.endsWith('.sh')) {
+            isScript = true;
+            scriptPathToRun = targetPath;
+          }
+        } catch {
+          // Fall through
+        }
+      }
+    }
+
+    if (isScript && scriptPathToRun) {
+      return await mockSh([scriptPathToRun, ...args]);
+    }
+    return 127; // command not found
+  };
+
+  // Case 1: ./build.sh with shebang
+  vfs.writeFile('/workspace/build.sh', '#!/bin/sh\ngcc src/main.c -o a.out\necho "Build done"');
+  executedCmds = [];
+  const exit1 = await mockDispatch('./build.sh', []);
+  assert.strictEqual(exit1, 0);
+  assert.deepStrictEqual(executedCmds, ['gcc src/main.c -o a.out', 'echo "Build done"']);
+
+  // Case 2: Full path /workspace/build.sh
+  executedCmds = [];
+  const exit2 = await mockDispatch('/workspace/build.sh', []);
+  assert.strictEqual(exit2, 0);
+  assert.deepStrictEqual(executedCmds, ['gcc src/main.c -o a.out', 'echo "Build done"']);
+
+  // Case 3: Script without shebang but ending in .sh
+  vfs.writeFile('/workspace/clean.sh', 'rm -rf build a.out\necho "Cleaned"');
+  executedCmds = [];
+  const exit3 = await mockDispatch('./clean.sh', []);
+  assert.strictEqual(exit3, 0);
+  assert.deepStrictEqual(executedCmds, ['rm -rf build a.out', 'echo "Cleaned"']);
+
+  // Case 4: Custom executable script without .sh extension but starting with #!
+  vfs.writeFile('/workspace/run_all', '#!/bin/sh\n./a.out\necho "Ran"');
+  executedCmds = [];
+  const exit4 = await mockDispatch('./run_all', []);
+  assert.strictEqual(exit4, 0);
+  assert.deepStrictEqual(executedCmds, ['./a.out', 'echo "Ran"']);
+
+  // Case 5: Wasm binary should NOT be detected as script
+  vfs.writeFile('/workspace/a.out', new Uint8Array([0x00, 0x61, 0x73, 0x6d]));
+  const exit5 = await mockDispatch('./a.out', []);
+  assert.strictEqual(exit5, 127, 'Wasm binary must not be dispatched as shell script');
+
+  console.log('✓ direct shell script execution (./build.sh, /path/to/script, #! shebang) passed');
+}
+
 console.log('--- ALL SHELL TESTS PASSED ---');

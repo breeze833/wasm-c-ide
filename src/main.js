@@ -374,6 +374,16 @@ export class App {
       }
 
       const wasmBytes = this.vfs.readFile(execPath, false);
+      if (
+        !wasmBytes ||
+        wasmBytes.length < 4 ||
+        wasmBytes[0] !== 0x00 ||
+        wasmBytes[1] !== 0x61 ||
+        wasmBytes[2] !== 0x73 ||
+        wasmBytes[3] !== 0x6d
+      ) {
+        throw new Error(`${cmd}: not an executable WebAssembly binary`);
+      }
       const res = await this.runtimeManager.runBinary(wasmBytes, [cmd, ...args], {
         stdinBytes: stdinData,
         captureStdout: shouldCapture,
