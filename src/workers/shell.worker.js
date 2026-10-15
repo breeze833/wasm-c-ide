@@ -1037,6 +1037,10 @@ async function executeCommandLine(commandStr) {
 
         stageInput = captured;
       } catch (err) {
+        if (err.message === 'Interrupted') {
+          pipelineExitCode = 130;
+          break;
+        }
         writeln(err.message || `${cmd}: command not found`);
         pipelineExitCode = 1;
         break;
@@ -1156,10 +1160,17 @@ async function handleKey(key) {
       try {
         await executeCommandLine(toExecute);
       } catch (err) {
-        writeln(`Error: ${err.message}`);
+        if (err.message !== 'Interrupted') {
+          writeln(`Error: ${err.message}`);
+        }
       } finally {
+        const wasExecuting = isExecuting;
         isExecuting = false;
+        if (wasExecuting) {
+          showPrompt();
+        }
       }
+      return;
     }
 
     showPrompt();
@@ -1297,8 +1308,18 @@ self.onmessage = async (event) => {
       activeStdinReader.reject(new Error('Interrupted'));
       activeStdinReader = null;
     }
-    isExecuting = false;
-    writeln('\r\n\x1b[31m[Process interrupted]\x1b[0m');
-    showPrompt();
+    for (const [id, pending] of pendingRpcs.entries()) {
+      pending.reject(new Error('Interrupted'));
+    }
+    pendingRpcs.clear();
+
+    if (isExecuting) {
+      isExecuting = false;
+      writeln('\r\n\x1b[31m[Process interrupted]\x1b[0m');
+      showPrompt();
+    } else {
+      writeln('^C');
+      showPrompt();
+    }
   }
 };

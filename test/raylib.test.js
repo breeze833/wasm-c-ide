@@ -404,4 +404,35 @@ assert.strictEqual(gw.resBadge.textContent, '450x450');
 gw.close();
 console.log('✓ GraphicsWindowUI open, isOpen, dynamic resizing, toggle dimension preservation, renderFrame, updateFPS, and close verified');
 
+// Test 9: Verify onCloseRequested sets shouldClose in InputCoordinator
+const mockCoord = new InputCoordinator({ sharedBuffer: new SharedArrayBuffer(512) });
+let closeReqCalled = false;
+const gwCloseTest = new GraphicsWindowUI({
+  onCloseRequested: () => {
+    mockCoord.shouldClose = true;
+    mockCoord.updateSharedState();
+    closeReqCalled = true;
+  }
+});
+gwCloseTest.close();
+assert.strictEqual(closeReqCalled, true, 'onCloseRequested should be invoked when window is closed');
+assert.strictEqual(mockCoord.shouldClose, true);
+assert.strictEqual(new DataView(mockCoord.sharedBuffer).getInt32(20, true), 1);
+console.log('✓ GraphicsWindowUI onCloseRequested and shouldClose update verified');
+
+// Test 10: Verify RuntimeManager.kill closes graphics window and resolves promise cleanly
+const { RuntimeManager } = await import('../src/terminal/runtime.js');
+let rmGwClosed = false;
+const rmGwMock = { close() { rmGwClosed = true; } };
+const rm = new RuntimeManager({ write() {}, writeln() {} });
+rm.setGraphicsWindow(rmGwMock);
+rm.isRunning = true;
+let settledRes = null;
+rm.currentResolve = (val) => { settledRes = val; };
+rm.kill();
+assert.strictEqual(rm.isRunning, false, 'RuntimeManager should not be running after kill()');
+assert.strictEqual(rmGwClosed, true, 'Graphics window must be closed when kill() is called');
+assert.strictEqual(settledRes, 130, 'Promise must resolve with SIGINT exitCode 130 on kill()');
+console.log('✓ RuntimeManager.kill terminates process, hides graphics window, and resolves with exitCode 130 verified');
+
 console.log('--- ALL RAYLIB TESTS PASSED ---');

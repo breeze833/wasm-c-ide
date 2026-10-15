@@ -21,6 +21,9 @@ export class RuntimeManager {
     this.isRunning = false;
     this.isWaitingForStdin = false;
     this.stdinLineBuffer = '';
+    this.currentResolve = null;
+    this.currentReject = null;
+    this.currentOptions = null;
 
     if (typeof window !== 'undefined' && window.crossOriginIsolated) {
       this.sharedBuffer = new SharedArrayBuffer(8192);
@@ -57,6 +60,10 @@ export class RuntimeManager {
       if (this.isRunning) {
         this.kill();
       }
+
+      this.currentResolve = resolve;
+      this.currentReject = reject;
+      this.currentOptions = options;
 
       this.isRunning = true;
       this.isWaitingForStdin = false;
@@ -113,30 +120,51 @@ export class RuntimeManager {
         } else if (msg.type === 'stdin_request') {
           this.isWaitingForStdin = true;
         } else if (msg.type === 'done') {
+          const res = this.currentResolve;
+          const opt = this.currentOptions;
+          this.currentResolve = null;
+          this.currentReject = null;
+          this.currentOptions = null;
           this.cleanUp();
-          if (options.captureStdout) {
-            resolve({ exitCode: msg.exitCode, stdout: capturedStdout });
-          } else {
-            resolve(msg.exitCode);
+          if (res) {
+            if (opt && opt.captureStdout) {
+              res({ exitCode: msg.exitCode, stdout: capturedStdout });
+            } else {
+              res(msg.exitCode);
+            }
           }
         } else if (msg.type === 'error') {
+          const res = this.currentResolve;
+          const opt = this.currentOptions;
+          this.currentResolve = null;
+          this.currentReject = null;
+          this.currentOptions = null;
           this.cleanUp();
           this.terminal.writeln(`\r\n\x1b[31mRuntime Error: ${msg.error}\x1b[0m`);
-          if (options.captureStdout) {
-            resolve({ exitCode: 1, stdout: capturedStdout });
-          } else {
-            resolve(1);
+          if (res) {
+            if (opt && opt.captureStdout) {
+              res({ exitCode: 1, stdout: capturedStdout });
+            } else {
+              res(1);
+            }
           }
         }
       };
 
       this.worker.onerror = (err) => {
+        const res = this.currentResolve;
+        const opt = this.currentOptions;
+        this.currentResolve = null;
+        this.currentReject = null;
+        this.currentOptions = null;
         this.cleanUp();
         this.terminal.writeln(`\r\n\x1b[31mRuntime Worker Error: ${err.message}\x1b[0m`);
-        if (options.captureStdout) {
-          resolve({ exitCode: 1, stdout: capturedStdout });
-        } else {
-          resolve(1);
+        if (res) {
+          if (opt && opt.captureStdout) {
+            res({ exitCode: 1, stdout: capturedStdout });
+          } else {
+            res(1);
+          }
         }
       };
 
@@ -250,8 +278,25 @@ export class RuntimeManager {
       Atomics.notify(this.sharedInt32, CONTROL_STATE_IDX, 1);
     }
 
+    if (this.graphicsWindow && typeof this.graphicsWindow.close === 'function') {
+      this.graphicsWindow.close();
+    }
+
+    const res = this.currentResolve;
+    const opt = this.currentOptions;
+    this.currentResolve = null;
+    this.currentReject = null;
+    this.currentOptions = null;
+
     this.cleanUp();
-    this.terminal.writeln('\r\n\x1b[31m[Process terminated]\x1b[0m');
+
+    if (res) {
+      if (opt && opt.captureStdout) {
+        res({ exitCode: 130, stdout: '' });
+      } else {
+        res(130);
+      }
+    }
   }
 
   cleanUp() {

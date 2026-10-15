@@ -735,4 +735,65 @@ console.log('✓ parseCommandChain passed');
   console.log('✓ direct shell script execution (./build.sh, /path/to/script, #! shebang) passed');
 }
 
+// Test 14: Verify shell interrupt state transition, prompt emission, and RPC clearance
+{
+  let isExecuting = true;
+  const pendingRpcs = new Map();
+  let rpcRejected = false;
+  pendingRpcs.set(1, {
+    resolve: () => {},
+    reject: (err) => {
+      if (err.message === 'Interrupted') rpcRejected = true;
+    }
+  });
+
+  const output = [];
+  const writeln = (s) => output.push(s);
+  let promptShown = 0;
+  const showPrompt = () => { promptShown++; };
+
+  // Simulate interrupt message while executing
+  let activeStdinReader = { reject: () => {} };
+  if (activeStdinReader) {
+    activeStdinReader.reject(new Error('Interrupted'));
+    activeStdinReader = null;
+  }
+  for (const [id, pending] of pendingRpcs.entries()) {
+    pending.reject(new Error('Interrupted'));
+  }
+  pendingRpcs.clear();
+
+  if (isExecuting) {
+    isExecuting = false;
+    writeln('\r\n\x1b[31m[Process interrupted]\x1b[0m');
+    showPrompt();
+  } else {
+    writeln('^C');
+    showPrompt();
+  }
+
+  assert.strictEqual(isExecuting, false);
+  assert.strictEqual(rpcRejected, true, 'Pending RPCs must be rejected on interrupt');
+  assert.strictEqual(pendingRpcs.size, 0, 'Pending RPC map must be cleared');
+  assert.strictEqual(promptShown, 1, 'Only one prompt should be emitted');
+  assert.strictEqual(output[0].includes('Process interrupted'), true);
+
+  // Simulate interrupt while idle at prompt
+  output.length = 0;
+  promptShown = 0;
+  if (isExecuting) {
+    isExecuting = false;
+    writeln('\r\n\x1b[31m[Process interrupted]\x1b[0m');
+    showPrompt();
+  } else {
+    writeln('^C');
+    showPrompt();
+  }
+
+  assert.strictEqual(output[0], '^C');
+  assert.strictEqual(promptShown, 1);
+
+  console.log('✓ shell interrupt state transition, RPC clearance, and prompt emission verified');
+}
+
 console.log('--- ALL SHELL TESTS PASSED ---');

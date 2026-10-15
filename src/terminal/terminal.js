@@ -94,6 +94,7 @@ export class TerminalManager {
       // Ctrl+C is 0x03
       if (data === '\x03') {
         this.onInterrupt();
+        return;
       }
       this.onInput(data);
     });
