@@ -468,7 +468,11 @@ export class App {
           if (buildSystemSelect) buildSystemSelect.value = newConfig.buildSystem;
           await this.syncRaylibState(Boolean(newConfig.enableRaylib));
           if (this.fileTreeUI) this.fileTreeUI.render();
-          showToast('Settings saved & build files regenerated.', 'success', 3000);
+          showToast('Settings saved.', 'success', 3000);
+        },
+        () => {
+          if (this.fileTreeUI) this.fileTreeUI.render();
+          showToast('Build scripts generated.', 'success', 3000);
         }
       );
 

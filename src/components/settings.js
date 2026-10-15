@@ -1,7 +1,7 @@
 // Project Settings Panel & Build File Generator
 
 export class SettingsModal {
-  constructor(vfs, config, onSave = () => {}) {
+  constructor(vfs, config, onSave = () => {}, onGenerateBuildFiles = () => {}) {
     this.vfs = vfs;
     this.config = {
       mode: 'c',
@@ -14,6 +14,36 @@ export class SettingsModal {
       ...config,
     };
     this.onSave = onSave;
+    this.onGenerateBuildFiles = onGenerateBuildFiles;
+  }
+
+  readFormValues(modalOverlay) {
+    if (!modalOverlay) return;
+    const mode = modalOverlay.querySelector('#setting-mode');
+    const buildSys = modalOverlay.querySelector('#setting-build-sys');
+    const raylib = modalOverlay.querySelector('#setting-raylib');
+    const includes = modalOverlay.querySelector('#setting-includes');
+    const flags = modalOverlay.querySelector('#setting-flags');
+    const target = modalOverlay.querySelector('#setting-target');
+
+    if (mode) this.config.mode = mode.value;
+    if (buildSys) this.config.buildSystem = buildSys.value;
+    if (raylib) this.config.enableRaylib = raylib.checked;
+    if (includes) {
+      this.config.includePaths = includes.value
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+    }
+    if (flags) {
+      this.config.compilerFlags = flags.value
+        .split(' ')
+        .map(s => s.trim())
+        .filter(Boolean);
+    }
+    if (target) {
+      this.config.targetName = target.value.trim() || 'a.out';
+    }
   }
 
   show() {
@@ -67,7 +97,8 @@ export class SettingsModal {
         </div>
         <div class="modal-footer">
           <button id="modal-cancel-btn" class="btn">Cancel</button>
-          <button id="modal-save-btn" class="btn btn-primary">Save & Regenerate Build Files</button>
+          <button id="modal-generate-btn" class="btn" title="Generate build.sh and Makefile based on files in workspace">Generate Build Script</button>
+          <button id="modal-save-btn" class="btn btn-primary" title="Save state and mount/unmount system files">Save</button>
         </div>
       </div>
     `;
@@ -81,24 +112,30 @@ export class SettingsModal {
     modalOverlay.querySelector('#modal-close-btn').addEventListener('click', close);
     modalOverlay.querySelector('#modal-cancel-btn').addEventListener('click', close);
 
-    modalOverlay.querySelector('#modal-save-btn').addEventListener('click', () => {
-      this.config.mode = modalOverlay.querySelector('#setting-mode').value;
-      this.config.buildSystem = modalOverlay.querySelector('#setting-build-sys').value;
-      this.config.enableRaylib = modalOverlay.querySelector('#setting-raylib').checked;
-      this.config.includePaths = modalOverlay.querySelector('#setting-includes').value
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean);
-      this.config.compilerFlags = modalOverlay.querySelector('#setting-flags').value
-        .split(' ')
-        .map(s => s.trim())
-        .filter(Boolean);
-      this.config.targetName = modalOverlay.querySelector('#setting-target').value.trim() || 'a.out';
+    const btnGenerate = modalOverlay.querySelector('#modal-generate-btn');
+    if (btnGenerate) {
+      btnGenerate.addEventListener('click', () => {
+        this.readFormValues(modalOverlay);
+        this.regenerateBuildFiles();
+        if (typeof this.onGenerateBuildFiles === 'function') {
+          this.onGenerateBuildFiles(this.config);
+        }
+        const origText = btnGenerate.textContent;
+        btnGenerate.textContent = '✓ Generated!';
+        setTimeout(() => {
+          btnGenerate.textContent = origText;
+        }, 1500);
+      });
+    }
 
-      this.regenerateBuildFiles();
-      this.onSave(this.config);
-      close();
-    });
+    const btnSave = modalOverlay.querySelector('#modal-save-btn');
+    if (btnSave) {
+      btnSave.addEventListener('click', () => {
+        this.readFormValues(modalOverlay);
+        this.onSave(this.config);
+        close();
+      });
+    }
   }
 
   regenerateBuildFiles() {
@@ -128,9 +165,15 @@ export class SettingsModal {
     // 1. Generate /workspace/build.sh
     let buildSh = `#!/bin/sh\n# Auto-generated build script\nmkdir -p build\n`;
     for (let i = 0; i < sources.length; i++) {
-      buildSh += `${compiler} ${incFlags} ${extraFlags} -c ${sources[i]} -o ${objFiles[i]}\n`;
+      const compileCmd = [compiler, incFlags, extraFlags, '-c', sources[i], '-o', objFiles[i]]
+        .filter(Boolean)
+        .join(' ');
+      buildSh += `${compileCmd}\n`;
     }
-    buildSh += `${compiler} ${objFiles.join(' ')} ${linkLibs} -o ${this.config.targetName}\n`.replace(/\s+/g, ' ');
+    const linkCmd = [compiler, ...objFiles, linkLibs, '-o', this.config.targetName]
+      .filter(Boolean)
+      .join(' ');
+    buildSh += `${linkCmd}\n`;
     buildSh += `echo "Build complete: ${this.config.targetName}"\n`;
 
     this.vfs.writeFile('/workspace/build.sh', buildSh);
