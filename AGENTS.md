@@ -18,8 +18,10 @@ You are an autonomous senior systems and web engineer implementing the project s
 
 ```
 /
-├── SPEC.md                    # Technical specification & architectural ground truth
+├── SPEC.md                    # Technical specification & architectural ground truth (v1 baseline)
+├── SPECv2.md                  # Extended technical specification with Raylib 5.5 graphics
 ├── AGENTS.md                  # Agent operating protocols (this file)
+├── KNOWN_ISSUES.md            # Documented toolchain version gaps, limits, and MemFS invariants
 ├── README.md                  # User-facing project documentation & deployment guides
 ├── index.html                 # Main entry point (loads /coi-serviceworker.js)
 ├── package.json               # Development tooling, dependencies, and test scripts
@@ -29,7 +31,8 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── style.css              # Dark theme styling, button color hierarchy, tooltips
 │   ├── components/
 │   │   ├── filetree.js        # File tree sidebar, directory expansion, file operations
-│   │   ├── settings.js        # Project settings modal, build.sh & Makefile generation
+│   │   ├── graphics-window.js # Dedicated floating/pop-out canvas console with FPS & dimensions
+│   │   ├── settings.js        # Project settings modal with decoupled Save and Generate buttons
 │   │   └── toast.js           # Non-blocking notification toasts
 │   ├── editor/
 │   │   ├── editor.js          # Monaco editor instance controller and save actions
@@ -41,6 +44,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── toolchain/
 │   │   ├── driver.js          # gcc / clang command parser and execution coordinator
 │   │   ├── make.js            # Incremental Makefile runner evaluating mtimes
+│   │   ├── raylib-host.js     # Raylib GLES2 / WebGL host calls and input coordination
 │   │   ├── tar.js             # Sysroot tarball extractor
 │   │   └── wasm-clang.js      # Clang, LLD, and MemFS WebAssembly wrappers
 │   ├── vfs/
@@ -49,22 +53,23 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   ├── sysroot.js         # Standard C/C++ sysroot header and binary mount definitions
 │   │   └── vfs.js             # In-memory virtual filesystem with path normalization
 │   └── workers/
-│       ├── runtime.worker.js  # WASI host executing user binaries with Atomics stdin
-│       └── shell.worker.js    # Interactive POSIX shell worker (pushd/popd, globs, mv/cp)
+│       ├── runtime.worker.js  # WASI host executing user binaries with Atomics stdin & OffscreenCanvas
+│       └── shell.worker.js    # Interactive POSIX shell worker (pushd/popd, globs, mv/cp, direct scripts)
 ├── public/
 │   ├── coi-serviceworker.js   # Unified cross-origin isolation and CacheStorage offline worker
 │   ├── manifest.webmanifest   # Web App Manifest for PWA installation
 │   ├── icons/                 # PWA application icons (192, 512, svg)
 │   └── sysroot/
-│       ├── wasm/              # Prebuilt clang.wasm, lld.wasm, memfs.wasm, sysroot.tar
-│       └── include/           # Minimal fallback libc headers
+│       ├── wasm/              # Prebuilt clang.wasm, lld.wasm, memfs.wasm, libraylib.a, sysroot.tar
+│       └── include/           # Minimal fallback libc headers & raylib headers
 └── test/
     ├── make.test.js           # Makefile parsing and incremental build tests
     ├── pipeline.test.js       # Command pipeline (|) and file redirection (<, >, >>) tests
+    ├── raylib.test.js         # Raylib graphics compilation, input sync, and canvas UI tests
     ├── runtime.test.js        # SharedArrayBuffer Atomics protocol and Ctrl-D EOF tests
-    ├── shell.test.js          # Shell argument parsing, globs, pushd/popd, and mv/cp tests
+    ├── shell.test.js          # Shell argument parsing, globs, pushd/popd, mv/cp, and direct scripts
     ├── sw.test.js             # Service Worker, PWA manifest, and offline COOP/COEP tests
-    ├── toolchain.test.js      # Toolchain driver, MemFS directory, and libc library tests
+    ├── toolchain.test.js      # Toolchain driver, MemFS directory, unlink guardrails, and libc tests
     ├── vfs.test.js            # VFS hierarchy, permissions, and zip round-trip tests
     └── zoom.test.js           # Editor & terminal font zoom, clamping, and persistence tests
 ```
@@ -137,6 +142,16 @@ Agents executing this project should proceed milestone-by-milestone:
 - Implement stream redirections (`<`, `>`, `>>`) for built-in utilities and external binaries.
 - Implement `Ctrl-D` (`\x04`) handling in `RuntimeManager` sending `STATE_EOF` via `SharedArrayBuffer` for clean EOF in `scanf`, `cin`, and `getchar`.
 - Support preloaded `stdinBytes` in `runtime.worker.js` for synchronous stream feeding without `Atomics.wait`.
+- Support direct shell script execution (`./build.sh`, `/workspace/script.sh`) in `shell.worker.js` and validate executable Wasm magic headers (`\0asm`) in `main.js`.
+
+### Milestone 10: Raylib 5.5 Graphics Subsystem & Dual Console Integration
+- Integrate Raylib 5.5 WASI static library (`libraylib.a`) and headers (`raylib.h`, `raymath.h`, `rlgl.h`) with opt-in project settings toggle.
+- Implement dual-thread rendering: offscreen WebGL canvas in `runtime.worker.js` transferring zero-copy GPU `ImageBitmap` frames to main thread `<canvas id="raylib-canvas">`.
+- Implement frame pacing with `Atomics.wait()` in `EndDrawing()` based on `SetTargetFPS()`.
+- Implement `GraphicsWindowUI` draggable/resizable floating window, pop-out to separate browser window (`window.open`), dock back, dynamic dimension adaptation to `InitWindow()`, and dimension preservation across window toggles.
+- Implement 512-byte `SharedArrayBuffer` keyboard and mouse input coordination with clean focus/blur lifecycle resets.
+- Decouple Project Settings modal into dedicated **Save** (state & sysroot mounting) and **Generate Build Script** (`build.sh` & `Makefile` generation) actions.
+- Enforce MemFS unlinking invariants: never unlink workspace compilation targets in `memfs.wasm` to prevent inode reuse offset corruption.
 
 ---
 
@@ -155,6 +170,7 @@ Before marking any task complete, agents must verify:
 | **Output Redirection (`>`, `>>`)** | `echo "hi" > file.txt` writes to file; `>>` appends to file without clobbering existing content. |
 | **Input Redirection (`<`)** | `./a.out < input.txt` reads directly from VFS file without interactive terminal prompt. |
 | **Command Pipelines (`|`)** | `cat input.txt | ./a.out` and `./a.out | cat` pipe output to input across stages. |
+| **Direct Shell Script Execution** | `./build.sh` or `/workspace/script.sh` runs shell commands without requiring manual `sh` prefix; Wasm validation catches invalid binaries. |
 | **Infinite Loop Interruption** | `while(1);` can be interrupted via `Ctrl+C` or UI Stop button; terminal returns to prompt. |
 | **Refresh Persistence** | Modifying files, closing tab, and reopening keeps files intact via IndexedDB. |
 | **Zip Round-Trip** | Exporting project to zip and re-importing preserves directory hierarchy. |
@@ -162,6 +178,11 @@ Before marking any task complete, agents must verify:
 | **Font Zoom Persistence** | Reloading page preserves configured font size for editor and terminal via localStorage. |
 | **Sub-Path Asset Resolution** | Serving application under a sub-path resolves all assets without broken root `/` requests. |
 | **Async Wasm Loading (8MB Limit)** | Clang (~20MB+) compiles and instantiates asynchronously without triggering main-thread synchronous size errors. |
+| **Raylib Sysroot Mount/Unmount** | Toggling Raylib mounts/unmounts headers and `libraylib.a` in VFS and MemFS cleanly. |
+| **Raylib Compilation & Linking** | Programs using `InitWindow` and drawing primitives link with `-lraylib` and run in runtime worker. |
+| **Dynamic Canvas Dimensions** | Initializing window sets canvas and window frame to requested size; toggling canvas preserves dimensions. |
+| **Settings Action Decoupling** | Clicking Save updates state and sysroot without modifying `/workspace`; Generate Build Script creates build files. |
+| **MemFS Recompilation Invariant** | Deleting an object file (`build/calc.o`) and re-running `make` re-compiles and relinks without corrupted object headers. |
 | **Offline PWA Installation** | Application provides valid manifest, registers service worker with COOP/COEP headers, and operates offline. |
 | **Portable Zip Distribution** | `npm run pack` creates a standalone `wasm-c-ide.zip` that runs in any static web server document root. |
 

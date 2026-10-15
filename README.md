@@ -64,7 +64,10 @@ This IDE is specifically engineered for **students and systems programming educa
 - **Interactive Shell Worker**:
   - POSIX utilities: `sh`, `ls`, `cd`, `pwd`, `cat`, `rm`, `mkdir`, `cp`, `mv`, `clear`, `echo` (with `>` and `>>` redirection), and `which`.
   - **Directory Stack**: Full support for `pushd`, `popd`, `dirs`, and `cd -`.
-  - **Command Chaining**: Supports `;`, `&&`, and `||` operators respecting quotes.
+  - **Command Chaining & Pipelines**: Supports `;`, `&&`, `||`, and sequential stream pipelines (`|`).
+  - **Stream Redirections**: File input (`<`) and output (`>`, `>>`) across builtins and external binaries.
+  - **Direct Script Execution**: Run `./build.sh` or `/workspace/script.sh` directly without requiring explicit `sh` prefix. Shebang (`#!`) and `.sh` scripts are executed automatically.
+  - **Interactive EOF (`Ctrl-D`)**: Flushes buffer or signals EOF to input loops (`scanf`, `cin`, `getchar`).
   - **Glob Pattern Expansion**: Expands `*` and `?` wildcards against the VFS file tree (e.g., `ls build/*`, `gcc src/*.c`).
   - **Advanced File Operations**: `mv` and `cp` support directory destinations (`mv a.out src/`), multi-source operands (`mv a.c b.c src/`), atomic file replacement, and recursive directory copying (`cp -r src backup/`).
 - **Transparent Working Directory Preservation**:
@@ -82,7 +85,7 @@ This IDE is specifically engineered for **students and systems programming educa
 - **Multi-File Separate Compilation**:
   - Separate object generation: `gcc -c src/calc.c -o build/calc.o`
   - Separate linking: `gcc build/main.o build/calc.o -o a.out`
-- **Robust MemFS Layer**: Automatically creates ancestor directories and handles missing file probes safely without WebAssembly assertion traps.
+- **Robust MemFS Layer**: Automatically creates ancestor directories, guards against invalid unlinks, and handles missing file probes safely without WebAssembly assertion traps.
 
 ### 4. Dual Build Systems (Shell Script & Makefile)
 - **Track 1: Shell Script (`build.sh`)**:
@@ -90,7 +93,9 @@ This IDE is specifically engineered for **students and systems programming educa
 - **Track 2: Standard Makefile (`Makefile`)**:
   - Generates a modular Makefile with `all`, `clean`, and pattern rules (`%.o: %.c`).
   - Built-in incremental `make` engine checks modification timestamps (`mtime`) against prerequisites to avoid redundant rebuilds.
-- **Project Settings Modal**: Configure language mode, include directories, compiler warning flags, default build track, and target binary name.
+- **Project Settings Modal**:
+  - Decoupled **Save** and **Generate Build Script** buttons: save configuration and toggle sysroots without clobbering existing files in `/workspace`.
+  - Configure language mode, include directories, compiler warning flags, default build track, target binary name, and optional Raylib graphics.
 
 ### 5. Execution Sandbox with Synchronous Stdin
 - **Dedicated Runtime Web Worker**: User executables run in an isolated WebAssembly execution sandbox with WASI emulation.
@@ -101,17 +106,26 @@ This IDE is specifically engineered for **students and systems programming educa
 - **Execution Interruption**:
   - Pressing `Ctrl+C` in `xterm.js` or clicking the UI **Stop** button terminates the runtime worker immediately, returning control to the shell prompt.
 
-### 6. Virtual File System & Storage
+### 6. Raylib 5.5 2D/3D Game Engine & Dual Console
+- **First-Class Graphics Support**: Opt-in Raylib 5.5 integration via [`@breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) without Emscripten.
+- **Dedicated Graphical Console**: Floating, resizable in-page window running alongside `xterm.js`.
+  - Dynamic resolution adaptation based on `InitWindow(width, height, title)`.
+  - Zero-copy GPU frame transfer (`ImageBitmap` / WebGL) rendered at 60 FPS.
+  - Real-time FPS counter and resolution badge.
+  - Pop-Out (`↗`) to external browser window and Dock (`↙`) back.
+- **Dual Console Ergonomics**: Run interactive games that use keyboard/mouse inputs on canvas while concurrently accepting terminal commands or `printf`/`scanf` in `xterm.js`.
+
+### 7. Virtual File System & Storage
 - **In-Memory VFS**: Fast hierarchical tree representation shared across the editor, shell, and toolchain.
 - **IndexedDB Persistence**: Automatically persists `/workspace` across browser sessions and page refreshes.
 - **Zip Import & Export**: One-click export of `/workspace` into a standard `.zip` file using JSZip, and direct zip unpacking into the workspace.
 - **Sysroot Protection**: Read-only protection on system root paths (`/usr`, `/bin`).
 
-### 7. Progressive Web App (PWA) & Offline Execution
+### 8. Progressive Web App (PWA) & Offline Execution
 - **Installable Desktop/Mobile App**: Certified PWA with Web App Manifest (`manifest.webmanifest`), dark theme colors, and icons.
 - **In-App Install Prompt**: Automatically reveals an **Install** button in the header toolbar when the browser detects installability.
 - **100% Offline Capability**:
-  - Unified Service Worker caches App Shell, fonts, editor modules, and WebAssembly compiler binaries (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar`).
+  - Unified Service Worker caches App Shell, fonts, editor modules, WebAssembly compiler binaries (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar`), and precompiled Raylib libraries.
   - Seamless offline execution with retained `COOP: same-origin` and `COEP: require-corp` isolation headers so `SharedArrayBuffer` remains operational without an internet connection.
   - Automatic connection status notifications when transitioning between online and offline modes.
 

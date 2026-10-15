@@ -91,19 +91,23 @@ SPECv2 extends the original specification to provide first-class, optional **Ray
       - Output Redirection: `> target` (truncate/overwrite) and `>> target` (append) capture stdout of builtins (`echo`, `ls`, `cat`, etc.) and external commands (`./a.out`, `gcc`, `make`) to files in the VFS.
       - Input Redirection: `< source` feeds files from the VFS directly into the standard input of commands (`./a.out < input.txt`, `cat < input.txt`).
       - Operators within quoted strings are preserved as literal characters.
-  - **Standard Input Closure (`Ctrl-D` / EOF)**:
-    - Pressing `Ctrl-D` (`\x04`) while standard input is active cleanly transmits End-of-File (EOF) to the executing process without terminating the process or shell.
-  - **Glob Pattern Expansion**:
-    - Unquoted command arguments containing glob wildcards (`*`, `?`) are recursively expanded against the VFS file tree before command execution. Unmatched patterns are preserved as literal strings.
-  - **File-Aware & Multi-Target `ls`**:
-    - Supports multiple target paths, listing individual files directly with metadata and directory contents under section headers.
-  - **File Operations (`mv` and `cp`) Semantics**:
-    - **Directory Destination Variants**: `mv <src> <dest_dir>` and `mv <src> <dest_dir>/` move `<src>` inside `<dest_dir>` using the source basename.
-    - **Multi-Source Support**: `mv file1 file2 <dest_dir>/` and `cp file1 file2 <dest_dir>/`.
-    - **Trailing Slash Enforcement**: If a target ends with `/`, it must exist and be a directory.
-    - **Atomic File Overwriting**: Moving a file onto an existing regular file replaces it cleanly without error.
-    - **Directory Safety**: Prohibits overwriting directories with non-directories, non-empty directories, or moving a directory into a subdirectory of itself.
-    - **Recursive Copy**: `cp -r` / `cp -R` recursively copies directory hierarchies.
+    - **Standard Input Closure (`Ctrl-D` / EOF)**:
+      - Pressing `Ctrl-D` (`\x04`) while standard input is active cleanly transmits End-of-File (EOF) to the executing process without terminating the process or shell.
+    - **Direct Shell Script Execution**:
+      - Executing `./<script>`, `/<path>/<script>`, or any file ending in `.sh` directly (such as `./build.sh` or `/workspace/build.sh`) is automatically detected by inspecting file contents or extension.
+      - If the target begins with a shebang (`#!`) or ends with `.sh`, it executes via the shell runner (`builtins.sh`) without requiring explicit `sh ./build.sh`.
+      - Non-script executable files dispatched to the runtime worker are verified against the WebAssembly magic number (`\0asm` / `[0x00, 0x61, 0x73, 0x6d]`), returning descriptive diagnostics if invalid bytes are encountered.
+    - **Glob Pattern Expansion**:
+      - Unquoted command arguments containing glob wildcards (`*`, `?`) are recursively expanded against the VFS file tree before command execution. Unmatched patterns are preserved as literal strings.
+    - **File-Aware & Multi-Target `ls`**:
+      - Supports multiple target paths, listing individual files directly with metadata and directory contents under section headers.
+    - **File Operations (`mv` and `cp`) Semantics**:
+      - **Directory Destination Variants**: `mv <src> <dest_dir>` and `mv <src> <dest_dir>/` move `<src>` inside `<dest_dir>` using the source basename.
+      - **Multi-Source Support**: `mv file1 file2 <dest_dir>/` and `cp file1 file2 <dest_dir>/`.
+      - **Trailing Slash Enforcement**: If a target ends with `/`, it must exist and be a directory.
+      - **Atomic File Overwriting**: Moving a file onto an existing regular file replaces it cleanly without error.
+      - **Directory Safety**: Prohibits overwriting directories with non-directories, non-empty directories, or moving a directory into a subdirectory of itself.
+      - **Recursive Copy**: `cp -r` / `cp -R` recursively copies directory hierarchies.
 - **UI Button Action Redirection (Strict Principle & Working Directory Transparency)**:
   - GUI action buttons (Compile, Build, Run, Stop) **MUST NOT** invoke hidden internal APIs.
   - Action buttons dynamically construct shell command sequences and inject them directly into `xterm.js` via `terminal.injectCommand(cmd)`.
@@ -120,24 +124,28 @@ SPECv2 extends the original specification to provide first-class, optional **Ray
 - **Sysroot & Standard Libraries**:
   - Bundles minimal `wasi-libc` (`libc.a`, `crt1.o`, Musl libc headers under `/usr/include`, static libraries under `/usr/lib`).
   - Full C++ standard library support (`libc++.a`, `libc++abi.a`, C++ headers under `/usr/include/c++/v1`).
-- **Toolchain MemFS Lifecycle & Ancestor Directory Auto-Creation**:
+- **Toolchain MemFS Lifecycle, Directory Auto-Creation & Inode Unlink Guardrails**:
   - The toolchain initializes an in-memory virtual filesystem (`MemFS`) for Clang/LLD execution.
   - Toolchain initialization is pre-warmed on application boot and guarded against re-entrance.
   - Adding files or directories to MemFS automatically ensures all ancestor parent directory nodes are created sequentially to prevent WebAssembly `unreachable` assertion traps.
-  - Missing-file probes safely return without trapping.
+  - **MemFS Unlinking Invariant**: `path_unlink_file` is strictly restricted to unmounting global sysroot headers and libraries (e.g., removing `include/raylib.h` and `usr/lib/libraylib.a` when Raylib is disabled). Workspace build files (`workspace/*.o`, `workspace/a.out`) must **never** be unlinked in MemFS when deleted from VFS, as `memfs.wasm` suffers from an inode memory reuse bug that corrupts file write offsets and emits corrupted object headers. Workspace files are instead overwritten cleanly on recompile.
+  - Missing-file probes safely verify existence (`hasFileInMemfs`) prior to calling `getFileFromMemfs` to prevent triggering `lookup.node` assertion traps.
 - **Language Dialects**:
   - **Pure C Mode**: Automatically injects `-x c -std=c11 -pedantic-errors -Wall -Wextra`. Forbids C++ syntax extensions and disallows `#include <iostream>`, `<vector>`, etc.
   - **C++ Mode**: Injects `-x c++ -std=c++17 -Wall -Wextra` linking against `libc++`. Preferred wrapper command is `g++`.
 - **Include Paths**: Default configuration includes `-I/workspace/include -I/workspace`. System headers resolve to `/usr/include` and `/usr/include/c++/v1`.
 
-### 3.4 Build Systems (Dual-Track Mechanism)
+### 3.4 Build Systems (Dual-Track Mechanism) & Project Settings
 Users can select between two build strategies in the Project Settings UI:
 
-1. **Default Track: Shell Script (`build.sh`)**
+1. **Decoupled Settings Modal Actions**:
+   - **Save Button**: Persists configuration state (mode, build system, compiler flags, include paths, target name, and Raylib toggle) and dynamically mounts/unmounts sysroot headers and libraries without overwriting existing files in `/workspace`.
+   - **Generate Build Script Button**: Scans source files in `/workspace` and generates or updates `/workspace/build.sh` and `/workspace/Makefile`.
+2. **Track 1: Shell Script (`build.sh`)**
    - The UI generates `/workspace/build.sh` reflecting compiler command (`gcc` in Pure C mode, `g++` in C++ mode), compiler flags, source files, and output paths.
    - When Raylib is enabled, `-lraylib` is automatically included in the final link command.
    - Triggering "Build" injects `pushd . && cd /workspace && sh build.sh; popd` to the terminal.
-2. **Alternative Track: Makefile & Incremental Make**
+3. **Track 2: Makefile & Incremental Make**
    - The UI generates a standard `/workspace/Makefile` defining explicit targets (`all`, `clean`, `%.o: %.c` or `%.o: %.cpp`) using `CC = gcc` in Pure C mode and `CXX = g++` in C++ mode.
    - When Raylib is enabled, `LDFLAGS += -lraylib` is automatically configured.
    - Incremental Makefile runner evaluates file modification timestamps (`mtime`) to rebuild only stale prerequisites.
@@ -257,15 +265,17 @@ Because standard Raylib games run in a continuous synchronous loop (`while (!Win
 - **In-Page Floating Window (`.graphics-window`)**:
   - Draggable, resizable container with dark theme matching the IDE.
   - Header displays game title (set dynamically by `InitWindow(width, height, title)`), resolution badge (`800x450`), and real-time FPS counter.
+  - **Dynamic Dimension Sizing**: The canvas and outer window frame size adapt dynamically to the dimensions passed to `InitWindow(width, height, title)` (e.g. `450x450`, `800x450`). Toggling the graphics window closed and open preserves the configured canvas dimensions rather than resetting to hardcoded default window frames.
   - Control buttons:
     - **Pop Out (`↗`)**: Detaches the canvas into a standalone browser popup window (`window.open`), transferring frame updates and input listeners to the external window for multi-monitor setups.
     - **Dock Back (`↙`)**: Restores the canvas into the floating in-page window inside the IDE.
     - **Minimize (`_`)**: Collapses the window to the top action bar.
     - **Close (`&times;`)**: Sets `WindowShouldClose() = true` via `SharedArrayBuffer`, allowing standard Raylib loops to terminate gracefully.
-- **Input Isolation & Event Routing**:
+- **Input Isolation, Lifecycle & Focus Safety**:
   - When the canvas window is clicked/focused, it attaches keyboard and mouse listeners.
   - Mouse `(x, y)` position, button states (left, right, middle), and keypress states are encoded into a 512-byte `SharedArrayBuffer`.
   - Gaming keys (WASD, arrows, space, numbers) are captured by the canvas without injecting keystrokes into `xterm.js`.
+  - On launch, cleanup, and window blur events, `inputCoordinator` state is cleanly reset and `shouldClose` is cleared so that focusing the canvas does not prematurely terminate `WindowShouldClose()`.
   - When `xterm.js` is focused, typing routes to the shell or `scanf`.
 - **Hybrid Program Concurrency**:
   - A single program can combine standard text I/O with graphics:
@@ -368,4 +378,8 @@ Because standard Raylib games run in a continuous synchronous loop (`while (!Win
 | **Concurrent Terminal I/O** | `printf` and `scanf` in the same program interact with xterm.js while graphics render on the canvas. |
 | **Clean Close Termination** | Clicking the graphics window close button or pressing Escape sets `WindowShouldClose() = true` and exits loop cleanly. |
 | **Window Pop-Out & Dock** | Clicking Pop-Out moves rendering to a standalone OS window; clicking Dock restores it to the IDE without interrupting the running game. |
+| **Dynamic Canvas Dimensions** | Initializing window at custom resolution (e.g. 450x450) sets canvas and window frame accordingly; toggling window maintains custom dimensions without resetting to default. |
+| **Direct Shell Script Execution** | `./build.sh` or `/workspace/script.sh` executes shell commands without manual `sh` prefix; Wasm validation verifies executable binaries. |
+| **Settings Modal Action Decoupling** | Clicking Save updates state and mounts/unmounts libraries without modifying `/workspace`; Generate Build Script creates/updates build files. |
+| **MemFS Recompilation Invariant** | Deleting an object file (`build/calc.o`) and re-running `make` cleanly recompiles and relinks without node reuse header corruption. |
 | **Offline PWA Operation** | Raylib binaries compile and run while disconnected from the internet via Service Worker caching. |
