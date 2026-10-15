@@ -20,6 +20,6 @@ export default defineConfig({
     format: 'es',
   },
   optimizeDeps: {
-    exclude: ['@xterm/xterm'],
+    include: ['@xterm/xterm', '@xterm/addon-fit'],
   },
 });

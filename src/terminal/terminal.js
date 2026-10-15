@@ -1,8 +1,11 @@
 // xterm.js Terminal Emulator Wrapper & Command Injection Bridge
 
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
+import * as xtermModule from '@xterm/xterm';
+import * as fitModule from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
+
+const Terminal = xtermModule.Terminal || xtermModule.default?.Terminal || xtermModule.default;
+const FitAddon = fitModule.FitAddon || fitModule.default?.FitAddon || fitModule.default;
 
 export class TerminalManager {
   constructor(containerElement, onInput = () => {}, onInterrupt = () => {}) {
