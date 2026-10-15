@@ -179,6 +179,29 @@ class MemFS {
     }
   }
 
+  removeFile(path) {
+    try {
+      const cleanPath = (path || '').replace(/^\/+/, '');
+      if (!cleanPath) return false;
+      const prevHostMem = this.hostMem_;
+      this.hostMem_ = null;
+      try {
+        this.mem.check();
+        const pathBuf = this.exports.GetPathBuf();
+        this.mem.write(pathBuf, cleanPath);
+        const res = this.exports.path_unlink_file(3, pathBuf, cleanPath.length);
+        this.files.delete(cleanPath);
+        return res === ESUCCESS;
+      } finally {
+        this.hostMem_ = prevHostMem;
+      }
+    } catch {
+      const cleanPath = (path || '').replace(/^\/+/, '');
+      this.files.delete(cleanPath);
+      return false;
+    }
+  }
+
   host_write(fd, iovs, iovs_len, nwritten_out) {
     this.hostMem_.check();
     let size = 0;
@@ -208,8 +231,9 @@ class MemFS {
   }
 
   copy_out(clang_dst, memfs_src, size) {
-    this.hostMem_.check();
-    const dst = new Uint8Array(this.hostMem_.buffer, clang_dst, size);
+    const targetMem = this.hostMem_ || this.mem;
+    targetMem.check();
+    const dst = new Uint8Array(targetMem.buffer, clang_dst, size);
     this.mem.check();
     const src = new Uint8Array(this.mem.buffer, memfs_src, size);
     dst.set(src);
@@ -218,8 +242,9 @@ class MemFS {
   copy_in(memfs_dst, clang_src, size) {
     this.mem.check();
     const dst = new Uint8Array(this.mem.buffer, memfs_dst, size);
-    this.hostMem_.check();
-    const src = new Uint8Array(this.hostMem_.buffer, clang_src, size);
+    const sourceMem = this.hostMem_ || this.mem;
+    sourceMem.check();
+    const src = new Uint8Array(sourceMem.buffer, clang_src, size);
     dst.set(src);
   }
 }
@@ -433,6 +458,12 @@ export class WasmToolchain {
     return this.memfs.getFileContents(cleanPath);
   }
 
+  removeFileFromMemfs(path) {
+    if (!this.memfs) return false;
+    const cleanPath = path.replace(/^\/+/, '');
+    return this.memfs.removeFile(cleanPath);
+  }
+
   async compile(sourcePath, objPath, mode = 'c', customFlags = []) {
     await this.init();
     const clang = await this._getClang();
@@ -473,9 +504,13 @@ export class WasmToolchain {
     args.push(...customFlags);
     args.push('-o', cleanObj, cleanSrc);
 
-    const app = await AppInstance.create(clang, this.memfs, 'clang', ...args);
-    const exitCode = app.run();
-    return exitCode;
+    try {
+      const app = await AppInstance.create(clang, this.memfs, 'clang', ...args);
+      const exitCode = app.run();
+      return exitCode;
+    } finally {
+      this.memfs.hostMem = null;
+    }
   }
 
   async link(objPaths, outputPath, customFlags = []) {
@@ -510,8 +545,12 @@ export class WasmToolchain {
       '-o', cleanOut,
     ];
 
-    const app = await AppInstance.create(lld, this.memfs, 'wasm-ld', ...args);
-    const exitCode = app.run();
-    return exitCode;
+    try {
+      const app = await AppInstance.create(lld, this.memfs, 'wasm-ld', ...args);
+      const exitCode = app.run();
+      return exitCode;
+    } finally {
+      this.memfs.hostMem = null;
+    }
   }
 }

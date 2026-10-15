@@ -433,7 +433,7 @@ export class App {
     } else {
       if (btnGraphics) btnGraphics.style.display = 'none';
       if (this.graphicsWindow) this.graphicsWindow.close();
-      unmountRaylibSysroot(this.vfs);
+      unmountRaylibSysroot(this.vfs, this.toolchain);
     }
     if (this.fileTreeUI) this.fileTreeUI.render();
   }

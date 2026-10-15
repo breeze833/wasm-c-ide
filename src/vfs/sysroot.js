@@ -618,10 +618,18 @@ export function mountRaylibSysroot(vfs, headers = {}, libBuffer = null) {
   }
 }
 
-export function unmountRaylibSysroot(vfs) {
+export function unmountRaylibSysroot(vfs, toolchain = null) {
   if (vfs.exists('/usr/include/raylib.h')) vfs.remove('/usr/include/raylib.h', false, true);
   if (vfs.exists('/usr/include/raymath.h')) vfs.remove('/usr/include/raymath.h', false, true);
   if (vfs.exists('/usr/include/rlgl.h')) vfs.remove('/usr/include/rlgl.h', false, true);
   if (vfs.exists('/usr/lib/libraylib.a')) vfs.remove('/usr/lib/libraylib.a', false, true);
+
+  if (toolchain && typeof toolchain.removeFileFromMemfs === 'function') {
+    toolchain.removeFileFromMemfs('include/raylib.h');
+    toolchain.removeFileFromMemfs('include/raymath.h');
+    toolchain.removeFileFromMemfs('include/rlgl.h');
+    toolchain.removeFileFromMemfs('usr/lib/libraylib.a');
+    toolchain.removeFileFromMemfs('lib/wasm32-wasi/libraylib.a');
+  }
 }
 

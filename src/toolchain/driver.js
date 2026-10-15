@@ -62,6 +62,7 @@ export async function executeGccCommand({
 
   // Sync VFS workspace files and directories into Toolchain MemFS
   const allWorkspaceFiles = vfs.getAllFiles('/workspace');
+  const currentWorkspaceFiles = new Set();
   for (const f of allWorkspaceFiles) {
     if (f.isDir) {
       if (typeof toolchain.ensureDirectoryInMemfs === 'function') {
@@ -69,23 +70,53 @@ export async function executeGccCommand({
       }
     } else {
       await toolchain.syncFileToMemfs(f.path, f.content);
+      currentWorkspaceFiles.add(f.path.replace(/^\/+/, ''));
     }
   }
 
-  // Sync Raylib sysroot files to toolchain MemFS if present in VFS
-  if (vfs.exists('/usr/include/raylib.h') && !toolchain.getFileFromMemfs('include/raylib.h')) {
-    await toolchain.syncFileToMemfs('include/raylib.h', vfs.readFile('/usr/include/raylib.h', true));
+  // Remove any deleted workspace files from MemFS
+  if (toolchain.memfs && toolchain.memfs.files && typeof toolchain.removeFileFromMemfs === 'function') {
+    for (const memfsPath of Array.from(toolchain.memfs.files)) {
+      if (memfsPath.startsWith('workspace/') && !currentWorkspaceFiles.has(memfsPath)) {
+        toolchain.removeFileFromMemfs(memfsPath);
+      }
+    }
   }
-  if (vfs.exists('/usr/include/raymath.h') && !toolchain.getFileFromMemfs('include/raymath.h')) {
-    await toolchain.syncFileToMemfs('include/raymath.h', vfs.readFile('/usr/include/raymath.h', true));
+
+  // Sync or unsync Raylib sysroot files in toolchain MemFS according to VFS presence
+  const raylibHeaders = [
+    { vfs: '/usr/include/raylib.h', memfs: 'include/raylib.h' },
+    { vfs: '/usr/include/raymath.h', memfs: 'include/raymath.h' },
+    { vfs: '/usr/include/rlgl.h', memfs: 'include/rlgl.h' },
+  ];
+
+  for (const h of raylibHeaders) {
+    if (vfs.exists(h.vfs)) {
+      if (!toolchain.getFileFromMemfs(h.memfs)) {
+        await toolchain.syncFileToMemfs(h.memfs, vfs.readFile(h.vfs, true));
+      }
+    } else {
+      if (typeof toolchain.removeFileFromMemfs === 'function' && toolchain.getFileFromMemfs(h.memfs)) {
+        toolchain.removeFileFromMemfs(h.memfs);
+      }
+    }
   }
-  if (vfs.exists('/usr/include/rlgl.h') && !toolchain.getFileFromMemfs('include/rlgl.h')) {
-    await toolchain.syncFileToMemfs('include/rlgl.h', vfs.readFile('/usr/include/rlgl.h', true));
-  }
-  if (vfs.exists('/usr/lib/libraylib.a') && !toolchain.getFileFromMemfs('usr/lib/libraylib.a')) {
-    const libraylib = vfs.readFile('/usr/lib/libraylib.a', false);
-    await toolchain.syncFileToMemfs('usr/lib/libraylib.a', libraylib);
-    await toolchain.syncFileToMemfs('lib/wasm32-wasi/libraylib.a', libraylib);
+
+  if (vfs.exists('/usr/lib/libraylib.a')) {
+    if (!toolchain.getFileFromMemfs('usr/lib/libraylib.a')) {
+      const libraylib = vfs.readFile('/usr/lib/libraylib.a', false);
+      await toolchain.syncFileToMemfs('usr/lib/libraylib.a', libraylib);
+      await toolchain.syncFileToMemfs('lib/wasm32-wasi/libraylib.a', libraylib);
+    }
+  } else {
+    if (typeof toolchain.removeFileFromMemfs === 'function') {
+      if (toolchain.getFileFromMemfs('usr/lib/libraylib.a')) {
+        toolchain.removeFileFromMemfs('usr/lib/libraylib.a');
+      }
+      if (toolchain.getFileFromMemfs('lib/wasm32-wasi/libraylib.a')) {
+        toolchain.removeFileFromMemfs('lib/wasm32-wasi/libraylib.a');
+      }
+    }
   }
 
   const effectiveMode = (cmd === 'g++' || cmd === 'clang++') ? 'cpp' : (mode || 'c');

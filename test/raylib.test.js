@@ -182,6 +182,21 @@ assert.strictEqual(moduleNames.has('gl'), true, 'Must import gl namespace');
 assert.strictEqual(moduleNames.has('raylib'), true, 'Must import raylib namespace');
 console.log('✓ End-to-end WasmToolchain compilation & linking with -lraylib verified');
 
+// Test 5b: Unmounting Raylib sysroot purges files from toolchain MemFS
+unmountRaylibSysroot(compileVfs, tc);
+assert.strictEqual(compileVfs.exists('/usr/include/raylib.h'), false);
+assert.strictEqual(compileVfs.exists('/usr/lib/libraylib.a'), false);
+assert.strictEqual(tc.getFileFromMemfs('include/raylib.h'), null, 'Raylib header must be removed from toolchain MemFS');
+assert.strictEqual(tc.getFileFromMemfs('include/raymath.h'), null);
+assert.strictEqual(tc.getFileFromMemfs('include/rlgl.h'), null);
+assert.strictEqual(tc.getFileFromMemfs('usr/lib/libraylib.a'), null, 'Raylib library must be removed from toolchain MemFS');
+assert.strictEqual(tc.getFileFromMemfs('lib/wasm32-wasi/libraylib.a'), null);
+
+// Verify subsequent compilation of raylib code now fails because raylib.h is gone
+const failCompCode = await tc.compile('workspace/main.c', 'workspace/main2.o', 'c', ['-I/include', '-I/workspace']);
+assert.notStrictEqual(failCompCode, 0, 'Compilation must fail when raylib is unmounted');
+console.log('✓ unmountRaylibSysroot MemFS clearance and compilation failure verified');
+
 // Test 6: Verification of WASI runtime imports including path_open and env.getcwd
 let stdoutOutput = '';
 let memoryInst = null;
