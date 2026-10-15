@@ -73,17 +73,17 @@ export async function executeGccCommand({
   }
 
   // Sync Raylib sysroot files to toolchain MemFS if present in VFS
-  if (vfs.exists('/usr/include/raylib.h')) {
-    await toolchain.syncFileToMemfs('include/raylib.h', vfs.readFile('/usr/include/raylib.h'));
+  if (vfs.exists('/usr/include/raylib.h') && !toolchain.getFileFromMemfs('include/raylib.h')) {
+    await toolchain.syncFileToMemfs('include/raylib.h', vfs.readFile('/usr/include/raylib.h', true));
   }
-  if (vfs.exists('/usr/include/raymath.h')) {
-    await toolchain.syncFileToMemfs('include/raymath.h', vfs.readFile('/usr/include/raymath.h'));
+  if (vfs.exists('/usr/include/raymath.h') && !toolchain.getFileFromMemfs('include/raymath.h')) {
+    await toolchain.syncFileToMemfs('include/raymath.h', vfs.readFile('/usr/include/raymath.h', true));
   }
-  if (vfs.exists('/usr/include/rlgl.h')) {
-    await toolchain.syncFileToMemfs('include/rlgl.h', vfs.readFile('/usr/include/rlgl.h'));
+  if (vfs.exists('/usr/include/rlgl.h') && !toolchain.getFileFromMemfs('include/rlgl.h')) {
+    await toolchain.syncFileToMemfs('include/rlgl.h', vfs.readFile('/usr/include/rlgl.h', true));
   }
-  if (vfs.exists('/usr/lib/libraylib.a')) {
-    const libraylib = vfs.readFile('/usr/lib/libraylib.a');
+  if (vfs.exists('/usr/lib/libraylib.a') && !toolchain.getFileFromMemfs('usr/lib/libraylib.a')) {
+    const libraylib = vfs.readFile('/usr/lib/libraylib.a', false);
     await toolchain.syncFileToMemfs('usr/lib/libraylib.a', libraylib);
     await toolchain.syncFileToMemfs('lib/wasm32-wasi/libraylib.a', libraylib);
   }

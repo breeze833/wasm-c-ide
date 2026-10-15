@@ -54,6 +54,7 @@ class Memory {
       const encoded = new TextEncoder().encode(buf);
       return this.write(o, encoded);
     } else {
+      this.check();
       const dst = new Uint8Array(this.buffer, o, buf.length);
       dst.set(buf);
       return buf.length;
@@ -146,15 +147,19 @@ class MemFS {
       this.ensureDirectory(cleanPath.substring(0, lastSlash));
     }
 
-    const length = contents instanceof ArrayBuffer
-      ? contents.byteLength
-      : contents.length;
+    let data = contents;
+    if (typeof contents === 'string') {
+      data = new TextEncoder().encode(contents);
+    }
+    const length = data instanceof ArrayBuffer
+      ? data.byteLength
+      : data.length;
     this.mem.check();
     this.mem.write(this.exports.GetPathBuf(), cleanPath);
     const inode = this.exports.AddFileNode(cleanPath.length, length);
     const addr = this.exports.GetFileNodeAddress(inode);
     this.mem.check();
-    this.mem.write(addr, contents);
+    this.mem.write(addr, data);
     this.files.add(cleanPath);
   }
 
