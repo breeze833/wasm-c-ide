@@ -168,4 +168,97 @@ assert.strictEqual(moduleNames.has('gl'), true, 'Must import gl namespace');
 assert.strictEqual(moduleNames.has('raylib'), true, 'Must import raylib namespace');
 console.log('✓ End-to-end WasmToolchain compilation & linking with -lraylib verified');
 
+// Test 6: Verification of WASI runtime imports including path_open and env.getcwd
+let stdoutOutput = '';
+let memoryInst = null;
+const wasiTest = {
+  proc_exit() {},
+  fd_write(fd, iovs, iovs_len, nwritten_out) {
+    const memU8 = new Uint8Array(memoryInst.buffer);
+    const memU32 = new Uint32Array(memoryInst.buffer);
+    let total = 0;
+    for (let i = 0; i < iovs_len; i++) {
+      const ptr = memU32[(iovs >> 2) + i * 2];
+      const len = memU32[(iovs >> 2) + i * 2 + 1];
+      for (let j = 0; j < len; j++) stdoutOutput += String.fromCharCode(memU8[ptr + j]);
+      total += len;
+    }
+    memU32[nwritten_out >> 2] = total;
+    return 0;
+  },
+  fd_read() { return 8; },
+  fd_close() { return 0; },
+  fd_seek() { return 0; },
+  fd_fdstat_get(fd, stat_out) {
+    new Uint8Array(memoryInst.buffer).fill(0, stat_out, stat_out + 24);
+    return 0;
+  },
+  fd_fdstat_set_flags() { return 0; },
+  fd_fdstat_set_rights() { return 0; },
+  fd_filestat_get() { return 0; },
+  fd_filestat_set_size() { return 0; },
+  fd_pread() { return 8; },
+  fd_pwrite() { return 8; },
+  fd_tell() { return 0; },
+  fd_sync() { return 0; },
+  fd_prestat_get() { return 8; },
+  fd_prestat_dir_name() { return 8; },
+  path_open() { return 44; },
+  path_filestat_get() { return 44; },
+  environ_sizes_get(c, s) {
+    new Uint32Array(memoryInst.buffer)[c >> 2] = 0;
+    new Uint32Array(memoryInst.buffer)[s >> 2] = 0;
+    return 0;
+  },
+  environ_get() { return 0; },
+  args_sizes_get(c, s) {
+    new Uint32Array(memoryInst.buffer)[c >> 2] = 0;
+    new Uint32Array(memoryInst.buffer)[s >> 2] = 0;
+    return 0;
+  },
+  args_get() { return 0; },
+  clock_time_get(id, prec, out) {
+    const now = BigInt(Date.now()) * 1000000n;
+    new BigInt64Array(memoryInst.buffer)[out >> 3] = now;
+    return 0;
+  },
+  clock_res_get() { return 0; },
+  random_get() { return 0; },
+  poll_oneoff() { return 0; },
+  sched_yield() { return 0; }
+};
+const wasiTestProxy = new Proxy(wasiTest, {
+  get(t, p) { return p in t ? t[p] : () => 0; }
+});
+const envTest = {
+  getcwd(buf, size) {
+    const cwd = '/workspace';
+    if (!buf || size <= 0) return 0;
+    const len = Math.min(size - 1, cwd.length);
+    const u8 = new Uint8Array(memoryInst.buffer);
+    for (let i = 0; i < len; i++) u8[buf + i] = cwd.charCodeAt(i);
+    u8[buf + len] = 0;
+    return buf;
+  }
+};
+const envTestProxy = new Proxy(envTest, {
+  get(t, p) { return p in t ? t[p] : () => 0; }
+});
+
+const gameInstance = await WebAssembly.instantiate(gameModule, {
+  wasi_unstable: wasiTestProxy,
+  wasi_snapshot_preview1: wasiTestProxy,
+  env: envTestProxy,
+  gl: new Proxy({}, { get: () => () => 0 }),
+  raylib: new Proxy({
+    raylib_host_init_window: () => 1,
+    raylib_host_poll_input: () => 0,
+  }, { get: (t, p) => p in t ? t[p] : () => 0 })
+});
+memoryInst = gameInstance.exports.memory;
+gameInstance.exports._start();
+assert.strictEqual(stdoutOutput.includes('Initializing Raylib window'), true);
+assert.strictEqual(stdoutOutput.includes('Window closed successfully'), true);
+console.log('✓ Runtime execution with WASI Preview 1 (path_open, getcwd, etc.) verified');
+
 console.log('--- ALL RAYLIB TESTS PASSED ---');

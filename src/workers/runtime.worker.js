@@ -26,6 +26,8 @@ class ProcExit extends Error {
 
 const ESUCCESS = 0;
 const EBADF = 8;
+const ENOENT = 44;
+const ENOSYS = 52;
 
 function readStr(u8, offset, len) {
   let str = '';
@@ -186,8 +188,37 @@ async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibShared
       memU8().fill(0, stat_out, stat_out + 24);
       return ESUCCESS;
     },
-    fd_prestat_get() { return 8; }, // EBADF
-    fd_prestat_dir_name() { return 8; },
+    fd_fdstat_set_flags() { return ESUCCESS; },
+    fd_fdstat_set_rights() { return ESUCCESS; },
+    fd_filestat_get(fd, stat_out) {
+      memU8().fill(0, stat_out, stat_out + 64);
+      return ESUCCESS;
+    },
+    fd_filestat_set_size() { return ESUCCESS; },
+    fd_filestat_set_times() { return ESUCCESS; },
+    fd_pread() { return EBADF; },
+    fd_pwrite() { return EBADF; },
+    fd_tell() { return ESUCCESS; },
+    fd_sync() { return ESUCCESS; },
+    fd_datasync() { return ESUCCESS; },
+    fd_allocate() { return ESUCCESS; },
+    fd_advise() { return ESUCCESS; },
+    fd_readdir() { return ESUCCESS; },
+    fd_renumber() { return EBADF; },
+
+    fd_prestat_get() { return EBADF; },
+    fd_prestat_dir_name() { return EBADF; },
+
+    path_open() { return ENOENT; },
+    path_filestat_get() { return ENOENT; },
+    path_filestat_set_times() { return ENOENT; },
+    path_create_directory() { return ESUCCESS; },
+    path_link() { return ENOENT; },
+    path_readlink() { return ENOENT; },
+    path_rename() { return ENOENT; },
+    path_symlink() { return ENOENT; },
+    path_unlink_file() { return ENOENT; },
+    path_remove_directory() { return ENOENT; },
 
     environ_sizes_get(count_out, size_out) {
       const keys = Object.keys(environ);
@@ -243,6 +274,12 @@ async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibShared
       return ESUCCESS;
     },
 
+    clock_res_get(clock_id, res_out) {
+      const view = new BigInt64Array(memoryInstance.buffer);
+      view[res_out >> 3] = 1000n;
+      return ESUCCESS;
+    },
+
     random_get(buf, len) {
       crypto.getRandomValues(memU8().subarray(buf, buf + len));
       return ESUCCESS;
@@ -250,17 +287,54 @@ async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibShared
 
     poll_oneoff() { return ESUCCESS; },
     sched_yield() { return ESUCCESS; },
-    fd_sync() { return ESUCCESS; },
   };
+
+  const wasiProxy = new Proxy(wasi, {
+    get(target, prop) {
+      if (prop in target) return target[prop];
+      return () => ESUCCESS;
+    }
+  });
+
+  const env = {
+    getcwd(buf, size) {
+      const cwd = '/workspace';
+      if (!buf || size <= 0) return 0;
+      const len = Math.min(size - 1, cwd.length);
+      for (let i = 0; i < len; i++) {
+        memU8()[buf + i] = cwd.charCodeAt(i);
+      }
+      memU8()[buf + len] = 0;
+      return buf;
+    },
+    chdir() { return 0; },
+    time(time_out) {
+      const sec = Math.floor(Date.now() / 1000);
+      if (time_out) {
+        memU32()[time_out >> 2] = sec;
+      }
+      return sec;
+    },
+    __assert_fail() {
+      return 0;
+    },
+  };
+
+  const envProxy = new Proxy(env, {
+    get(target, prop) {
+      if (prop in target) return target[prop];
+      return () => 0;
+    }
+  });
 
   const module = await WebAssembly.compile(wasmBytes);
   const importsList = WebAssembly.Module.imports(module);
   const hasRaylib = importsList.some(i => i.module === 'raylib' || i.module === 'gl');
 
   const importObject = {
-    wasi_snapshot_preview1: wasi,
-    wasi_unstable: wasi,
-    env: wasi,
+    wasi_snapshot_preview1: wasiProxy,
+    wasi_unstable: wasiProxy,
+    env: envProxy,
   };
 
   let raylibHost = null;
@@ -297,8 +371,13 @@ async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibShared
     });
 
     const raylibImports = raylibHost.getImports();
-    importObject.gl = raylibImports.gl;
-    importObject.raylib = {
+    importObject.gl = new Proxy(raylibImports.gl, {
+      get(t, p) {
+        if (p in t) return t[p];
+        return () => 0;
+      }
+    });
+    importObject.raylib = new Proxy({
       ...raylibImports.raylib,
       raylib_host_init_window: (w, h, titlePtr) => {
         const res = raylibImports.raylib.raylib_host_init_window(w, h, titlePtr);
@@ -314,7 +393,15 @@ async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibShared
         self.postMessage({ type: 'raylib_init', width: w, height: h, title: titleStr });
         return res;
       },
-    };
+    }, {
+      get(t, p) {
+        if (p in t) return t[p];
+        return () => 0;
+      }
+    });
+  } else if (hasRaylib) {
+    importObject.gl = new Proxy({}, { get: () => () => 0 });
+    importObject.raylib = new Proxy({}, { get: () => () => 0 });
   }
 
   const instance = await WebAssembly.instantiate(module, importObject);
