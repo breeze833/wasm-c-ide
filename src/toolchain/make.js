@@ -124,12 +124,21 @@ export async function runMake({
       for (const recipe of t.recipes) {
         write(`${recipe}\r\n`);
         executedAny = true;
-        await executeCommand(recipe);
+        const res = await executeCommand(recipe);
+        if (res === false || (typeof res === 'number' && res !== 0) || (res && typeof res.exitCode === 'number' && res.exitCode !== 0)) {
+          const code = typeof res === 'number' ? res : (res && res.exitCode ? res.exitCode : 1);
+          write(`make: *** [Makefile: ${name}] Error ${code}\r\n`);
+          throw new Error(`Recipe failed with exit code ${code}`);
+        }
       }
     }
   }
 
-  await buildTarget(effectiveTarget);
+  try {
+    await buildTarget(effectiveTarget);
+  } catch {
+    return 2;
+  }
 
   if (!executedAny && effectiveTarget !== 'clean') {
     write(`make: '${effectiveTarget}' is up to date.\r\n`);

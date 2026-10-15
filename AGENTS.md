@@ -151,7 +151,7 @@ Agents executing this project should proceed milestone-by-milestone:
 - Implement `GraphicsWindowUI` draggable/resizable floating window, pop-out to separate browser window (`window.open`), dock back, dynamic dimension adaptation to `InitWindow()`, and dimension preservation across window toggles.
 - Implement 512-byte `SharedArrayBuffer` keyboard and mouse input coordination with clean focus/blur lifecycle resets.
 - Decouple Project Settings modal into dedicated **Save** (state & sysroot mounting) and **Generate Build Script** (`build.sh` & `Makefile` generation) actions.
-- Enforce MemFS unlinking invariants: never unlink workspace compilation targets in `memfs.wasm` to prevent inode reuse offset corruption.
+- Enforce MemFS unlinking invariants: always truncate files to 0 bytes before unlinking (`AddFileNode(len, 0)` then `path_unlink_file`) in `MemFS.removeFile()` to conceal the inode reallocation offset bug and ensure clean recompilation.
 
 ---
 
@@ -182,7 +182,7 @@ Before marking any task complete, agents must verify:
 | **Raylib Compilation & Linking** | Programs using `InitWindow` and drawing primitives link with `-lraylib` and run in runtime worker. |
 | **Dynamic Canvas Dimensions** | Initializing window sets canvas and window frame to requested size; toggling canvas preserves dimensions. |
 | **Settings Action Decoupling** | Clicking Save updates state and sysroot without modifying `/workspace`; Generate Build Script creates build files. |
-| **MemFS Recompilation Invariant** | Deleting an object file (`build/calc.o`) and re-running `make` re-compiles and relinks without corrupted object headers. |
+| **MemFS Recompilation Invariant** | Deleting an object file (`build/calc.o`) or deleted source file purges MemFS without ghost files; re-running `make` re-compiles and relinks without corrupted object headers. |
 | **Offline PWA Installation** | Application provides valid manifest, registers service worker with COOP/COEP headers, and operates offline. |
 | **Portable Zip Distribution** | `npm run pack` creates a standalone `wasm-c-ide.zip` that runs in any static web server document root. |
 

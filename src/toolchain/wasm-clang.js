@@ -188,6 +188,17 @@ class MemFS {
     try {
       const cleanPath = (path || '').replace(/^\/+/, '');
       if (!cleanPath) return false;
+
+      // Conceal memfs.wasm inode reallocation bug:
+      // Always truncate the node to 0 bytes before unlinking. This resets its buffer
+      // and internal write offset so that if the inode is reused by Clang/WASI path_open,
+      // it writes from byte 0 cleanly instead of corrupting binary headers.
+      try {
+        this.addFile(cleanPath, new Uint8Array(0));
+      } catch {
+        // Ignore if file could not be truncated
+      }
+
       const prevHostMem = this.hostMem_;
       this.hostMem_ = null;
       try {
@@ -390,7 +401,11 @@ export class WasmToolchain {
         fetch(`${this.basePath}/sysroot.tar`).then(r => r.arrayBuffer()),
       ]);
 
-      this.memfs = await MemFS.create(memfsBuf, this.hostWrite);
+      this.memfs = await MemFS.create(memfsBuf, (str) => {
+        if (typeof this.hostWrite === 'function') {
+          this.hostWrite(str);
+        }
+      });
 
       // Ensure root workspace and system directories exist in MemFS
       this.memfs.ensureDirectory('workspace');
@@ -518,6 +533,9 @@ export class WasmToolchain {
     try {
       const app = await AppInstance.create(clang, this.memfs, 'clang', ...args);
       const exitCode = app.run();
+      if (exitCode === 0 && this.memfs) {
+        this.memfs.files.add(cleanObj);
+      }
       return exitCode;
     } finally {
       this.memfs.hostMem = null;
@@ -559,6 +577,9 @@ export class WasmToolchain {
     try {
       const app = await AppInstance.create(lld, this.memfs, 'wasm-ld', ...args);
       const exitCode = app.run();
+      if (exitCode === 0 && this.memfs) {
+        this.memfs.files.add(cleanOut);
+      }
       return exitCode;
     } finally {
       this.memfs.hostMem = null;

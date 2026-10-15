@@ -167,14 +167,7 @@ export class App {
       },
       () => {
         // Ctrl+C handling: interrupt active runtime process or shell
-        if (this.runtimeManager && this.runtimeManager.isRunning) {
-          this.runtimeManager.kill();
-          if (this.shellWorker) {
-            this.shellWorker.postMessage({ type: 'interrupt' });
-          }
-        } else if (this.shellWorker) {
-          this.shellWorker.postMessage({ type: 'interrupt' });
-        }
+        this.handleStopExecution();
       }
     );
 
@@ -182,6 +175,12 @@ export class App {
     this.graphicsWindow = new GraphicsWindowUI({
       sharedBuffer: this.runtimeManager.raylibSharedBuffer,
       inputCoordinator: this.runtimeManager.inputCoordinator,
+      onCloseRequested: () => {
+        if (this.runtimeManager && this.runtimeManager.inputCoordinator) {
+          this.runtimeManager.inputCoordinator.shouldClose = true;
+          this.runtimeManager.inputCoordinator.updateSharedState();
+        }
+      },
     });
     this.runtimeManager.setGraphicsWindow(this.graphicsWindow);
 
@@ -334,7 +333,7 @@ export class App {
             const subArgs = trimmed.split(/\s+/);
             const subCmd = subArgs.shift();
             const subMode = (subCmd === 'g++' || subCmd === 'clang++' || subCmd === '$(CXX)') ? 'cpp' : this.mode;
-            await executeGccCommand({
+            const exitCode = await executeGccCommand({
               cmd: subCmd,
               args: subArgs,
               cwd: cwd || '/workspace',
@@ -344,6 +343,7 @@ export class App {
               write: writeFn,
             });
             if (this.fileTreeUI) this.fileTreeUI.render();
+            return exitCode;
           }
         },
       });
@@ -577,9 +577,7 @@ export class App {
 
     if (btnStop) {
       btnStop.addEventListener('click', () => {
-        if (this.shellWorker) {
-          this.shellWorker.postMessage({ type: 'interrupt' });
-        }
+        this.handleStopExecution();
       });
     }
 
@@ -594,6 +592,18 @@ export class App {
         }
         this.deferredInstallPrompt = null;
       });
+    }
+  }
+
+  handleStopExecution() {
+    if (this.runtimeManager && this.runtimeManager.isRunning) {
+      this.runtimeManager.kill();
+    }
+    if (this.graphicsWindow && this.graphicsWindow.isOpen()) {
+      this.graphicsWindow.close();
+    }
+    if (this.shellWorker) {
+      this.shellWorker.postMessage({ type: 'interrupt' });
     }
   }
 

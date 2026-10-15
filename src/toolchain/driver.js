@@ -74,6 +74,15 @@ export async function executeGccCommand({
     }
   }
 
+  // Purge any files deleted from VFS /workspace from MemFS
+  if (toolchain.memfs && toolchain.memfs.files && typeof toolchain.removeFileFromMemfs === 'function') {
+    for (const memfsPath of Array.from(toolchain.memfs.files)) {
+      if (memfsPath.startsWith('workspace/') && !currentWorkspaceFiles.has(memfsPath)) {
+        toolchain.removeFileFromMemfs(memfsPath);
+      }
+    }
+  }
+
   // Sync or unsync Raylib sysroot files in toolchain MemFS according to VFS presence
   const raylibHeaders = [
     { vfs: '/usr/include/raylib.h', memfs: 'include/raylib.h' },
@@ -117,6 +126,24 @@ export async function executeGccCommand({
       if (hasInMemfs('lib/wasm32-wasi/libraylib.a')) {
         toolchain.removeFileFromMemfs('lib/wasm32-wasi/libraylib.a');
       }
+    }
+  }
+
+  // Validate that all input source files exist in VFS
+  for (const src of sources) {
+    const srcResolved = resolve(src);
+    if (!vfs.exists(srcResolved)) {
+      write(`${cmd || 'gcc'}: error: ${src}: No such file or directory\r\n`);
+      return 1;
+    }
+  }
+
+  // Validate that all input object/library files exist in VFS
+  for (const obj of objects) {
+    const objResolved = resolve(obj);
+    if (!vfs.exists(objResolved)) {
+      write(`${cmd || 'gcc'}: error: ${obj}: No such file or directory\r\n`);
+      return 1;
     }
   }
 

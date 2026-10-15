@@ -81,11 +81,11 @@ If an `HTMLCanvasElement` is transferred to a worker via `canvas.transferControl
 ### Context & Impact
 `memfs.wasm` acts as the in-memory virtual filesystem for `clang.wasm` and `lld.wasm`.
 
-When a file inside MemFS is deleted using WASI's `path_unlink_file`, `memfs.wasm` frees the corresponding inode structure. However, upon subsequent creation (`path_open` with `O_CREAT` / write mode) at that same path, `memfs.wasm`'s internal memory allocator reuses the freed node without resetting its internal write head/offset or zeroing its buffer pointers properly.
+When a file inside MemFS is deleted using WASI's `path_unlink_file`, `memfs.wasm` frees the corresponding inode structure. However, upon subsequent creation (`path_open` with `O_CREAT` / write mode) at that same path, `memfs.wasm`'s internal memory allocator reuses the freed node without resetting its internal write head/offset or zeroing its buffer length properly.
 
-Consequently, when Clang compiles a file whose output object path was previously unlinked in MemFS:
+Consequently, when Clang compiles a file whose output object path was previously directly unlinked in MemFS:
 1. Clang writes WebAssembly object bytes into the reused node starting from a corrupted offset.
-2. The initial 4 bytes of the emitted `.o` file become `[ 136, 128, 128, 128 ]` instead of the required WebAssembly magic header `\0asm` (`[ 0, 97, 115, 109 ]`).
+2. The initial 4 bytes of the emitted `.o` file become `[ 136, 128, 128, 128 ]` (linking metadata section) instead of the required WebAssembly magic header `\0asm` (`[ 0, 97, 115, 109 ]`).
 3. Later invocations of `wasm-ld` fail with:
    ```
    wasm-ld: error: unknown file type: workspace/build/calc.o
@@ -95,8 +95,14 @@ Consequently, when Clang compiles a file whose output object path was previously
    [memfs] Assertion failed: lookup.node
    ```
 
-### Architectural Guardrails & Resolution
-1. **Never Unlink Workspace Files in MemFS**: Workspace build files (`workspace/*.o`, `workspace/a.out`) must **not** be unlinked in `memfs.wasm` when deleted from the IDE's VFS. Clang and LLD overwrite existing inodes cleanly without memory corruption when paths are not unlinked.
-2. **Unlink Reserved Exclusively for Sysroot Modules**: `toolchain.removeFileFromMemfs` (`path_unlink_file`) is strictly reserved for unmounting global sysroot headers and libraries (such as `include/raylib.h` and `usr/lib/libraylib.a`) during mode toggles.
-3. **Safe File Lookups**: Always verify existence via `toolchain.hasFileInMemfs(path)` (checking `memfs.files.has(...)`) prior to calling `getFileFromMemfs` to prevent triggering `lookup.node` assertion traps.
+### Architectural Guardrails & Universal Resolution
+1. **Truncate to 0 Bytes Before Unlink**:
+   Inside `MemFS.removeFile(path)`, before calling WASI's `path_unlink_file`, the file is truncated to 0 bytes via `addFile(path, new Uint8Array(0))` (`AddFileNode(len, 0)`). This resets the inode's buffer allocation and size counter to 0. When `path_unlink_file` subsequently frees the inode, any future reallocation of that inode by Clang or any other program begins writing at byte 0, completely avoiding the header corruption bug.
+2. **Full Workspace Deletion Synchronization**:
+   Whenever `executeGccCommand` runs, any workspace files that were deleted from VFS (via UI, `rm`, or `make clean`) are purged from MemFS using `removeFileFromMemfs` (which executes the safe truncate-then-unlink sequence). This prevents deleted sources, headers, or object files from lingering as ghost files.
+3. **VFS Input Validation**:
+   `driver.js` checks that all input sources (`.c`, `.cpp`) and objects (`.o`, `.a`) exist in VFS before executing compiler steps, immediately aborting with standard `No such file or directory` diagnostics and exit code 1 if a required file is missing.
+4. **Safe File Lookups**:
+   Always verify existence via `toolchain.hasFileInMemfs(path)` (checking `memfs.files.has(...)`) prior to calling `getFileFromMemfs` to prevent triggering `lookup.node` assertion traps.
+
 

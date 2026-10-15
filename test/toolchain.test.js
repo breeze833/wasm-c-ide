@@ -341,7 +341,70 @@ console.log('✓ Direct compile & link argument parsing passed');
     assert.strictEqual(code, 0, 'Relinking with recompiled calc.o must succeed without "unknown file type" error');
     console.log('✓ Recompile and relink after deleting object file in VFS verified');
 
+    // Test 9: Deleting source files purges them from MemFS and triggers compiler error
+    vfs.writeFile('/workspace/include/calc.h', '#pragma once\nint add(int a, int b);\n');
+    vfs.writeFile('/workspace/src/calc.c', '#include "calc.h"\nint add(int a, int b) { return a + b; }\n');
+    vfs.writeFile('/workspace/src/main.c', '#include "calc.h"\nint main(void) { return add(2, 3); }\n');
+
+    // Build them once so they exist in MemFS
+    let buildMsg = '';
+    const wrBuild = (m) => { buildMsg += m; };
+    await executeGccCommand({
+      cmd: 'gcc',
+      args: ['-Iinclude', '-c', 'src/calc.c', '-o', 'build/calc.o'],
+      cwd: '/workspace',
+      vfs,
+      toolchain: tc,
+      mode: 'c',
+      write: wrBuild
+    });
+    assert.strictEqual(tc.hasFileInMemfs('workspace/include/calc.h'), true, 'calc.h must initially exist in MemFS');
+    assert.strictEqual(tc.hasFileInMemfs('workspace/src/calc.c'), true, 'calc.c must initially exist in MemFS');
+    assert.strictEqual(tc.hasFileInMemfs('workspace/build/calc.o'), true, 'calc.o must initially exist in MemFS');
+
+    // Now delete calc.h, calc.c, and calc.o from VFS
+    vfs.remove('/workspace/include/calc.h');
+    vfs.remove('/workspace/src/calc.c');
+    vfs.remove('/workspace/build/calc.o');
+
+    // Running gcc compile on deleted src/calc.c must fail
+    let errOutput = '';
+    const wrErr = (msg) => { errOutput += msg; };
+    code = await executeGccCommand({
+      cmd: 'gcc',
+      args: ['-c', 'src/calc.c', '-o', 'build/calc.o'],
+      cwd: '/workspace',
+      vfs,
+      toolchain: tc,
+      mode: 'c',
+      write: wrErr
+    });
+    assert.strictEqual(code, 1, 'Compiling non-existent source file must return exit code 1');
+    assert.match(errOutput, /No such file or directory/i, 'Must report missing source file');
+
+    // Verify MemFS purged workspace/include/calc.h, workspace/src/calc.c, and workspace/build/calc.o
+    assert.strictEqual(tc.hasFileInMemfs('workspace/include/calc.h'), false, 'calc.h must be purged from MemFS');
+    assert.strictEqual(tc.hasFileInMemfs('workspace/src/calc.c'), false, 'calc.c must be purged from MemFS');
+    assert.strictEqual(tc.hasFileInMemfs('workspace/build/calc.o'), false, 'calc.o must be purged from MemFS');
+
+    // Also verify compiling src/main.c (which includes calc.h) fails because calc.h is gone
+    let diagOutput = '';
+    tc.hostWrite = (msg) => { diagOutput += msg; };
+    code = await executeGccCommand({
+      cmd: 'gcc',
+      args: ['-Iinclude', '-c', 'src/main.c', '-o', 'build/main.o'],
+      cwd: '/workspace',
+      vfs,
+      toolchain: tc,
+      mode: 'c',
+      write: wrErr
+    });
+    assert.notStrictEqual(code, 0, 'Compiling main.c without calc.h must fail');
+    assert.match(diagOutput, /calc\.h.*not found/i, 'Must report calc.h not found in compiler diagnostics');
+    console.log('✓ Ghost file prevention and missing header/source validation verified');
+
     console.log('--- ALL TOOLCHAIN DRIVER TESTS PASSED ---');
   });
 }
+
 
