@@ -257,7 +257,89 @@ console.log('✓ Direct compile & link argument parsing passed');
       console.log('✓ Clang compilation uses async WebAssembly.instantiate without hitting 8MB sync limit');
     } finally {
       WebAssembly.Instance = origInstance;
+      // Restore real clang module
+      const realClangBuf = fs.readFileSync('public/sysroot/wasm/clang.wasm');
+      tc.clangModule = await WebAssembly.compile(realClangBuf);
     }
+
+    // Test 8: Regression test - Delete build/calc.o in VFS and recompile + relink without object file corruption
+    const calcC = "int add(int a, int b) { return a + b; }\n";
+    const mainC = "int add(int a, int b);\nint main(void) { return add(2, 3); }\n";
+    vfs.writeFile('/workspace/src/calc.c', calcC);
+    vfs.writeFile('/workspace/src/main.c', mainC);
+
+    // Initial compile
+    let outMsg = '';
+    const wr = (msg) => { outMsg += msg; };
+    let code = await executeGccCommand({
+      cmd: 'gcc',
+      args: ['-c', 'src/calc.c', '-o', 'build/calc.o'],
+      cwd: '/workspace',
+      vfs,
+      toolchain: tc,
+      mode: 'c',
+      write: wr
+    });
+    assert.strictEqual(code, 0, 'Initial compilation of calc.c should succeed');
+
+    code = await executeGccCommand({
+      cmd: 'gcc',
+      args: ['-c', 'src/main.c', '-o', 'build/main.o'],
+      cwd: '/workspace',
+      vfs,
+      toolchain: tc,
+      mode: 'c',
+      write: wr
+    });
+    assert.strictEqual(code, 0, 'Initial compilation of main.c should succeed');
+
+    code = await executeGccCommand({
+      cmd: 'gcc',
+      args: ['build/calc.o', 'build/main.o', '-o', 'a.out'],
+      cwd: '/workspace',
+      vfs,
+      toolchain: tc,
+      mode: 'c',
+      write: wr
+    });
+    assert.strictEqual(code, 0, 'Initial link to a.out should succeed');
+
+    // Simulate user action: manually delete build/calc.o from VFS
+    vfs.remove('/workspace/build/calc.o');
+    assert.strictEqual(vfs.exists('/workspace/build/calc.o'), false);
+
+    // Recompile build/calc.o via executeGccCommand (like `make` does)
+    code = await executeGccCommand({
+      cmd: 'gcc',
+      args: ['-c', 'src/calc.c', '-o', 'build/calc.o'],
+      cwd: '/workspace',
+      vfs,
+      toolchain: tc,
+      mode: 'c',
+      write: wr
+    });
+    assert.strictEqual(code, 0, 'Recompilation of calc.c should succeed');
+
+    // Verify the recompiled object file is a valid wasm object file (\0asm magic)
+    const recompiledObj = vfs.readFile('/workspace/build/calc.o', false);
+    assert.notStrictEqual(recompiledObj, null);
+    assert.strictEqual(recompiledObj[0], 0x00, 'wasm magic byte 0');
+    assert.strictEqual(recompiledObj[1], 0x61, 'wasm magic byte 1');
+    assert.strictEqual(recompiledObj[2], 0x73, 'wasm magic byte 2');
+    assert.strictEqual(recompiledObj[3], 0x6d, 'wasm magic byte 3');
+
+    // Relink a.out with the recompiled object file
+    code = await executeGccCommand({
+      cmd: 'gcc',
+      args: ['build/calc.o', 'build/main.o', '-o', 'a.out'],
+      cwd: '/workspace',
+      vfs,
+      toolchain: tc,
+      mode: 'c',
+      write: wr
+    });
+    assert.strictEqual(code, 0, 'Relinking with recompiled calc.o must succeed without "unknown file type" error');
+    console.log('✓ Recompile and relink after deleting object file in VFS verified');
 
     console.log('--- ALL TOOLCHAIN DRIVER TESTS PASSED ---');
   });

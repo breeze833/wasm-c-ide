@@ -74,15 +74,6 @@ export async function executeGccCommand({
     }
   }
 
-  // Remove any deleted workspace files from MemFS
-  if (toolchain.memfs && toolchain.memfs.files && typeof toolchain.removeFileFromMemfs === 'function') {
-    for (const memfsPath of Array.from(toolchain.memfs.files)) {
-      if (memfsPath.startsWith('workspace/') && !currentWorkspaceFiles.has(memfsPath)) {
-        toolchain.removeFileFromMemfs(memfsPath);
-      }
-    }
-  }
-
   // Sync or unsync Raylib sysroot files in toolchain MemFS according to VFS presence
   const raylibHeaders = [
     { vfs: '/usr/include/raylib.h', memfs: 'include/raylib.h' },
@@ -90,30 +81,40 @@ export async function executeGccCommand({
     { vfs: '/usr/include/rlgl.h', memfs: 'include/rlgl.h' },
   ];
 
+  const hasInMemfs = (path) => {
+    if (typeof toolchain.hasFileInMemfs === 'function') {
+      return toolchain.hasFileInMemfs(path);
+    }
+    if (toolchain.memfs && toolchain.memfs.files) {
+      return toolchain.memfs.files.has(path.replace(/^\/+/, ''));
+    }
+    return false;
+  };
+
   for (const h of raylibHeaders) {
     if (vfs.exists(h.vfs)) {
-      if (!toolchain.getFileFromMemfs(h.memfs)) {
+      if (!hasInMemfs(h.memfs)) {
         await toolchain.syncFileToMemfs(h.memfs, vfs.readFile(h.vfs, true));
       }
     } else {
-      if (typeof toolchain.removeFileFromMemfs === 'function' && toolchain.getFileFromMemfs(h.memfs)) {
+      if (typeof toolchain.removeFileFromMemfs === 'function' && hasInMemfs(h.memfs)) {
         toolchain.removeFileFromMemfs(h.memfs);
       }
     }
   }
 
   if (vfs.exists('/usr/lib/libraylib.a')) {
-    if (!toolchain.getFileFromMemfs('usr/lib/libraylib.a')) {
+    if (!hasInMemfs('usr/lib/libraylib.a')) {
       const libraylib = vfs.readFile('/usr/lib/libraylib.a', false);
       await toolchain.syncFileToMemfs('usr/lib/libraylib.a', libraylib);
       await toolchain.syncFileToMemfs('lib/wasm32-wasi/libraylib.a', libraylib);
     }
   } else {
     if (typeof toolchain.removeFileFromMemfs === 'function') {
-      if (toolchain.getFileFromMemfs('usr/lib/libraylib.a')) {
+      if (hasInMemfs('usr/lib/libraylib.a')) {
         toolchain.removeFileFromMemfs('usr/lib/libraylib.a');
       }
-      if (toolchain.getFileFromMemfs('lib/wasm32-wasi/libraylib.a')) {
+      if (hasInMemfs('lib/wasm32-wasi/libraylib.a')) {
         toolchain.removeFileFromMemfs('lib/wasm32-wasi/libraylib.a');
       }
     }

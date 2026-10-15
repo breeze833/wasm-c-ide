@@ -163,6 +163,11 @@ class MemFS {
     this.files.add(cleanPath);
   }
 
+  hasFile(path) {
+    const cleanPath = (path || '').replace(/^\/+/, '');
+    return this.files.has(cleanPath);
+  }
+
   getFileContents(path) {
     try {
       const cleanPath = (path || '').replace(/^\/+/, '');
@@ -456,6 +461,12 @@ export class WasmToolchain {
     if (!this.memfs) return null;
     const cleanPath = path.replace(/^\/+/, '');
     return this.memfs.getFileContents(cleanPath);
+  }
+
+  hasFileInMemfs(path) {
+    if (!this.memfs) return false;
+    const cleanPath = path.replace(/^\/+/, '');
+    return this.memfs.hasFile(cleanPath);
   }
 
   removeFileFromMemfs(path) {
