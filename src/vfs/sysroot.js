@@ -602,3 +602,26 @@ export function mountSysroot(vfs) {
     vfs.writeFile(`/usr/bin/${cmd}`, `#!/bin/sh\n# Toolchain binary: ${cmd}\n`, Date.now(), true);
   }
 }
+
+export function mountRaylibSysroot(vfs, headers = {}, libBuffer = null) {
+  if (headers['raylib.h']) {
+    vfs.writeFile('/usr/include/raylib.h', headers['raylib.h'], Date.now(), true);
+  }
+  if (headers['raymath.h']) {
+    vfs.writeFile('/usr/include/raymath.h', headers['raymath.h'], Date.now(), true);
+  }
+  if (headers['rlgl.h']) {
+    vfs.writeFile('/usr/include/rlgl.h', headers['rlgl.h'], Date.now(), true);
+  }
+  if (libBuffer) {
+    vfs.writeFile('/usr/lib/libraylib.a', libBuffer, Date.now(), true);
+  }
+}
+
+export function unmountRaylibSysroot(vfs) {
+  if (vfs.exists('/usr/include/raylib.h')) vfs.remove('/usr/include/raylib.h', false, true);
+  if (vfs.exists('/usr/include/raymath.h')) vfs.remove('/usr/include/raymath.h', false, true);
+  if (vfs.exists('/usr/include/rlgl.h')) vfs.remove('/usr/include/rlgl.h', false, true);
+  if (vfs.exists('/usr/lib/libraylib.a')) vfs.remove('/usr/lib/libraylib.a', false, true);
+}
+

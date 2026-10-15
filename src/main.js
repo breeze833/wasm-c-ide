@@ -2,7 +2,7 @@
 
 import { VFS } from './vfs/vfs.js';
 import { loadWorkspace, setupAutoSync } from './vfs/storage.js';
-import { mountSysroot } from './vfs/sysroot.js';
+import { mountSysroot, mountRaylibSysroot, unmountRaylibSysroot } from './vfs/sysroot.js';
 import { EditorManager } from './editor/editor.js';
 import { TabsUI } from './editor/tabs.js';
 import { FileTreeUI } from './components/filetree.js';
@@ -11,6 +11,7 @@ import { TerminalManager } from './terminal/terminal.js';
 import { RuntimeManager } from './terminal/runtime.js';
 import { WasmToolchain } from './toolchain/wasm-clang.js';
 import { executeGccCommand } from './toolchain/driver.js';
+import { GraphicsWindowUI } from './components/graphics-window.js';
 
 import { SettingsModal } from './components/settings.js';
 import { runMake } from './toolchain/make.js';
@@ -29,6 +30,7 @@ export class App {
     this.fileTreeUI = null;
     this.terminal = null;
     this.runtimeManager = null;
+    this.graphicsWindow = null;
     this.shellWorker = null;
     this.toolchain = null;
     this.settingsModal = null;
@@ -177,6 +179,11 @@ export class App {
     );
 
     this.runtimeManager = new RuntimeManager(this.terminal);
+    this.graphicsWindow = new GraphicsWindowUI({
+      sharedBuffer: this.runtimeManager.raylibSharedBuffer,
+      inputCoordinator: this.runtimeManager.inputCoordinator,
+    });
+    this.runtimeManager.setGraphicsWindow(this.graphicsWindow);
 
     // Instantiate Shell Worker as ES Module worker
     this.shellWorker = new Worker(
@@ -386,29 +393,87 @@ export class App {
     throw new Error(`${cmd}: command not found`);
   }
 
+  async syncRaylibState(enabled) {
+    const btnGraphics = document.getElementById('btn-graphics-window');
+    if (enabled) {
+      if (btnGraphics) btnGraphics.style.display = 'inline-flex';
+      if (!this.vfs.exists('/usr/include/raylib.h') || !this.vfs.exists('/usr/lib/libraylib.a')) {
+        try {
+          let basePath = './';
+          if (typeof window !== 'undefined' && window.location) {
+            const baseUrl = import.meta.env?.BASE_URL || './';
+            let loc = new URL(window.location.href);
+            if (!loc.pathname.endsWith('/') && !loc.pathname.split('/').pop().includes('.')) {
+              loc.pathname += '/';
+            }
+            basePath = new URL(baseUrl, loc.href).href;
+            if (!basePath.endsWith('/')) basePath += '/';
+          }
+          const [raylibH, raymathH, rlglH, libA] = await Promise.all([
+            fetch(`${basePath}sysroot/include/raylib/raylib.h`).then(r => r.text()),
+            fetch(`${basePath}sysroot/include/raylib/raymath.h`).then(r => r.text()),
+            fetch(`${basePath}sysroot/include/raylib/rlgl.h`).then(r => r.text()),
+            fetch(`${basePath}sysroot/wasm/libraylib.a`).then(r => r.arrayBuffer()),
+          ]);
+          mountRaylibSysroot(this.vfs, {
+            'raylib.h': raylibH,
+            'raymath.h': raymathH,
+            'rlgl.h': rlglH,
+          }, new Uint8Array(libA));
+        } catch (err) {
+          console.warn('Failed to mount Raylib sysroot:', err);
+        }
+      }
+    } else {
+      if (btnGraphics) btnGraphics.style.display = 'none';
+      if (this.graphicsWindow) this.graphicsWindow.close();
+      unmountRaylibSysroot(this.vfs);
+    }
+    if (this.fileTreeUI) this.fileTreeUI.render();
+  }
+
   attachHeaderActions() {
     const btnSave = document.getElementById('btn-save');
     const btnCompile = document.getElementById('btn-compile');
     const btnBuild = document.getElementById('btn-build');
     const btnRun = document.getElementById('btn-run');
     const btnStop = document.getElementById('btn-stop');
+    const btnGraphicsWindow = document.getElementById('btn-graphics-window');
     const btnSettings = document.getElementById('btn-settings');
     const modeSelect = document.getElementById('mode-select');
     const buildSystemSelect = document.getElementById('build-system-select');
+
+    if (btnGraphicsWindow) {
+      btnGraphicsWindow.addEventListener('click', () => {
+        if (this.graphicsWindow) {
+          if (this.graphicsWindow.container && this.graphicsWindow.container.style.display === 'none') {
+            this.graphicsWindow.open(800, 450, 'Raylib Display');
+          } else {
+            this.graphicsWindow.close();
+          }
+        }
+      });
+    }
 
     if (btnSettings) {
       this.settingsModal = new SettingsModal(
         this.vfs,
         { mode: this.mode, buildSystem: this.buildSystem },
-        (newConfig) => {
+        async (newConfig) => {
           this.mode = newConfig.mode;
           this.buildSystem = newConfig.buildSystem;
           if (modeSelect) modeSelect.value = newConfig.mode;
           if (buildSystemSelect) buildSystemSelect.value = newConfig.buildSystem;
+          await this.syncRaylibState(Boolean(newConfig.enableRaylib));
           if (this.fileTreeUI) this.fileTreeUI.render();
           showToast('Settings saved & build files regenerated.', 'success', 3000);
         }
       );
+
+      // Restore Raylib state if enabled in settings
+      if (this.settingsModal.config && this.settingsModal.config.enableRaylib) {
+        this.syncRaylibState(true);
+      }
 
       btnSettings.addEventListener('click', () => {
         this.settingsModal.show();
@@ -647,6 +712,13 @@ export function initApp() {
             <path d="M3.5 3.5h9v9h-9v-9z"/>
           </svg>
           <span>Stop</span>
+        </button>
+        <button id="btn-graphics-window" class="btn btn-graphics" title="Open Raylib Graphical Window" style="display: none;">
+          <svg class="btn-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M11.5 6.027a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0zm-1.5 1.5a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1zm2.5-.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0zm-1.5 1.5a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1zM4 6.5A.5.5 0 0 1 4.5 6h1a.5.5 0 0 1 0 1h-1A.5.5 0 0 1 4 6.5z"/>
+            <path d="M3.051 3.26a.5.5 0 0 1 .615-.357c.563.155 1.564.402 2.678.583a27.18 27.18 0 0 1 3.312 0c1.114-.181 2.115-.428 2.678-.583a.5.5 0 0 1 .59.822c-.2.25-.436.564-.69 1.018a10.985 10.985 0 0 0-.616 1.488c-.126.438-.204.887-.204 1.341v.003c0 1.25.405 2.44 1.134 3.411.396.527.877.986 1.408 1.353a.5.5 0 0 1 .15.688l-.75 1.25a.5.5 0 0 1-.774.137 11.026 11.026 0 0 1-2.112-2.164 12.185 12.185 0 0 1-2.81 0 11.025 11.025 0 0 1-2.112 2.164.5.5 0 0 1-.774-.137l-.75-1.25a.5.5 0 0 1 .15-.688 8.016 8.016 0 0 0 1.408-1.353c.729-.97 1.134-2.16 1.134-3.411v-.003c0-.454-.078-.903-.204-1.341a10.986 10.986 0 0 0-.616-1.488 12.24 12.24 0 0 0-.69-1.018.5.5 0 0 1 .025-.465z"/>
+          </svg>
+          <span>Canvas</span>
         </button>
         <button id="btn-settings" class="btn" title="Project Settings">
           <svg class="btn-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">

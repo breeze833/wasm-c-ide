@@ -72,6 +72,22 @@ export async function executeGccCommand({
     }
   }
 
+  // Sync Raylib sysroot files to toolchain MemFS if present in VFS
+  if (vfs.exists('/usr/include/raylib.h')) {
+    await toolchain.syncFileToMemfs('include/raylib.h', vfs.readFile('/usr/include/raylib.h'));
+  }
+  if (vfs.exists('/usr/include/raymath.h')) {
+    await toolchain.syncFileToMemfs('include/raymath.h', vfs.readFile('/usr/include/raymath.h'));
+  }
+  if (vfs.exists('/usr/include/rlgl.h')) {
+    await toolchain.syncFileToMemfs('include/rlgl.h', vfs.readFile('/usr/include/rlgl.h'));
+  }
+  if (vfs.exists('/usr/lib/libraylib.a')) {
+    const libraylib = vfs.readFile('/usr/lib/libraylib.a');
+    await toolchain.syncFileToMemfs('usr/lib/libraylib.a', libraylib);
+    await toolchain.syncFileToMemfs('lib/wasm32-wasi/libraylib.a', libraylib);
+  }
+
   const effectiveMode = (cmd === 'g++' || cmd === 'clang++') ? 'cpp' : (mode || 'c');
 
   // Compile-only mode: gcc -c src/calc.c -o build/calc.o

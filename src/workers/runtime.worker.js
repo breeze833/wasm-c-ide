@@ -1,6 +1,8 @@
 // Web Worker: Sandboxed Execution Runtime for compiled a.out
 // Implements WASI syscalls and synchronous stdin using SharedArrayBuffer & Atomics.wait()
 
+import { createRaylibHost } from '../toolchain/raylib-host.js';
+
 const STATE_IDLE = 0;
 const STATE_WAITING = 1;
 const STATE_READY = 2;
@@ -38,7 +40,7 @@ self.onmessage = async (event) => {
   if (!msg) return;
 
   if (msg.type === 'run') {
-    const { wasmBytes, sharedBuffer, argv = ['./a.out'], environ = {}, stdinBytes } = msg;
+    const { wasmBytes, sharedBuffer, argv = ['./a.out'], environ = {}, stdinBytes, raylibSharedBuffer } = msg;
 
     if (sharedBuffer) {
       sharedInt32 = new Int32Array(sharedBuffer);
@@ -46,7 +48,7 @@ self.onmessage = async (event) => {
     }
 
     try {
-      await runWasm(wasmBytes, argv, environ, stdinBytes);
+      await runWasm(wasmBytes, argv, environ, stdinBytes, raylibSharedBuffer);
       self.postMessage({ type: 'done', exitCode: 0 });
     } catch (err) {
       if (err instanceof ProcExit) {
@@ -58,7 +60,7 @@ self.onmessage = async (event) => {
   }
 };
 
-async function runWasm(wasmBytes, argv, environ, stdinBytes = null) {
+async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibSharedBuffer = null) {
   let memoryInstance = null;
   let stdinPos = 0;
   const preloadedStdin = stdinBytes ? (stdinBytes instanceof Uint8Array ? stdinBytes : new Uint8Array(stdinBytes)) : null;
@@ -247,16 +249,79 @@ async function runWasm(wasmBytes, argv, environ, stdinBytes = null) {
     },
 
     poll_oneoff() { return ESUCCESS; },
+    sched_yield() { return ESUCCESS; },
+    fd_sync() { return ESUCCESS; },
   };
 
   const module = await WebAssembly.compile(wasmBytes);
-  const instance = await WebAssembly.instantiate(module, {
+  const importsList = WebAssembly.Module.imports(module);
+  const hasRaylib = importsList.some(i => i.module === 'raylib' || i.module === 'gl');
+
+  const importObject = {
     wasi_snapshot_preview1: wasi,
     wasi_unstable: wasi,
     env: wasi,
-  });
+  };
 
+  let raylibHost = null;
+  if (hasRaylib && typeof OffscreenCanvas !== 'undefined') {
+    const offscreen = new OffscreenCanvas(800, 450);
+    const gl = offscreen.getContext('webgl', {
+      alpha: false,
+      depth: true,
+      stencil: true,
+      antialias: true,
+      premultipliedAlpha: false,
+      preserveDrawingBuffer: false,
+    });
+
+    raylibHost = createRaylibHost({
+      canvas: offscreen,
+      gl,
+      sharedBuffer: raylibSharedBuffer,
+      width: 800,
+      height: 450,
+      print: (text) => self.postMessage({ type: 'stdout', data: text }),
+      printErr: (text) => self.postMessage({ type: 'stdout', data: text }),
+      onFrame: (bitmap) => {
+        if (bitmap) {
+          self.postMessage({ type: 'frame', bitmap }, [bitmap]);
+        }
+      },
+      onFPS: (fps) => {
+        self.postMessage({ type: 'fps', fps });
+      },
+      onClose: () => {
+        self.postMessage({ type: 'raylib_close' });
+      },
+    });
+
+    const raylibImports = raylibHost.getImports();
+    importObject.gl = raylibImports.gl;
+    importObject.raylib = {
+      ...raylibImports.raylib,
+      raylib_host_init_window: (w, h, titlePtr) => {
+        const res = raylibImports.raylib.raylib_host_init_window(w, h, titlePtr);
+        let titleStr = 'Raylib Display';
+        try {
+          if (titlePtr && memoryInstance) {
+            const u8 = new Uint8Array(memoryInstance.buffer, titlePtr);
+            let end = 0;
+            while (u8[end] !== 0) end++;
+            titleStr = new TextDecoder('utf-8').decode(new Uint8Array(memoryInstance.buffer, titlePtr, end));
+          }
+        } catch (_) {}
+        self.postMessage({ type: 'raylib_init', width: w, height: h, title: titleStr });
+        return res;
+      },
+    };
+  }
+
+  const instance = await WebAssembly.instantiate(module, importObject);
   memoryInstance = instance.exports.memory;
+  if (raylibHost) {
+    raylibHost.setInstance(instance);
+  }
 
   if (typeof instance.exports._start === 'function') {
     instance.exports._start();

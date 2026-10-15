@@ -229,12 +229,12 @@ export class VFS {
     });
   }
 
-  remove(path, recursive = false) {
+  remove(path, recursive = false, isSystem = false) {
     const norm = normalizePath(path);
     if (norm === '/' || norm === '/workspace') {
       throw new Error(`Cannot remove root or workspace: ${norm}`);
     }
-    if (this._isReadOnly(norm)) {
+    if (!isSystem && this._isReadOnly(norm)) {
       throw new Error(`Permission denied: Cannot remove ${norm}`);
     }
 

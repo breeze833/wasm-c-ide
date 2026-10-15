@@ -6,6 +6,7 @@ export class SettingsModal {
     this.config = {
       mode: 'c',
       buildSystem: 'sh',
+      enableRaylib: false,
       includePaths: ['include'],
       compilerFlags: ['-Wall', '-Wextra'],
       targetName: 'a.out',
@@ -45,6 +46,12 @@ export class SettingsModal {
               <option value="make" ${this.config.buildSystem === 'make' ? 'selected' : ''}>Makefile (make)</option>
             </select>
           </div>
+          <div class="form-group" style="flex-direction: row; align-items: center; gap: 8px; margin: 4px 0;">
+            <input type="checkbox" id="setting-raylib" ${this.config.enableRaylib ? 'checked' : ''} style="cursor: pointer; width: 16px; height: 16px;">
+            <label for="setting-raylib" style="cursor: pointer; font-size: 13px; color: var(--text-bright); font-weight: 500;">
+              🎮 Enable Raylib Graphics Support
+            </label>
+          </div>
           <div class="form-group">
             <label for="setting-includes">Include Directories (comma-separated):</label>
             <input type="text" id="setting-includes" class="form-control" value="${this.config.includePaths.join(', ')}">
@@ -77,6 +84,7 @@ export class SettingsModal {
     modalOverlay.querySelector('#modal-save-btn').addEventListener('click', () => {
       this.config.mode = modalOverlay.querySelector('#setting-mode').value;
       this.config.buildSystem = modalOverlay.querySelector('#setting-build-sys').value;
+      this.config.enableRaylib = modalOverlay.querySelector('#setting-raylib').checked;
       this.config.includePaths = modalOverlay.querySelector('#setting-includes').value
         .split(',')
         .map(s => s.trim())
@@ -97,6 +105,7 @@ export class SettingsModal {
     const incFlags = this.config.includePaths.map(p => `-I${p}`).join(' ');
     const extraFlags = this.config.compilerFlags.join(' ');
     const compiler = this.config.mode === 'cpp' ? 'g++' : 'gcc';
+    const linkLibs = this.config.enableRaylib ? '-lraylib' : '';
 
     // Scan workspace for C/C++ source files
     let sources = [];
@@ -121,7 +130,7 @@ export class SettingsModal {
     for (let i = 0; i < sources.length; i++) {
       buildSh += `${compiler} ${incFlags} ${extraFlags} -c ${sources[i]} -o ${objFiles[i]}\n`;
     }
-    buildSh += `${compiler} ${objFiles.join(' ')} -o ${this.config.targetName}\n`;
+    buildSh += `${compiler} ${objFiles.join(' ')} ${linkLibs} -o ${this.config.targetName}\n`.replace(/\s+/g, ' ');
     buildSh += `echo "Build complete: ${this.config.targetName}"\n`;
 
     this.vfs.writeFile('/workspace/build.sh', buildSh);
@@ -129,6 +138,9 @@ export class SettingsModal {
     // 2. Generate /workspace/Makefile
     let makefile = `# Auto-generated Makefile\nCC = ${compiler}\n`;
     makefile += `CFLAGS = ${incFlags} ${extraFlags}\n`;
+    if (this.config.enableRaylib) {
+      makefile += `LDFLAGS = -lraylib\n`;
+    }
     makefile += `TARGET = ${this.config.targetName}\n\n`;
     makefile += `all: $(TARGET)\n\n`;
     makefile += `build:\n\tmkdir -p build\n\n`;
@@ -137,7 +149,8 @@ export class SettingsModal {
       makefile += `${objFiles[i]}: ${sources[i]} | build\n\t$(CC) $(CFLAGS) -c ${sources[i]} -o ${objFiles[i]}\n\n`;
     }
 
-    makefile += `$(TARGET): ${objFiles.join(' ')}\n\t$(CC) ${objFiles.join(' ')} -o $(TARGET)\n\n`;
+    const ldFlagsRef = this.config.enableRaylib ? ' $(LDFLAGS)' : '';
+    makefile += `$(TARGET): ${objFiles.join(' ')}\n\t$(CC) ${objFiles.join(' ')}${ldFlagsRef} -o $(TARGET)\n\n`;
     makefile += `clean:\n\trm -rf build $(TARGET)\n`;
 
     this.vfs.writeFile('/workspace/Makefile', makefile);

@@ -492,6 +492,7 @@ export class WasmToolchain {
 
     const args = [
       '--no-threads',
+      '--allow-undefined',
       '-z', `stack-size=${stackSize}`,
       `-L${libdir}`,
       `-Lusr/lib`,

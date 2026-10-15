@@ -1,6 +1,8 @@
 // Execution Runtime Host Manager
 // Coordinates runtime.worker.js with SharedArrayBuffer and terminal stdin capture
 
+import { InputCoordinator } from '../toolchain/raylib-host.js';
+
 const CONTROL_STATE_IDX = 0;
 const CONTROL_LEN_IDX = 1;
 const CONTROL_READ_POS_IDX = 2;
@@ -12,21 +14,41 @@ const STATE_READY = 2;
 const STATE_EOF = -1;
 
 export class RuntimeManager {
-  constructor(terminal) {
+  constructor(terminal, options = {}) {
     this.terminal = terminal;
+    this.graphicsWindow = options.graphicsWindow || null;
     this.worker = null;
     this.isRunning = false;
     this.isWaitingForStdin = false;
     this.stdinLineBuffer = '';
 
-    if (window.crossOriginIsolated) {
+    if (typeof window !== 'undefined' && window.crossOriginIsolated) {
       this.sharedBuffer = new SharedArrayBuffer(8192);
       this.sharedInt32 = new Int32Array(this.sharedBuffer);
       this.sharedUint8 = new Uint8Array(this.sharedBuffer);
+
+      this.raylibSharedBuffer = new SharedArrayBuffer(512);
+      this.inputCoordinator = new InputCoordinator({
+        sharedBuffer: this.raylibSharedBuffer,
+        width: 800,
+        height: 450,
+      });
+      if (this.graphicsWindow) {
+        this.graphicsWindow.setInputCoordinator(this.inputCoordinator);
+      }
     } else {
       this.sharedBuffer = null;
       this.sharedInt32 = null;
       this.sharedUint8 = null;
+      this.raylibSharedBuffer = null;
+      this.inputCoordinator = null;
+    }
+  }
+
+  setGraphicsWindow(graphicsWindow) {
+    this.graphicsWindow = graphicsWindow;
+    if (this.inputCoordinator && this.graphicsWindow) {
+      this.graphicsWindow.setInputCoordinator(this.inputCoordinator);
     }
   }
 
@@ -64,6 +86,22 @@ export class RuntimeManager {
             options.onStdout(msg.data);
           } else if (!options.captureStdout) {
             this.terminal.write(msg.data.replace(/\r?\n/g, '\r\n'));
+          }
+        } else if (msg.type === 'raylib_init') {
+          if (this.graphicsWindow) {
+            this.graphicsWindow.open(msg.width, msg.height, msg.title);
+          }
+        } else if (msg.type === 'frame') {
+          if (this.graphicsWindow) {
+            this.graphicsWindow.renderFrame(msg.bitmap);
+          }
+        } else if (msg.type === 'fps') {
+          if (this.graphicsWindow) {
+            this.graphicsWindow.updateFPS(msg.fps);
+          }
+        } else if (msg.type === 'raylib_close') {
+          if (this.graphicsWindow) {
+            this.graphicsWindow.close();
           }
         } else if (msg.type === 'stdin_request') {
           this.isWaitingForStdin = true;
@@ -105,6 +143,7 @@ export class RuntimeManager {
         type: 'run',
         wasmBytes,
         sharedBuffer: this.sharedBuffer,
+        raylibSharedBuffer: this.raylibSharedBuffer,
         argv,
         stdinBytes,
       });
@@ -212,6 +251,10 @@ export class RuntimeManager {
     this.isRunning = false;
     this.isWaitingForStdin = false;
     this.stdinLineBuffer = '';
+    if (this.inputCoordinator) {
+      this.inputCoordinator.shouldClose = true;
+      this.inputCoordinator.updateSharedState();
+    }
     if (this.worker) {
       this.worker.terminate();
       this.worker = null;
