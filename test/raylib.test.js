@@ -363,6 +363,30 @@ gw.renderFrame({ close() {} });
 
 gw.close();
 assert.strictEqual(gw.isOpen(), false, 'Window should be closed after close()');
-console.log('✓ GraphicsWindowUI open, isOpen, dynamic resizing, renderFrame, updateFPS, and close verified');
+
+// Test toggle preserves custom canvas dimensions without resetting to default 800x450
+gw.open(450, 450, 'Square Window');
+assert.strictEqual(gw.width, 450);
+assert.strictEqual(gw.height, 450);
+assert.strictEqual(gw.canvas.style.width, '450px');
+assert.strictEqual(gw.canvas.style.height, '450px');
+
+// First toggle: should hide window
+gw.toggle();
+assert.strictEqual(gw.isOpen(), false, 'Window should be hidden after toggle()');
+
+// Second toggle: should show window without resetting dimensions to 800x450
+gw.toggle();
+assert.strictEqual(gw.isOpen(), true, 'Window should be open after toggle()');
+assert.strictEqual(gw.width, 450, 'Width must remain 450 after toggle()');
+assert.strictEqual(gw.height, 450, 'Height must remain 450 after toggle()');
+assert.strictEqual(gw.canvas.width, 450);
+assert.strictEqual(gw.canvas.height, 450);
+assert.strictEqual(gw.canvas.style.width, '450px');
+assert.strictEqual(gw.canvas.style.height, '450px');
+assert.strictEqual(gw.resBadge.textContent, '450x450');
+
+gw.close();
+console.log('✓ GraphicsWindowUI open, isOpen, dynamic resizing, toggle dimension preservation, renderFrame, updateFPS, and close verified');
 
 console.log('--- ALL RAYLIB TESTS PASSED ---');

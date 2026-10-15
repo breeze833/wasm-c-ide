@@ -194,10 +194,14 @@ export class GraphicsWindowUI {
   }
 
   open(width, height, title) {
-    if (this.inputCoordinator && typeof this.inputCoordinator.reset === 'function') {
-      this.inputCoordinator.reset();
+    if (width && height) {
+      if (this.inputCoordinator && typeof this.inputCoordinator.reset === 'function') {
+        this.inputCoordinator.reset();
+      }
+      this.initWindow(width, height, title);
+    } else {
+      this.show();
     }
-    this.initWindow(width || this.width, height || this.height, title || this.title);
   }
 
   isOpen() {
@@ -215,10 +219,25 @@ export class GraphicsWindowUI {
     this.container.style.display = 'flex';
     this.isMinimized = false;
     this.container.classList.remove('minimized');
+    if (this.canvas && typeof this.canvas.focus === 'function') {
+      this.canvas.focus();
+    }
   }
 
   hide() {
     this.container.style.display = 'none';
+  }
+
+  toggle() {
+    if (this.isOpen()) {
+      if (this.isMinimized) {
+        this.toggleMinimize();
+      } else {
+        this.hide();
+      }
+    } else {
+      this.show();
+    }
   }
 
   close() {

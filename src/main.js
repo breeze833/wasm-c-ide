@@ -452,11 +452,7 @@ export class App {
     if (btnGraphicsWindow) {
       btnGraphicsWindow.addEventListener('click', () => {
         if (this.graphicsWindow) {
-          if (this.graphicsWindow.isOpen()) {
-            this.graphicsWindow.close();
-          } else {
-            this.graphicsWindow.open(800, 450, 'Raylib Display');
-          }
+          this.graphicsWindow.toggle();
         }
       });
     }
