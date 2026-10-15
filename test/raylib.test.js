@@ -100,6 +100,20 @@ const wasmView = new DataView(wasmMem.buffer, 1024, 372);
 assert.strictEqual(wasmView.getInt32(0, true), 640);
 assert.strictEqual(wasmView.getFloat32(24, true), 120);
 assert.strictEqual(wasmView.getUint32(44, true), 1 << 5);
+
+// Verify shouldClose setting and reset() cleanup
+coord.shouldClose = true;
+coord.updateSharedState();
+assert.strictEqual(view.getInt32(20, true), 1, 'shouldClose should be 1');
+coord.pollToWasm(1024, wasmMem);
+assert.strictEqual(wasmView.getInt32(20, true), 1, 'wasm shouldClose should be 1');
+
+coord.reset();
+assert.strictEqual(coord.shouldClose, false, 'shouldClose should reset to false');
+assert.strictEqual(view.getInt32(20, true), 0, 'sharedBuffer shouldClose should reset to 0');
+coord.pollToWasm(1024, wasmMem);
+assert.strictEqual(wasmView.getInt32(20, true), 0, 'wasm shouldClose should reset to 0');
+
 console.log('✓ InputCoordinator SharedArrayBuffer state sync and pollToWasm verified');
 
 // Test 5: End-to-end WasmToolchain compilation and linking with -lraylib

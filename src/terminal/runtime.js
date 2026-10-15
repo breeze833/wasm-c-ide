@@ -69,6 +69,13 @@ export class RuntimeManager {
         Atomics.store(this.sharedInt32, CONTROL_READ_POS_IDX, 0);
       }
 
+      if (this.inputCoordinator) {
+        this.inputCoordinator.reset();
+      }
+      if (this.raylibSharedBuffer) {
+        new Uint8Array(this.raylibSharedBuffer).fill(0);
+      }
+
       this.worker = new Worker(
         new URL('../workers/runtime.worker.js', import.meta.url),
         { type: 'module' }
@@ -252,8 +259,7 @@ export class RuntimeManager {
     this.isWaitingForStdin = false;
     this.stdinLineBuffer = '';
     if (this.inputCoordinator) {
-      this.inputCoordinator.shouldClose = true;
-      this.inputCoordinator.updateSharedState();
+      this.inputCoordinator.reset();
     }
     if (this.worker) {
       this.worker.terminate();

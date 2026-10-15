@@ -772,6 +772,27 @@ class InputCoordinator {
       }
       this.updateSharedState();
     });
+
+    canvas.addEventListener('blur', () => {
+      this.keysDown.fill(0);
+      this.mouseButtons = 0;
+      this.updateSharedState();
+    });
+  }
+
+  reset() {
+    this.shouldClose = false;
+    this.mouseButtons = 0;
+    this.mouseWheelX = 0;
+    this.mouseWheelY = 0;
+    this.keysDown.fill(0);
+    this.keyPressedQueue.length = 0;
+    this.charPressedQueue.length = 0;
+
+    if (this.sharedBuffer) {
+      this.sharedU8.fill(0);
+      this.updateSharedState();
+    }
   }
 
   updateSharedState() {
@@ -1061,6 +1082,7 @@ function createRaylibHost(options = {}) {
       input.windowHeight = height;
       input.renderWidth = width;
       input.renderHeight = height;
+      input.shouldClose = false;
       input.updateSharedState();
       if (typeof document !== 'undefined' && title) {
         document.title = title;

@@ -174,6 +174,9 @@ export class GraphicsWindowUI {
   }
 
   open(width, height, title) {
+    if (this.inputCoordinator && typeof this.inputCoordinator.reset === 'function') {
+      this.inputCoordinator.reset();
+    }
     this.initWindow(width || this.width, height || this.height, title || this.title);
   }
 
@@ -205,6 +208,9 @@ export class GraphicsWindowUI {
       this.popupWindow = null;
     }
     this.isPoppedOut = false;
+    if (this.inputCoordinator && typeof this.inputCoordinator.reset === 'function') {
+      this.inputCoordinator.reset();
+    }
     this.onCloseRequested();
   }
 
