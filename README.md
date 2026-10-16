@@ -82,9 +82,20 @@ This IDE is specifically engineered for **students and systems programming educa
 - **Sysroot & Standard Libraries**:
   - Bundles Musl libc standard headers under `/usr/include/` and C++ headers under `/usr/include/c++/v1/`.
   - Pre-mounted static runtime archives in `/usr/lib/`: `crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libm.a`, `libpthread.a`.
-- **Multi-File Separate Compilation**:
+- **Standard Compiler CLI Options & Stages**:
+  - **Preprocess Only (`-E`)**: Inspect preprocessed output streamed directly to stdout or saved via `-o <file>` (e.g., `gcc -E main.c > main.i`, `gcc -E main.c | grep foo`).
+  - **Assembly Only (`-S`)**: Compile to WebAssembly assembly text (`main.s` or `-o -` for stdout).
+  - **Object Compilation (`-c`)**: Compile source files to object files (`main.o`) without invoking the linker.
+  - **Macro & Include Directives**: Pass `-D<macro>`, `-U<macro>`, `-I<dir>`, and `-isystem<dir>` flags seamlessly.
+  - **Diagnostics & Optimization**: Supports `-O0`, `-O1`, `-O2`, `-O3`, `-Os`, `-Wall`, `-Wextra`, `-Werror`, `-w`, and `-v` verbose diagnostics.
+- **Built-in `ar` Archiver**:
+  - Full-featured static library archiver mounted at `/usr/bin/ar` and integrated into the shell and `make` (`AR = ar`).
+  - Supports `rcs` (create/replace with symbol table index), `t`/`tv` (list contents), `x` (extract), `d` (delete), and `q` (quick append).
+  - Generates standard `!<arch>\n` archives with big-endian symbol indices extracted directly from Wasm object `linking` metadata, fully linkable by `wasm-ld` via `-L<dir> -l<name>` or direct archive paths.
+- **Multi-File Separate Compilation & Linking**:
   - Separate object generation: `gcc -c src/calc.c -o build/calc.o`
-  - Separate linking: `gcc build/main.o build/calc.o -o a.out`
+  - Archive creation: `ar rcs build/libcalc.a build/calc.o`
+  - Separate linking: `gcc build/main.o -Lbuild -lcalc -o a.out`
 - **Robust MemFS Layer**: Automatically creates ancestor directories, guards against invalid unlinks, and handles missing file probes safely without WebAssembly assertion traps.
 
 ### 4. Dual Build Systems (Shell Script & Makefile)

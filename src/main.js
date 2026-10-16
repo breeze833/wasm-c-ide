@@ -11,6 +11,7 @@ import { TerminalManager } from './terminal/terminal.js';
 import { RuntimeManager } from './terminal/runtime.js';
 import { WasmToolchain } from './toolchain/wasm-clang.js';
 import { executeGccCommand } from './toolchain/driver.js';
+import { executeArCommand } from './toolchain/ar.js';
 import { GraphicsWindowUI } from './components/graphics-window.js';
 
 import { SettingsModal } from './components/settings.js';
@@ -301,6 +302,27 @@ export class App {
       return true;
     }
 
+    if (cmd === 'ar') {
+      const exitCode = await executeArCommand({
+        args,
+        cwd: cwd || '/workspace',
+        vfs: this.vfs,
+        toolchain: this.toolchain,
+        write: writeFn,
+      });
+
+      if (this.fileTreeUI) this.fileTreeUI.render();
+      await flushStdoutRedirect();
+
+      if (captureStdout) {
+        return { exitCode, stdout: capturedStdout };
+      }
+      if (exitCode !== 0) {
+        throw new Error(`Process terminated with exit code ${exitCode}`);
+      }
+      return true;
+    }
+
     if (cmd === 'make') {
       const exitCode = await runMake({
         targetName: args[0] || 'all',
@@ -340,6 +362,18 @@ export class App {
               vfs: this.vfs,
               toolchain: this.toolchain,
               mode: subMode,
+              write: writeFn,
+            });
+            if (this.fileTreeUI) this.fileTreeUI.render();
+            return exitCode;
+          } else if (trimmed.startsWith('ar ') || trimmed.startsWith('$(AR)')) {
+            const subArgs = trimmed.split(/\s+/);
+            subArgs.shift();
+            const exitCode = await executeArCommand({
+              args: subArgs,
+              cwd: cwd || '/workspace',
+              vfs: this.vfs,
+              toolchain: this.toolchain,
               write: writeFn,
             });
             if (this.fileTreeUI) this.fileTreeUI.render();

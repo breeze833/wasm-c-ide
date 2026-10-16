@@ -572,6 +572,7 @@ export const USR_BIN_COMMANDS = [
   'clang++',
   'make',
   'wasm-ld',
+  'ar',
 ];
 
 export function mountSysroot(vfs) {
