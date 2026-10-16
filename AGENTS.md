@@ -42,6 +42,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   ├── terminal.js        # xterm.js wrapper and command injection bridge
 │   │   └── runtime.js         # Host-side runtime manager and SharedArrayBuffer coordinator
 │   ├── toolchain/
+│   │   ├── ar.js              # POSIX ar static library archiver and wasm object symbol extractor
 │   │   ├── driver.js          # gcc / clang command parser and execution coordinator
 │   │   ├── make.js            # Incremental Makefile runner evaluating mtimes
 │   │   ├── raylib-host.js     # Raylib GLES2 / WebGL host calls and input coordination
@@ -63,6 +64,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │       ├── wasm/              # Prebuilt clang.wasm, lld.wasm, memfs.wasm, libraylib.a, sysroot.tar
 │       └── include/           # Minimal fallback libc headers & raylib headers
 └── test/
+    ├── ar.test.js             # Static archiver creation, extraction, table, and wasm-ld linkage tests
     ├── make.test.js           # Makefile parsing and incremental build tests
     ├── pipeline.test.js       # Command pipeline (|) and file redirection (<, >, >>) tests
     ├── raylib.test.js         # Raylib graphics compilation, input sync, and canvas UI tests
@@ -153,6 +155,19 @@ Agents executing this project should proceed milestone-by-milestone:
 - Decouple Project Settings modal into dedicated **Save** (state & sysroot mounting) and **Generate Build Script** (`build.sh` & `Makefile` generation) actions.
 - Enforce MemFS unlinking invariants: always truncate files to 0 bytes before unlinking (`AddFileNode(len, 0)` then `path_unlink_file`) in `MemFS.removeFile()` to conceal the inode reallocation offset bug and ensure clean recompilation.
 
+### Milestone 11: Compiler CLI Options (-E, -S, -c, -v, -D) & Built-in `ar` Archiver Tool
+- Implement compiler stages in `wasm-clang.js` and `driver.js`:
+  - Preprocess stage (`-E`): stream preprocessed C/C++ text directly to stdout (`write`) or output file (`-o <file>`), skipping linker.
+  - Assembly stage (`-S`): compile source to WebAssembly assembly text (`<name>.s`, `-o <file>`, or `-o -` for stdout), skipping linker.
+  - Compile stage (`-c`): compile source to object file (`<name>.o` or `-o <file>`), skipping linker.
+  - Full build & link (default): compile sources to `.o` and invoke `wasm-ld` with user objects and libraries.
+- Support preprocessor, optimization, diagnostic, and linker flags: `-D<macro>`, `-U<macro>`, `-I<dir>`, `-isystem<dir>`, `-O0`–`-O3`, `-Os`, `-w`, `-Wall`, `-Wextra`, `-Werror`, `-pedantic-errors`, `-v`, `-L<dir>`, `-l<name>`, `-Wl,...`.
+- Implement `src/toolchain/ar.js`:
+  - Standard POSIX/BSD `ar` tool mounted under `/usr/bin/ar` and available in `which`, shell worker, and `make`.
+  - Operations: `rcs` (create/replace with symbol index), `t`/`tv` (table of contents), `x` (extract), `d` (delete), `q` (quick append), `s` (regenerate symbol index).
+  - WebAssembly relocatable object parsing: parse custom `linking` section (subtype 8, `WASM_SYMBOL_TABLE`) to extract defined, non-local symbols.
+  - Big-endian symbol index (`/`) generation and GNU long filename table (`//`) support, fully compatible with LLVM 8.0.1 `wasm-ld`.
+
 ---
 
 ## 4. Verification & Testing Checklist
@@ -171,6 +186,12 @@ Before marking any task complete, agents must verify:
 | **Input Redirection (`<`)** | `./a.out < input.txt` reads directly from VFS file without interactive terminal prompt. |
 | **Command Pipelines (`|`)** | `cat input.txt | ./a.out` and `./a.out | cat` pipe output to input across stages. |
 | **Direct Shell Script Execution** | `./build.sh` or `/workspace/script.sh` runs shell commands without requiring manual `sh` prefix; Wasm validation catches invalid binaries. |
+| **Compiler Preprocessing (`gcc -E`)** | `gcc -E main.c` streams preprocessed output to terminal or `main.i` via `-o` without linking. |
+| **Compiler Assembly (`gcc -S`)** | `gcc -S main.c` compiles to WebAssembly assembly text (`main.s` or `-o <file>`) without linking. |
+| **Compiler Macros & Diagnostics (`-D`, `-v`)** | Macros defined via `-D` substitute cleanly; `-v` prints verbose toolchain invocations and search paths. |
+| **Static Archiver Creation (`ar rcs`)** | `ar rcs libmath.a add.o sub.o` generates compliant `!<arch>\n` archive with big-endian symbol index extracted from Wasm relocatable objects. |
+| **Static Archiver Linkage (`wasm-ld`)** | Programs link against generated `.a` archives using `-Lworkspace -lmath` or direct file path `workspace/libmath.a`. |
+| **Static Archiver Table & Extraction (`ar t`, `ar x`)** | `ar t` lists member files; `ar x` unpacks members into current directory; `ar d` deletes members. |
 | **Infinite Loop Interruption** | `while(1);` can be interrupted via `Ctrl+C` or UI Stop button; terminal returns to prompt. |
 | **Refresh Persistence** | Modifying files, closing tab, and reopening keeps files intact via IndexedDB. |
 | **Zip Round-Trip** | Exporting project to zip and re-importing preserves directory hierarchy. |

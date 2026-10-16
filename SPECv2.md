@@ -121,9 +121,24 @@ SPECv2 extends the original specification to provide first-class, optional **Ray
 - **Prebuilt Binaries**: Open-source prebuilt WebAssembly binaries are utilized for Clang, `wasm-ld`, Make, and BusyBox.
 - **Compiler**: Clang / LLVM Wasm build mapped to commands `gcc`, `clang`, `g++`, and `clang++`. In C++ mode or when invoked via `g++` / `clang++`, C++ compilation flags and `libc++` linkage are automatically selected.
 - **Linker**: `wasm-ld` mapped to handle object linking.
+- **Static Archiver**: Built-in `ar` command mounted under `/usr/bin/ar` for creating and managing static `.a` libraries.
 - **Sysroot & Standard Libraries**:
   - Bundles minimal `wasi-libc` (`libc.a`, `crt1.o`, Musl libc headers under `/usr/include`, static libraries under `/usr/lib`).
   - Full C++ standard library support (`libc++.a`, `libc++abi.a`, C++ headers under `/usr/include/c++/v1`).
+- **Comprehensive Compiler CLI Flag & Stage Support**:
+  - **Preprocess Stage (`-E`)**: Preprocess source files without compiling or linking. Streams preprocessed output to `stdout` (or `-o <file>`). Supports piping and redirection (`gcc -E main.c > main.i`, `gcc -E main.c | grep foo`).
+  - **Assembly Stage (`-S`)**: Compiles source files to WebAssembly text/assembly format (`.s`). Emits `<source_base>.s` or `-o <file>` (or `-o -` for stdout). Skips linking.
+  - **Object Compilation Stage (`-c`)**: Compiles source files to `.o` object format (`<source_base>.o` or `-o <file>`). Skips linking.
+  - **Full Build & Link Stage (Default)**: When none of `-E`, `-S`, or `-c` are given, compiles all input source files to `.o` and invokes `wasm-ld` with user objects and libraries into `a.out` (or `-o <target>`).
+  - **Preprocessor & Include Options**: `-D<macro>`, `-U<macro>`, `-I<dir>`, `-isystem<dir>` resolved relative to working directory and passed directly to Clang.
+  - **Optimization & Diagnostic Flags**: User optimization flags (`-O0`, `-O1`, `-O2`, `-O3`, `-Os`), warning controls (`-w`, `-Wall`, `-Wextra`, `-Werror`, `-pedantic-errors`), and verbose diagnostics (`-v`).
+  - **Linker Flag Routing**: Search paths (`-L<dir>`), libraries (`-l<name>`), and linker options (`-Wl,...`) cleanly routed to `wasm-ld`.
+- **Built-in `ar` Static Library Archiver Tool**:
+  - Standard POSIX/BSD `ar` tool mounted under `/usr/bin/ar` and recognized in `which ar`, interactive shell, and Makefiles (`AR = ar`, `$(AR) rcs $@ $^`).
+  - **Supported Operations**: `r` (replace/insert), `c` (create silently), `s` (write symbol table index), `t` (table of contents), `tv` (verbose listing), `x` (extract members), `d` (delete member), `q` (quick append).
+  - **Archive Compliance & Big-Endian Symbol Table (`/`)**: Generates standard `!<arch>\n` archives with 60-byte headers and even-byte newline padding. Automatically extracts defined, non-local symbols from member Wasm objects (subtype 8, `WASM_SYMBOL_TABLE` in `linking` custom section) and generates a big-endian symbol index compatible with LLVM 8.0.1 `wasm-ld`.
+  - **GNU Long Filename Table (`//`)**: Supports member names exceeding 15 characters via standard GNU long filename tables.
+  - **Linker Interoperability**: Generated archives link cleanly against user applications using `-L<dir> -l<lib>` or direct file paths.
 - **Toolchain MemFS Lifecycle, Directory Auto-Creation & Inode Unlink Guardrails**:
   - The toolchain initializes an in-memory virtual filesystem (`MemFS`) for Clang/LLD execution.
   - Toolchain initialization is pre-warmed on application boot and guarded against re-entrance.
@@ -382,4 +397,10 @@ Because standard Raylib games run in a continuous synchronous loop (`while (!Win
 | **Direct Shell Script Execution** | `./build.sh` or `/workspace/script.sh` executes shell commands without manual `sh` prefix; Wasm validation verifies executable binaries. |
 | **Settings Modal Action Decoupling** | Clicking Save updates state and mounts/unmounts libraries without modifying `/workspace`; Generate Build Script creates/updates build files. |
 | **MemFS Recompilation Invariant** | Deleting an object file (`build/calc.o`) and re-running `make` cleanly recompiles and relinks without node reuse header corruption. |
+| **Compiler Preprocessing (`gcc -E`)** | `gcc -E main.c` streams preprocessed output to terminal or `main.i` via `-o` without invoking linker or failing on incomplete objects. |
+| **Compiler Assembly (`gcc -S`)** | `gcc -S main.c` compiles to WebAssembly assembly text (`main.s` or `-o <file>`) without linking. |
+| **Compiler Macros & Diagnostics (`-D`, `-v`)** | Macros defined via `-D` substitute cleanly; `-v` prints verbose toolchain invocations and search paths. |
+| **Static Archiver Creation (`ar rcs`)** | `ar rcs libmath.a add.o sub.o` generates compliant `!<arch>\n` archive with big-endian symbol index extracted from Wasm relocatable objects. |
+| **Static Archiver Linkage (`wasm-ld`)** | Programs link against generated `.a` archives using `-Lworkspace -lmath` or direct file path `workspace/libmath.a`. |
+| **Static Archiver Table & Extraction (`ar t`, `ar x`)** | `ar t` lists member files; `ar x` unpacks members into current directory; `ar d` deletes members. |
 | **Offline PWA Operation** | Raylib binaries compile and run while disconnected from the internet via Service Worker caching. |

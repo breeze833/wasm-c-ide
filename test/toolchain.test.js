@@ -1,6 +1,6 @@
 // Unit tests for Toolchain argument parsing and driver flags
 import assert from 'node:assert';
-import { executeGccCommand } from '../src/toolchain/driver.js';
+import { executeGccCommand, parseCompilerArgs } from '../src/toolchain/driver.js';
 import { WasmToolchain } from '../src/toolchain/wasm-clang.js';
 import { VFS } from '../src/vfs/vfs.js';
 
@@ -402,6 +402,108 @@ console.log('✓ Direct compile & link argument parsing passed');
     assert.notStrictEqual(code, 0, 'Compiling main.c without calc.h must fail');
     assert.match(diagOutput, /calc\.h.*not found/i, 'Must report calc.h not found in compiler diagnostics');
     console.log('✓ Ghost file prevention and missing header/source validation verified');
+
+    // Test 10: Compiler CLI options parsing via parseCompilerArgs
+    const pE = parseCompilerArgs(['-E', 'main.c']);
+    assert.strictEqual(pE.stage, 'preprocess');
+    assert.deepStrictEqual(pE.sources, ['main.c']);
+
+    const pS = parseCompilerArgs(['-S', 'main.c', '-o', 'output.s']);
+    assert.strictEqual(pS.stage, 'assembly');
+    assert.strictEqual(pS.outputFile, 'output.s');
+
+    const pC = parseCompilerArgs(['-c', 'main.c', '-O3', '-DDEBUG=1', '-Iinclude', '-Llib', '-lm']);
+    assert.strictEqual(pC.stage, 'compile');
+    assert.strictEqual(pC.compilerFlags.includes('-O3'), true);
+    assert.strictEqual(pC.compilerFlags.includes('-DDEBUG=1'), true);
+    assert.strictEqual(pC.compilerFlags.includes('-I/workspace/include'), true);
+    assert.strictEqual(pC.linkerFlags.includes('-Lworkspace/lib'), true);
+    assert.strictEqual(pC.linkerFlags.includes('-lm'), true);
+    console.log('✓ Compiler CLI options argument parsing (-E, -S, -c, -D, -I, -L, -l) verified');
+
+    // Test 11: gcc -E streams preprocessed output to stdout (write)
+    vfs.writeFile('/workspace/macro.c', '#define ANSWER 42\nint get_answer(void) { return ANSWER; }\n');
+    let prepStdout = '';
+    code = await executeGccCommand({
+      cmd: 'gcc',
+      args: ['-E', 'macro.c'],
+      cwd: '/workspace',
+      vfs,
+      toolchain: tc,
+      mode: 'c',
+      write: (m) => { prepStdout += m; }
+    });
+    assert.strictEqual(code, 0, 'gcc -E must succeed with exit code 0');
+    assert.strictEqual(prepStdout.includes('get_answer'), true, 'Preprocessed output must contain get_answer');
+    assert.strictEqual(prepStdout.includes('42'), true, 'Preprocessed output must contain substituted macro value 42');
+    console.log('✓ gcc -E preprocessor streaming to stdout verified');
+
+    // Test 12: gcc -E macro.c -o macro.i writes preprocessed output to file in VFS
+    code = await executeGccCommand({
+      cmd: 'gcc',
+      args: ['-E', 'macro.c', '-o', 'macro.i'],
+      cwd: '/workspace',
+      vfs,
+      toolchain: tc,
+      mode: 'c',
+      write: () => {}
+    });
+    assert.strictEqual(code, 0, 'gcc -E -o macro.i must succeed');
+    assert.strictEqual(vfs.exists('/workspace/macro.i'), true, 'macro.i must be created in VFS');
+    const macroIContent = vfs.readFile('/workspace/macro.i', true);
+    assert.strictEqual(macroIContent.includes('get_answer'), true);
+    assert.strictEqual(macroIContent.includes('42'), true);
+    console.log('✓ gcc -E with -o <file> output to VFS verified');
+
+    // Test 13: gcc -S generates WebAssembly text/assembly format (.s)
+    code = await executeGccCommand({
+      cmd: 'gcc',
+      args: ['-S', 'macro.c'],
+      cwd: '/workspace',
+      vfs,
+      toolchain: tc,
+      mode: 'c',
+      write: () => {}
+    });
+    assert.strictEqual(code, 0, 'gcc -S must succeed');
+    assert.strictEqual(vfs.exists('/workspace/macro.s'), true, 'macro.s must be created in VFS');
+    const macroSContent = vfs.readFile('/workspace/macro.s', true);
+    assert.match(macroSContent, /get_answer/);
+    assert.match(macroSContent, /i32\.const\s+42/);
+    console.log('✓ gcc -S assembly generation (.s) verified');
+
+    // Test 14: gcc -S macro.c -o - streams assembly to stdout
+    let asmStdout = '';
+    code = await executeGccCommand({
+      cmd: 'gcc',
+      args: ['-S', 'macro.c', '-o', '-'],
+      cwd: '/workspace',
+      vfs,
+      toolchain: tc,
+      mode: 'c',
+      write: (m) => { asmStdout += m; }
+    });
+    assert.strictEqual(code, 0, 'gcc -S -o - must succeed');
+    assert.match(asmStdout, /get_answer/);
+    assert.match(asmStdout, /i32\.const\s+42/);
+    console.log('✓ gcc -S -o - assembly streaming to stdout verified');
+
+    // Test 15: gcc -D macro definitions and -v verbose diagnostics
+    vfs.writeFile('/workspace/flags.c', '#ifndef CUSTOM_FLAG\n#error "CUSTOM_FLAG not defined"\n#endif\nint test() { return CUSTOM_FLAG; }\n');
+    let verboseStdout = '';
+    code = await executeGccCommand({
+      cmd: 'gcc',
+      args: ['-DCUSTOM_FLAG=100', '-v', '-c', 'flags.c', '-o', 'flags.o'],
+      cwd: '/workspace',
+      vfs,
+      toolchain: tc,
+      mode: 'c',
+      write: (m) => { verboseStdout += m; }
+    });
+    assert.strictEqual(code, 0, 'gcc -D and -v must succeed');
+    assert.strictEqual(vfs.exists('/workspace/flags.o'), true, 'flags.o must be created');
+    assert.match(verboseStdout, /clang -cc1/i, 'Verbose output must include compiler invocations');
+    console.log('✓ gcc -D macro definitions and -v diagnostics verified');
 
     console.log('--- ALL TOOLCHAIN DRIVER TESTS PASSED ---');
   });

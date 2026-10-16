@@ -490,22 +490,27 @@ export class WasmToolchain {
     return this.memfs.removeFile(cleanPath);
   }
 
-  async compile(sourcePath, objPath, mode = 'c', customFlags = []) {
+  async compile(sourcePath, objPath, mode = 'c', customFlags = [], options = {}) {
     await this.init();
     const clang = await this._getClang();
 
     const cleanSrc = sourcePath.replace(/^\/+/, '');
-    const cleanObj = objPath.replace(/^\/+/, '');
+    const cleanObj = objPath === '-' ? '-' : objPath.replace(/^\/+/, '');
 
-    // Ensure output directory exists in MemFS before compilation
-    const lastSlash = cleanObj.lastIndexOf('/');
-    if (lastSlash !== -1) {
-      this.memfs.ensureDirectory(cleanObj.substring(0, lastSlash));
+    // Ensure output directory exists in MemFS before compilation (if not writing to stdout '-')
+    if (cleanObj !== '-') {
+      const lastSlash = cleanObj.lastIndexOf('/');
+      if (lastSlash !== -1) {
+        this.memfs.ensureDirectory(cleanObj.substring(0, lastSlash));
+      }
     }
+
+    const stage = options.stage || 'compile'; // 'preprocess' (-E), 'assembly' (-S), 'compile' (-emit-obj)
+    const stageFlag = stage === 'preprocess' ? '-E' : (stage === 'assembly' ? '-S' : '-emit-obj');
 
     const args = [
       '-cc1',
-      '-emit-obj',
+      stageFlag,
       '-disable-free',
       '-isysroot', '/',
       '-internal-isystem', '/include',
@@ -516,8 +521,13 @@ export class WasmToolchain {
       '-ferror-limit', '19',
       '-fmessage-length', '80',
       '-fcolor-diagnostics',
-      '-O2',
     ];
+
+    // Check if customFlags has an optimization flag like -O0, -O1, -O2, -O3, -Os, -Oz
+    const hasOptFlag = customFlags.some(f => /^-O[0-3sz]?$/.test(f));
+    if (!hasOptFlag) {
+      args.push('-O2');
+    }
 
     if (mode === 'c') {
       // Pure C mode: Force C11 and strict pedantic errors
@@ -533,7 +543,7 @@ export class WasmToolchain {
     try {
       const app = await AppInstance.create(clang, this.memfs, 'clang', ...args);
       const exitCode = app.run();
-      if (exitCode === 0 && this.memfs) {
+      if (exitCode === 0 && this.memfs && cleanObj !== '-') {
         this.memfs.files.add(cleanObj);
       }
       return exitCode;
