@@ -78,10 +78,11 @@ This IDE is specifically engineered for **students and systems programming educa
   - Guarantees that the student's shell working directory is preserved even if compilation or execution exits with an error code.
 
 ### 3. Clang & LLD WebAssembly Toolchain
-- **Real Clang & LLD Binaries**: Uses prebuilt WebAssembly builds of LLVM Clang and `wasm-ld` running in the browser.
+- **Modern LLVM 19.1.0 Toolchain**: Powered by real WebAssembly builds of LLVM Clang 19.1.0 and `wasm-ld` 19.1.0 targeting **WASI Preview 1 (`wasm32-wasip1`)**, directly integrated from [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi).
+- **Native WebAssembly Section 12 Support**: `wasm-ld` natively parses and links relocatable object files containing Section 12 (`DataCount`) emitted by modern Clang for bulk-memory operations.
 - **Sysroot & Standard Libraries**:
-  - Bundles Musl libc standard headers under `/usr/include/` and C++ headers under `/usr/include/c++/v1/`.
-  - Pre-mounted static runtime archives in `/usr/lib/`: `crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libm.a`, `libpthread.a`.
+  - Bundles standard WASI Preview 1 headers under `/usr/include/`, `/include/wasm32-wasip1/`, `/lib/clang/19/include/`, and C++ headers under `/usr/include/c++/v1/`.
+  - Pre-mounted static runtime archives in `/usr/lib/` and `/lib/wasm32-wasip1/`: `crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libclang_rt.builtins.a`, `libm.a`, `libpthread.a`.
 - **Standard Compiler CLI Options & Stages**:
   - **Preprocess Only (`-E`)**: Inspect preprocessed output streamed directly to stdout or saved via `-o <file>` (e.g., `gcc -E main.c > main.i`, `gcc -E main.c | grep foo`).
   - **Assembly Only (`-S`)**: Compile to WebAssembly assembly text (`main.s` or `-o -` for stdout).
@@ -96,7 +97,11 @@ This IDE is specifically engineered for **students and systems programming educa
   - Separate object generation: `gcc -c src/calc.c -o build/calc.o`
   - Archive creation: `ar rcs build/libcalc.a build/calc.o`
   - Separate linking: `gcc build/main.o -Lbuild -lcalc -o a.out`
-- **Robust MemFS Layer**: Automatically creates ancestor directories, guards against invalid unlinks, and handles missing file probes safely without WebAssembly assertion traps.
+- **WebAssembly Shared Objects (`.so`)**:
+  - Position-Independent Code: `-fPIC` and `-fpic` flags compile code with position-independent relocation records.
+  - Shared library creation: `gcc -shared -fPIC src/math.c -o build/libmath.so` (and `g++ -shared -fPIC ...` for C++) generates standard WebAssembly dynamic libraries with `dylink.0` custom sections.
+  - Dynamic linking: Link executables against `.so` shared libraries directly (`gcc src/main.c build/libmath.so -o a.out`) or via dynamic library search paths (`-Bdynamic -Lbuild -lmath`).
+- **Native WASI Preview 1 MemFS Layer**: Built upstream in `clang-wasi` with dynamic node allocation supporting 4,300+ standard library files, explicit deallocation on unlink, standard WASI Preview 1 struct alignment, and safe non-trapping lookups.
 
 ### 4. Dual Build Systems (Shell Script & Makefile)
 - **Track 1: Shell Script (`build.sh`)**:
@@ -118,7 +123,7 @@ This IDE is specifically engineered for **students and systems programming educa
   - Pressing `Ctrl+C` in `xterm.js` or clicking the UI **Stop** button terminates the runtime worker immediately, returning control to the shell prompt.
 
 ### 6. Raylib 5.5 2D/3D Game Engine & Dual Console
-- **First-Class Graphics Support**: Opt-in Raylib 5.5 integration via [`@breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) without Emscripten.
+- **First-Class Graphics Support**: Opt-in Raylib 5.5 integration via [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) without Emscripten, compiled with LLVM 19.
 - **Dedicated Graphical Console**: Floating, resizable in-page window running alongside `xterm.js`.
   - Dynamic resolution adaptation based on `InitWindow(width, height, title)`.
   - Zero-copy GPU frame transfer (`ImageBitmap` / WebGL) rendered at 60 FPS.
@@ -136,7 +141,7 @@ This IDE is specifically engineered for **students and systems programming educa
 - **Installable Desktop/Mobile App**: Certified PWA with Web App Manifest (`manifest.webmanifest`), dark theme colors, and icons.
 - **In-App Install Prompt**: Automatically reveals an **Install** button in the header toolbar when the browser detects installability.
 - **100% Offline Capability**:
-  - Unified Service Worker caches App Shell, fonts, editor modules, WebAssembly compiler binaries (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar`), and precompiled Raylib libraries.
+  - Unified Service Worker caches App Shell, fonts, editor modules, WebAssembly compiler binaries (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar.gz`), and precompiled Raylib libraries.
   - Seamless offline execution with retained `COOP: same-origin` and `COEP: require-corp` isolation headers so `SharedArrayBuffer` remains operational without an internet connection.
   - Automatic connection status notifications when transitioning between online and offline modes.
 

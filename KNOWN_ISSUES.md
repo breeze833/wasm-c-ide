@@ -4,42 +4,22 @@ This document catalogs technical limitations, toolchain version gaps, and platfo
 
 ---
 
-## 1. WebAssembly Relocatable Object ABI Mismatch (LLVM 8.0.1 vs. Modern Clang 15–19)
+## 1. WebAssembly Relocatable Object ABI Compatibility (Resolved in LLVM 19.1.0)
 
-### Context & Impact
-While final WebAssembly executable binaries (`.wasm`) are standardized and cross-platform across all compliant engines (V8, SpiderMonkey, JavaScriptCore, Wasmtime, Wasmer), **intermediate relocatable object files (`.o`) and static library archives (`.a`) are compiler-internal intermediate formats**.
+### Status: RESOLVED
+The in-browser toolchain has been upgraded from legacy LLVM 8.0.1 to **LLVM 19.1.0** targeting **WASI Preview 1 (`wasm32-wasip1`)** using prebuilt binaries from [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi) and [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi).
 
-When importing external prebuilt libraries—such as `@breeze833/raylib-wasi` via `npm install https://github.com/breeze833/raylib-wasi`—the prebuilt `libraylib.a` provided in upstream GitHub releases was compiled with modern **Clang 19**. Attempting to link this archive using `wasm-c-ide`'s in-browser linker (`lld.wasm`) fails.
-
-### Detailed Root Causes
-
-1. **Wasm Section 12 (`DataCount`) Rejection**:
-   - Modern Clang (LLVM 15+) emits WebAssembly Section 12 (`DataCount` section) by default in relocatable object files to support the Bulk Memory Operations proposal.
-   - `wasm-c-ide` bundles `lld.wasm` based on **LLVM 8.0.1** (circa 2019). When LLVM 8's `wasm-ld` encounters Section 12 in an object file, it aborts:
-     ```
-     wasm-ld: error: <object_file>: Bad section type: 12
-     ```
-   - *Note*: Naively stripping Section 12 from `.o` bytes corrupts the relative byte offsets of relocations in `.reloc.CODE`, causing memory corruption or invalid LEB128 relocation errors during linking.
-
+### Key Architectural Resolutions:
+1. **Wasm Section 12 (`DataCount`) Support**:
+   - Modern `wasm-ld` 19 natively parses and links object files containing Section 12 (`DataCount` section) emitted by modern Clang for bulk-memory operations.
 2. **Relocation Record Types**:
-   - Newer versions of LLVM introduced additional relocation types (such as `R_WASM_TABLE_INDEX_REL_SLEB` and new linking metadata versions) that older linkers cannot parse.
-
-3. **Thread-Local Storage (TLS) in WASI libc**:
-   - Upstream WASI libc in modern `wasi-sdk` uses thread-local storage models (`extern _Thread_local int errno;`).
-   - LLVM 8 without thread support crashes with `GlobalTLSAddress<i32* @errno>`. To compile C files referencing `<errno.h>`, an override `__errno_location(void)` definition must be provided to avoid `_Thread_local`.
-
-4. **Archive Symbol Table Index Requirement**:
-   - In-browser `wasm-ld` requires static archives (`.a`) to have a valid symbol table index (e.g. generated via `llvm-ar s` or `ranlib`). Without an archive index, `wasm-ld` will report `undefined symbol` for symbols that exist inside the archive members.
-
-5. **Host Function Imports and `--allow-undefined`**:
-   - By default, `wasm-ld` treats any unresolved symbol as a fatal link error. For libraries that rely on WebGL and runtime host bindings (such as `raylib_host_*` and `gl*`), `--allow-undefined` must be passed to `wasm-ld` so that these unresolved symbols become imported functions in the final WebAssembly module.
-
-### Current Workaround
-- The static library [public/sysroot/wasm/libraylib.a](file:///home/breeze/work/projects/wasm-c-ide/public/sysroot/wasm/libraylib.a) is compiled directly using the LLVM 8 `WasmToolchain` against the bundled WASI sysroot with `-Wno-pedantic`, and indexed with `llvm-ar s`.
-
-### Future Enhancement Roadmap
-1. **Upgrade In-Browser Compiler Toolchain**: Upgrade `clang.wasm` and `lld.wasm` from LLVM 8.0.1 to modern LLVM (LLVM 18+ / `wasi-sdk` 22+). This will provide native Section 12 bulk-memory support, modern C++20/C23 features, and full binary compatibility with libraries published to npm by `@breeze833/raylib-wasi`.
-2. **Upstream Multi-Target Build in `raylib-wasi` CI**: Add a legacy target matrix in `raylib-wasi` GitHub Actions CI to build and publish an LLVM-8-compatible `libraylib-llvm8.a` alongside the default modern Clang static library.
+   - Full support for modern relocation types (`R_WASM_TABLE_INDEX_REL_SLEB`, 64-bit table indices, modern linking metadata versions).
+3. **Raylib 5.5 Linkage**:
+   - `libraylib.a` compiled from `breeze833/raylib-wasi` links directly without ABI incompatibilities or section errors.
+4. **Builtin Runtime**:
+   - Builtin compiler runtime `libclang_rt.builtins.a` is included and automatically linked for WebAssembly operations.
+5. **WebAssembly Shared Object (`.so`) Support**:
+   - `wasm-ld` 19 supports creating dynamic shared libraries via `--shared` with `dylink.0` sections and position-independent code (`-fPIC`). Note that `wasm-ld` outputs an upstream informational warning (`wasm-ld: warning: creating shared libraries, with -shared, is not yet stable`), but `.so` creation, linkage, and execution function as intended.
 
 ---
 
@@ -52,7 +32,7 @@ RangeError: WebAssembly.compile is disallowed on the main thread, if the buffer 
 ```
 
 ### Resolution
-All toolchain components (`clang.wasm` ~20 MB, `lld.wasm` ~8 MB) must always be compiled and instantiated using asynchronous methods:
+All toolchain components (`clang.wasm` ~50 MB, `lld.wasm` ~25 MB) must always be compiled and instantiated using asynchronous methods:
 ```javascript
 const module = await WebAssembly.compile(buffer);
 const instance = await WebAssembly.instantiate(module, imports);
@@ -76,33 +56,19 @@ If an `HTMLCanvasElement` is transferred to a worker via `canvas.transferControl
 
 ---
 
-## 4. MemFS (`memfs.wasm`) Inode Memory Reuse on Unlink
+## 4. MemFS (`memfs.wasm`) Inode Memory Reuse & Capacity (Resolved in Native WASI Preview 1 MemFS)
 
-### Context & Impact
-`memfs.wasm` acts as the in-memory virtual filesystem for `clang.wasm` and `lld.wasm`.
-
-When a file inside MemFS is deleted using WASI's `path_unlink_file`, `memfs.wasm` frees the corresponding inode structure. However, upon subsequent creation (`path_open` with `O_CREAT` / write mode) at that same path, `memfs.wasm`'s internal memory allocator reuses the freed node without resetting its internal write head/offset or zeroing its buffer length properly.
-
-Consequently, when Clang compiles a file whose output object path was previously directly unlinked in MemFS:
-1. Clang writes WebAssembly object bytes into the reused node starting from a corrupted offset.
-2. The initial 4 bytes of the emitted `.o` file become `[ 136, 128, 128, 128 ]` (linking metadata section) instead of the required WebAssembly magic header `\0asm` (`[ 0, 97, 115, 109 ]`).
-3. Later invocations of `wasm-ld` fail with:
-   ```
-   wasm-ld: error: unknown file type: workspace/build/calc.o
-   ```
-4. Querying non-existent files via internal `FindNode` triggers an unreachable trap:
-   ```
-   [memfs] Assertion failed: lookup.node
-   ```
-
-### Architectural Guardrails & Universal Resolution
-1. **Truncate to 0 Bytes Before Unlink**:
-   Inside `MemFS.removeFile(path)`, before calling WASI's `path_unlink_file`, the file is truncated to 0 bytes via `addFile(path, new Uint8Array(0))` (`AddFileNode(len, 0)`). This resets the inode's buffer allocation and size counter to 0. When `path_unlink_file` subsequently frees the inode, any future reallocation of that inode by Clang or any other program begins writing at byte 0, completely avoiding the header corruption bug.
-2. **Full Workspace Deletion Synchronization**:
-   Whenever `executeGccCommand` runs, any workspace files that were deleted from VFS (via UI, `rm`, or `make clean`) are purged from MemFS using `removeFileFromMemfs` (which executes the safe truncate-then-unlink sequence). This prevents deleted sources, headers, or object files from lingering as ghost files.
-3. **VFS Input Validation**:
-   `driver.js` checks that all input sources (`.c`, `.cpp`) and objects (`.o`, `.a`) exist in VFS before executing compiler steps, immediately aborting with standard `No such file or directory` diagnostics and exit code 1 if a required file is missing.
-4. **Safe File Lookups**:
-   Always verify existence via `toolchain.hasFileInMemfs(path)` (checking `memfs.files.has(...)`) prior to calling `getFileFromMemfs` to prevent triggering `lookup.node` assertion traps.
+### Status: RESOLVED
+The legacy 2019 `memfs.wasm` binary has been replaced with a modern, native WASI Preview 1 implementation built upstream and released via [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi) (`v19.1.0`):
+1. **Dynamic Node Allocation**:
+   - Replaced fixed `MAX_NODES = 1024` with dynamically reallocated node vector (`Node** g_nodes`). Sysroot extraction with over 4,300 files now runs smoothly without running out of inodes.
+2. **Explicit Memory Deallocation & Zeroing on Unlink**:
+   - `DeleteNode` explicitly frees member buffers (`free(node->file.data)`, `free(node->name)`, `free(node->dir.dirents)`) and zeroes out node structures before placing them onto the free list. When an inode is recycled, its buffers and offsets begin at byte 0 cleanly.
+3. **Safe Lookups**:
+   - `FindNode` returns 0 if a node is not found rather than asserting and trapping with WebAssembly `unreachable`.
+4. **WASI Preview 1 Alignment**:
+   - Modern `__wasi_filestat_t` layout (`size` at byte offset 32), standard whence mapping (`0=SET, 1=CUR, 2=END`), and `path_link` export prevent all struct alignment and seek discrepancies.
+5. **Architectural Guardrails Maintained**:
+   - `MemFS.removeFile` maintains defensive truncation before unlinking as a safety invariant, and `executeGccCommand` synchronizes deleted workspace files and validates file existence.
 
 

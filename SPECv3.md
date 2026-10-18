@@ -1,0 +1,301 @@
+# Software Specification v3: In-Browser C/C++ Teaching IDE with LLVM 19 WASI Toolchain & Raylib 5.5 Graphics (Pure Static Wasm)
+
+## 1. Project Overview & Objectives
+The goal of this project is to build an installation-free, zero-backend, multi-file C/C++ programming development and learning environment that runs entirely client-side in modern web browsers via WebAssembly (Wasm).
+
+SPECv3 extends SPECv2 by modernizing the core WebAssembly compilation infrastructure from legacy LLVM 8.0.1 to **LLVM 19.1.0 targeting WASI Preview 1 (`wasm32-wasip1`)**, directly integrating the upstream prebuilt releases from [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi) and [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi). In addition, SPECv3 incorporates the modern native WASI Preview 1 `memfs.wasm` released by `clang-wasi`, eliminating legacy 1,024-node exhaustion limits and inode memory reuse bugs, while preserving full binary compatibility across user programs, compiler runtime libraries, and Raylib 5.5 graphical applications.
+
+### Key Objectives:
+- **Zero Backend / Pure Static**: Hostable on static hosting services (e.g., GitHub Pages, Cloudflare Pages, static Nginx) with no server-side execution.
+- **Educational Transparency**: Demystify the compilation, assembly, and linking phases. Users observe object files (`.o`), static libraries (`.a`), executables (`.wasm`/binary), search paths, and compiler flags directly in the file tree and terminal.
+- **Pedagogical Discipline**: Enforce strict standard C mode (`-std=c11 -pedantic-errors`), disallow automatic saving to cultivate deliberate save habits, and route all GUI actions into visible shell terminal commands.
+- **Modern LLVM 19 Toolchain (`wasm32-wasip1`)**:
+  - Full support for modern C11, C23, C++17, and C++20 features.
+  - Native WebAssembly Section 12 (`DataCount`) bulk-memory support in `wasm-ld`.
+  - Upstream compiler-rt runtime builtins (`libclang_rt.builtins.a`).
+  - Seamless linking with modern relocations (`R_WASM_TABLE_INDEX_REL_SLEB`, 64-bit table indices).
+- **Native WASI Preview 1 MemFS (`memfs.wasm`)**:
+  - Maintained upstream in [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi) and integrated as an official release binary.
+  - Dynamic inode scaling beyond 1,024 nodes, supporting extraction of over 4,300 standard library headers and runtime files.
+  - Standard WASI Preview 1 filestat ABI alignment, standard whence mapping, and safe non-trapping lookups.
+- **Optional Graphical Game Engine (Raylib 5.5)**: Opt-in 2D/3D game programming support without Emscripten, utilizing pure `wasm32-wasip1` static libraries and headers from [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi).
+- **Dual Console Ergonomics**: A dedicated graphical console window for visual rendering and game inputs running concurrently alongside `xterm.js` for text standard I/O.
+
+---
+
+## 2. System Architecture
+```
++-----------------------------------------------------------------------------------------+
+|                                        Browser UI                                       |
+|  +---------------------------+  +------------------------------------+  +------------+  |
+|  | Multi-tab Code Editor     |  | Project Settings & Build Action Bar|  | Graphical  |  |
+|  | (Monaco Editor & Zoom +/-)|  | (Save/Compile/Build/Run/Canvas/PWA)|  | Console    |  |
+|  +-------------+-------------+  +-----------------+------------------+  | (Floating/ |  |
+|                |                                  | (Transparent        |  Pop-out   |  |
+|                v (Explicit Save / Dirty Marker)   v  pushd/cd/popd cmd) |  Canvas)   |  |
+|  +-------------+----------------------------------+------------------+  | bitmap-    |  |
+|  |               xterm.js Virtual Terminal & Zoom (+/-)              |  | renderer   |  |
+|  +------------------------------------+------------------------------+  +-----+------+  |
++---------------------------------------|---------------------------------------|---------+
+                                        | (Pty Stdin / Stdout stream)           | (Zero-copy
++---------------------------------------v---------------------------------------v--+     ImageBitmap)
+|                         Web Worker Execution Sandboxes                           |
+|                                                                                  |
+|  +--------------------------+          +--------------------------------------+  |
+|  |    POSIX Shell Worker    |          |  Wasm Runtime (Target App + Raylib)  |  |
+|  |  - History & Autocomplete|          |  - SharedArrayBuffer (Stdin & Input) |  |
+|  |  - Directory Stack & Globs|         |  - Atomics.wait (Blocking IO & FPS)  |  |
+|  +-------------+------------+          |  - OffscreenCanvas (WebGL Context)   |  |
+|                | (executes commands)   |  - raylib-host.js (GLES2/Input Bridge)|  |
+|                v                       +------------------+-------------------+  |
+|  +--------------------------------------------------------+                      |
+|  |  LLVM 19 Clang / LLD / Make Wasm Toolchain (Async)     |                      |
+|  |  - clang.wasm 19.1.0 (-cc1 wasm32-unknown-wasi)        |                      |
+|  |  - lld.wasm 19.1.0 (-flavor wasm, Section 12 DataCount)|                      |
+|  |  - memfs.wasm (WASI Preview 1, Dynamic Nodes)          |                      |
+|  +------------------------------------+-------------------+                      |
+|                                       |                                          |
+|                                       v                                          |
+|  +------------------------------------+------------------------------------------+
+|  | Virtual File System (VFS - Single Source of Truth)                            |
+|  | - /workspace (Read-Write, IndexedDB Sync, .zip Export/Import)                |
+|  | - /usr/include & /include/wasm32-wasip1 (Standard C/C++ Headers & raylib.h)   |
+|  | - /usr/lib & /lib/wasm32-wasip1 (libc, libc++, compiler-rt, libraylib.a)     |
+|  | - /bin & /usr/bin (POSIX and Toolchain Binaries: gcc, g++, ar, make, etc.)   |
+|  +-------------------------------------------------------------------------------+
++----------------------------------------------------------------------------------+
+| Offline Engine: Unified PWA Service Worker (COOP/COEP & CacheStorage)            |
++----------------------------------------------------------------------------------+
+```
+
+---
+
+## 3. Detailed Component Specifications
+
+### 3.1 Code Editor Component
+- **Engine**: Monaco Editor.
+- **Implementation**: Pure Vanilla JS / DOM with standard ES modules.
+- **Multi-File / Multi-Tab**: Tabbed interface corresponding to files under `/workspace`.
+- **Dirty State Indicator**:
+  - Unsaved modifications display a prominent dirty marker (`*` on tab).
+  - **No Auto-Save**: Files MUST NOT auto-save on edit or build.
+  - **Save Action**: Explicit `Ctrl+S` / `Cmd+S` or UI Save button writes content into the Virtual File System (VFS).
+- **Build Pre-Condition Warning**:
+  - If a user triggers "Compile Active File" or "Build" while any workspace file is dirty, show a non-blocking toast warning: `"Warning: File has unsaved changes. Build proceeds with last saved disk state."` (Does not block compilation, but never auto-saves).
+
+### 3.2 Terminal & Shell Subsystem
+- **Terminal Emulator**: `xterm.js` with `xterm-addon-fit`.
+- **Shell**: Dedicated Web Worker running interactive POSIX-compatible shell.
+  - **Built-in CLI Utilities**: `sh`, `ls`, `cd`, `pwd`, `cat`, `rm`, `mkdir`, `cp`, `mv`, `clear`, `echo` (with `>` and `>>` output redirection), `which`, `pushd`, `popd`, and `dirs`.
+  - **External Toolchain Dispatch**: External commands (`gcc`, `clang`, `g++`, `clang++`, `ar`, `wasm-ld`, `make`, `./a.out` or `./*`) are delegated to Wasm toolchain and runtime worker execution sandboxes.
+  - **Interactive Features**: Interactive prompt (`$ ` with cwd display), command history (Up/Down arrows), autocompletion (Tab), line editing, and ANSI colors.
+  - **Directory Stack & Navigation**:
+    - `pushd <dir>`: Saves current working directory onto stack and navigates to target.
+    - `pushd .`: Pushes current directory onto stack.
+    - `pushd` (parameterless): Swaps current directory with top of directory stack.
+    - `popd`: Pops the top directory from stack and restores working directory.
+    - `dirs`: Displays current directory stack formatted with `~` representing `/workspace`.
+    - `cd -`: Swaps to the previous working directory (`oldPwd`).
+  - **Command Chaining & Operators**:
+    - Supports sequential `;`, conditional `&&`, and conditional `||`, properly respecting quoted strings.
+    - **Pipes (`|`)**: Supports multi-stage pipeline command chaining (`cmd1 | cmd2 | cmd3`), connecting stdout of stage $k$ to stdin of stage $k+1$ across both builtins and external binaries via deterministic sequential buffer staging.
+    - **Stream Redirections (`<`, `>`, `>>`)**:
+      - Output Redirection: `> target` (truncate/overwrite) and `>> target` (append) capture stdout of builtins and external commands to files in the VFS.
+      - Input Redirection: `< source` feeds files from VFS directly into standard input (`./a.out < input.txt`, `cat < input.txt`).
+    - **Standard Input Closure (`Ctrl-D` / EOF)**:
+      - Pressing `Ctrl-D` (`\x04`) while standard input is active cleanly transmits End-of-File (EOF) to the executing process without terminating the process or shell.
+    - **Direct Shell Script Execution**:
+      - Executing `./<script>`, `/<path>/<script>`, or any file ending in `.sh` directly (such as `./build.sh` or `/workspace/build.sh`) is automatically detected by inspecting file contents or extension.
+      - If the target begins with a shebang (`#!`) or ends with `.sh`, it executes via the shell runner (`builtins.sh`) without requiring explicit `sh ./build.sh`.
+      - Non-script executable files dispatched to the runtime worker are verified against the WebAssembly magic number (`\0asm` / `[0x00, 0x61, 0x73, 0x6d]`), returning descriptive diagnostics if invalid bytes are encountered.
+    - **Glob Pattern Expansion**:
+      - Unquoted command arguments containing glob wildcards (`*`, `?`) are recursively expanded against the VFS file tree before command execution.
+    - **File Operations (`mv` and `cp`)**:
+      - Supports directory destinations (`mv a.out src/`), multi-source operands (`mv a.c b.c src/`), atomic file replacement, and recursive directory copying (`cp -r src backup/`).
+- **UI Button Action Redirection & Working Directory Transparency**:
+  - GUI action buttons (Compile, Build, Run, Stop) MUST NOT invoke hidden internal APIs.
+  - Action buttons dynamically construct shell command sequences and inject them directly into `xterm.js` via `terminal.injectCommand(cmd)`.
+  - **Directory Stack Preservation**:
+    - **Compile**: `pushd . && cd /workspace && gcc -Iinclude -Wall -c <relPath> -o <objPath>; popd` (or `g++` when active project is in C++ mode)
+    - **Build**: `pushd . && cd /workspace && make; popd` (or `pushd . && cd /workspace && sh build.sh; popd`)
+    - **Run**: `pushd . && cd /workspace && ./a.out; popd`
+  - The `; popd` delimiter ensures the user's working directory is always restored even when compilation or program execution fails with a non-zero exit code.
+
+### 3.3 LLVM 19 C/C++ Toolchain & WASI Preview 1 Sysroot
+- **Prebuilt Binaries**: Modern **Clang 19.1.0** and **wasm-ld 19.1.0** targeting **WASI Preview 1 (`wasm32-wasip1`)** compiled from upstream LLVM 19 releases via [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi), alongside native WASI Preview 1 `memfs.wasm` and [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi).
+- **Compiler (`clang.wasm`)**:
+  - LLVM 19.1.0 `-cc1` frontend mapped to commands `gcc`, `clang`, `g++`, and `clang++`.
+  - Configured with target triple `-triple wasm32-unknown-wasi`.
+  - In C++ mode or when invoked via `g++` / `clang++`, C++ compilation flags (`-x c++`, `-std=c++17`) and `libc++` linkage are automatically selected.
+- **Linker (`lld.wasm`)**:
+  - `wasm-ld` 19.1.0 mapped to handle object linking (`-flavor wasm`).
+  - Native support for WebAssembly Section 12 (`DataCount`), modern relocation records (`R_WASM_TABLE_INDEX_REL_SLEB`, 64-bit table indices), and builtin compiler-rt runtime (`libclang_rt.builtins.a`).
+  - Links standard libraries: `-lc -lclang_rt.builtins -lc++ -lc++abi`, and conditionally `-lraylib`.
+- **Static Archiver (`ar`)**:
+  - Standard POSIX/BSD `ar` tool mounted under `/usr/bin/ar` and available in `which`, shell worker, and `make`.
+  - Generates standard `!<arch>\n` archives with 60-byte headers and even-byte newline padding.
+  - Automatically extracts defined, non-local symbols from member Wasm objects (subtype 8, `WASM_SYMBOL_TABLE` in `linking` custom section) and generates a big-endian symbol index compatible with LLVM 8 through LLVM 19 `wasm-ld`.
+  - Supports GNU long filename tables (`//`) for member names exceeding 15 characters.
+- **Sysroot & Standard Libraries (`sysroot.tar.gz`)**:
+  - Bundles standard WASI Preview 1 sysroot (compressed to 30MB with gzip, decompressed on the fly via `DecompressionStream`) with headers mounted under `/usr/include`, `/include/wasm32-wasip1`, `/lib/clang/19/include`, and `/usr/include/c++/v1`.
+  - Static libraries mounted under `/usr/lib` and `/lib/wasm32-wasip1`: `crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libclang_rt.builtins.a`, `libm.a`, `libpthread.a`.
+- **WebAssembly Shared Object (`.so`) Support**:
+  - **Position-Independent Code (`-fPIC`, `-fpic`)**: Compiles position-independent code with `-mrelocation-model pic -pic-level 2`, emitting relocatable WebAssembly objects with dynamic relocation entries.
+  - **Shared Library Generation (`-shared`, `--shared`)**: Links objects into WebAssembly dynamic libraries (`.so`) with `wasm-ld --shared`, omitting `crt1.o` and generating standard `dylink.0` dynamic linking custom sections. Shared libraries export functions and ctors (`__wasm_call_ctors`, `__wasm_apply_data_relocs`) while importing `env.memory`, `env.__memory_base`, and `env.__table_base`.
+  - **Dynamic Linkage in Executables**: Programs link directly against `.so` files (e.g. `gcc main.c libmath.so -o a.out` or `-Bdynamic -L<dir> -l<name>`), producing executables containing `dylink.0` dynamic dependency records and `env.<symbol>` function imports.
+  - **C & C++ Shared Libraries**: Full support for both C and C++ shared objects (`gcc -shared -fPIC ...`, `g++ -shared -fPIC ...`).
+- **Comprehensive Compiler CLI Flag & Stage Support**:
+  - **Preprocess Stage (`-E`)**: Preprocess source files without compiling or linking. Streams preprocessed output to `stdout` (or `-o <file>`). Supports piping and redirection (`gcc -E main.c > main.i`, `gcc -E main.c | grep foo`).
+  - **Assembly Stage (`-S`)**: Compiles source files to WebAssembly text/assembly format (`.s`). Emits `<source_base>.s` or `-o <file>` (or `-o -` for stdout). Skips linking.
+  - **Object Compilation Stage (`-c`)**: Compiles source files to `.o` object format (`<source_base>.o` or `-o <file>`). Skips linking.
+  - **Full Build & Link Stage (Default)**: Compiles all input source files to `.o` and invokes `wasm-ld` with user objects, libraries, and runtime builtins into `a.out` (or `-o <target>`).
+  - **Preprocessor & Include Options**: `-D<macro>`, `-U<macro>`, `-I<dir>`, `-isystem<dir>` resolved relative to working directory and passed directly to Clang.
+  - **Optimization & Diagnostic Flags**: Optimization flags (`-O0`, `-O1`, `-O2`, `-O3`, `-Os`), warning controls (`-w`, `-Wall`, `-Wextra`, `-Werror`, `-pedantic-errors`), and verbose diagnostics (`-v`).
+  - **Linker Flag Routing**: Search paths (`-L<dir>`), libraries (`-l<name>`), and linker options (`-Wl,...`) cleanly routed to `wasm-ld`.
+- **Toolchain MemFS Lifecycle & Native WASI Preview 1 Invariants**:
+  - `memfs.wasm` is maintained upstream in `breeze833/clang-wasi` and provided as an official release binary.
+  - **Dynamic Node Allocation**: Scales beyond the legacy 1,024-node ceiling via dynamic reallocations (`Node** g_nodes`), mounting over 4,300 files without running out of inodes.
+  - **Explicit Memory Deallocation & Zeroing on Unlink**: `DeleteNode` explicitly frees member buffers (`node->file.data`, `node->name`, `node->dir.dirents`) and zeroes out recycled node structures before placing them onto the free list, preventing buffer offset corruption.
+  - **Safe Non-Trapping Lookups**: `FindNode` returns 0 for non-existent files rather than tripping `lookup.node` assertion traps.
+  - **WASI Preview 1 Alignment**: Standard `__wasi_filestat_t` layout (`size` at offset 32), standard whence mapping (`0 = SET, 1 = CUR, 2 = END`), and `path_link` export prevent all struct alignment discrepancies.
+  - **Defensive Unlink Invariant**: `MemFS.removeFile` truncates files to 0 bytes before unlinking (`AddFileNode(len, 0)` then `path_unlink_file`) as a defensive invariant.
+- **Language Dialects**:
+  - **Pure C Mode**: Automatically injects `-x c -std=c11 -pedantic-errors -Wall -Wextra`. Forbids C++ syntax extensions and disallows `#include <iostream>`, `<vector>`, etc.
+  - **C++ Mode**: Injects `-x c++ -std=c++17 -Wall -Wextra` linking against `libc++`. Preferred wrapper command is `g++`.
+- **Include Paths**: Default configuration includes `/workspace/include`, `/workspace`, `/usr/include`, `/include/wasm32-wasip1`, `/lib/clang/19/include`, and `/usr/include/c++/v1`.
+
+### 3.4 Build Systems (Dual-Track Mechanism) & Project Settings
+Users can select between two build strategies in the Project Settings UI:
+1. **Decoupled Settings Modal Actions**:
+   - **Save Button**: Persists configuration state (mode, build system, compiler flags, include paths, target name, and Raylib toggle) and dynamically mounts/unmounts sysroot headers and libraries without overwriting existing files in `/workspace`.
+   - **Generate Build Script Button**: Scans source files in `/workspace` and generates or updates `/workspace/build.sh` and `/workspace/Makefile`.
+2. **Track 1: Shell Script (`build.sh`)**:
+   - The UI generates `/workspace/build.sh` reflecting compiler command (`gcc` in Pure C mode, `g++` in C++ mode), compiler flags, source files, and output paths.
+   - When Raylib is enabled, `-lraylib` is automatically included in the final link command.
+   - Triggering "Build" injects `pushd . && cd /workspace && sh build.sh; popd` to the terminal.
+3. **Track 2: Makefile & Incremental Make**:
+   - The UI generates a standard `/workspace/Makefile` defining explicit targets (`all`, `clean`, `%.o: %.c` or `%.o: %.cpp`) using `CC = gcc` in Pure C mode and `CXX = g++` in C++ mode.
+   - When Raylib is enabled, `LDFLAGS += -lraylib` is automatically configured.
+   - Incremental Makefile runner evaluates file modification timestamps (`mtime`) to rebuild only stale prerequisites.
+   - Triggering "Build" injects `pushd . && cd /workspace && make; popd` to the terminal.
+
+### 3.5 Runtime & Interactive Standard I/O
+- Target binaries run in a dedicated Web Worker instance with WASI Preview 1 emulation.
+- **Monotonic Clock**: `clock_time_get` implemented in `AppInstance` providing high-resolution monotonic timestamps.
+- **Standard Input (`stdin`) Handling**:
+  - **Interactive Blocking Input**: Handled via `SharedArrayBuffer` and `Atomics.wait()`. When the runtime executes WASI `fd_read` on file descriptor 0, the worker pauses without blocking the browser main UI thread until `xterm.js` receives user input and signals `SharedArrayBuffer` via `Atomics.notify()`.
+  - **Non-Interactive Stream Redirection**: When stdin is redirected from a file (`<`) or pipeline (`|`), input bytes are preloaded into memory and consumed synchronously by `fd_read` without entering `Atomics.wait()`.
+  - **End-of-File Signaling (`Ctrl-D` / `\x04`)**:
+    - Pressing `Ctrl-D` (`\x04`) in `xterm.js` while input is pending flushes existing buffer content or signals `STATE_EOF` (`-1`) to `SharedArrayBuffer`.
+    - `Atomics.notify()` immediately resumes the waiting worker.
+    - WASI `fd_read` sets `*nread = 0` and returns `ESUCCESS` (0), allowing standard C library functions (`scanf`, `getchar`, `fgets`, `cin`) to recognize EOF and terminate input loops cleanly.
+- **Execution Interruption**:
+  - `Ctrl+C` in the terminal or GUI "Stop" button immediately issues worker interruption/termination, closes/resets the graphical window, and resets terminal state.
+
+### 3.6 Virtual File System (VFS) & Storage
+- Single Source of Truth shared across Editor, Shell Worker, and Toolchain.
+- **Directory Layout**:
+  - `/workspace`: Root of the user project (Read-Write, persisted in IndexedDB).
+  - `/usr/include` & `/include/wasm32-wasip1`: Read-only sysroot standard C and C++ headers. When Raylib is enabled, contains `raylib.h`, `raymath.h`, and `rlgl.h`.
+  - `/usr/lib` & `/lib/wasm32-wasip1`: Read-only static runtime archives (`crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libclang_rt.builtins.a`, `libm.a`, `libpthread.a`). When Raylib is enabled, contains `libraylib.a`.
+  - `/bin`: Read-only POSIX utilities (`sh`, `ls`, `cat`, `rm`, `mkdir`, `cp`, `mv`, `pwd`, `clear`, `echo`, `pushd`, `popd`, `dirs`).
+  - `/usr/bin`: Read-only toolchain binaries (`gcc`, `clang`, `g++`, `clang++`, `ar`, `make`, `wasm-ld`).
+- **Persistence**: Synchronized with browser `IndexedDB`. Survives page refreshes.
+- **Import / Export**:
+  - Export: Bundles `/workspace` exclusively into a standard `.zip` archive downloaded to the client.
+  - Import: Extracts a user `.zip` archive directly into `/workspace`. System files outside `/workspace` cannot be overwritten.
+
+### 3.7 Static Hosting, Security Isolation & Offline PWA Capabilities
+- **Cross-Origin Isolation**:
+  - `SharedArrayBuffer` requires:
+    - `Cross-Origin-Opener-Policy: same-origin`
+    - `Cross-Origin-Embedder-Policy: require-corp`
+- **GitHub Pages / Zero-Config Static Server Compatibility & Unified PWA Service Worker**:
+  - Bundles `coi-serviceworker.js` in `public/` providing Cross-Origin Isolation header injection across static hosting environments and `CacheStorage` offline caching.
+- **Progressive Web App (PWA) & Offline Execution**:
+  - `manifest.webmanifest` defining standalone display, theme colors, and icons.
+  - Enables 100% offline development: cached toolchain and Raylib assets execute locally without network access.
+
+### 3.8 Raylib 5.5 Graphics Subsystem & Dedicated Graphical Console
+- **First-Class Graphics Support**: Opt-in Raylib 5.5 integration via [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) without Emscripten, compiled with LLVM 19.
+- **Dedicated Graphical Console**: Floating, resizable in-page window running alongside `xterm.js`.
+  - Dynamic resolution adaptation based on `InitWindow(width, height, title)`.
+  - Zero-copy GPU frame transfer (`ImageBitmap` / WebGL) rendered at 60 FPS.
+  - Real-time FPS counter and resolution badge.
+  - Pop-Out (`↗`) to external browser window and Dock (`↙`) back.
+  - Frame pacing via `Atomics.wait()` in `EndDrawing()` based on `SetTargetFPS()`.
+  - Keyboard and mouse input coordination with 512-byte `SharedArrayBuffer` and clean focus/blur lifecycle resets.
+
+---
+
+## 4. UI Layout & User Experience
+
+```
++-----------------------------------------------------------------------------------------+
+| [Header] App Title | Mode: [Pure C | C++] | Raylib: [ON] | Build System: [sh | make]     |
+| [Actions] [💾 Save] [⚙ Compile] [🔨 Build] [▶ Run] [⏹ Stop] | [🎮 Canvas] [⚙ Settings]  |
+|                                                                  [📲 Install PWA (opt)] |
++-----------------------+-----------------------------------------------------------------+
+| Workspace File Tree   | Editor Tabs: [main.c *] [calc.c]                    [- 14px +]  |
+| [📄+] [📁+] [📥] [📤]   +---------------------------------------------------------------+
+| - src/                | 1 | #include "raylib.h"                                         |
+|   - main.c            | 2 | int main(void) {                                            |
+| - build/              | 3 |   InitWindow(640, 480, "Ball Demo");                        |
+|   - main.o            | 4 |   while (!WindowShouldClose()) { ... }                      |
+| - a.out               | 5 | }                                                           |
+| - Makefile            +-----------------------------------------------------------------+
+|                       | Integrated Terminal (xterm.js)                      [- 13px +]  |
+|                       | ide:~$ pushd . && cd /workspace && make; popd                   |
+|                       | ide:~$ ./a.out                                                  |
++-----------------------+-----------------------------------------------------------------+
+                                      |
+                                      v (Opens automatically on InitWindow)
+                        +---------------------------------------+
+                        | [🎮] Ball Demo (640x480) [60 FPS] [↗][X]|
+                        | +-----------------------------------+ |
+                        | |                                   | |
+                        | |         🔴 (WebGL Canvas)         | |
+                        | |                                   | |
+                        | +-----------------------------------+ |
+                        +---------------------------------------+
+```
+
+---
+
+## 5. Non-Functional Requirements
+- **Bundle Size Optimization**: Toolchain and Raylib assets lazy-loaded with clear progress indicators.
+- **Clean Browser Compatibility**: Operable on recent Chromium, Firefox, and Safari (Safari 15.2+ supporting `SharedArrayBuffer` and `ImageBitmapRenderingContext`).
+- **No Remote Telemetry**: Strict local client execution; zero remote dependencies.
+- **Sub-Path Hosting Compatibility**: Ready for zero-config sub-directory hosting without hardcoded absolute URLs.
+- **Main-Thread Asynchronous Wasm Compilation**: Zero synchronous instantiation of Wasm modules >8MB on the main thread.
+- **100% Offline Autonomy**: Full offline PWA execution with Cache-First Service Worker precaching App Shell, Wasm toolchain, and Raylib distribution assets.
+
+---
+
+## 6. Verification & Testing Checklist
+
+| Test Case | Expected Behavior |
+|---|---|
+| **LLVM 19 Pure C Compilation** | `gcc -x c -std=c11 -pedantic-errors -Wall -c main.c` compiles C code strictly with Clang 19. |
+| **LLVM 19 C++ Compilation** | `g++ -std=c++17 main.cpp` compiles C++ code linking against `libc++` and `libc++abi`. |
+| **WebAssembly Section 12 Linkage** | `wasm-ld` 19 links relocatable objects containing Section 12 (`DataCount`) without section errors. |
+| **Compiler Runtime Builtins** | Symbols required by Clang 19 WebAssembly operations resolve cleanly via `libclang_rt.builtins.a`. |
+| **MemFS Capacity & Dynamic Nodes** | Extracting `sysroot.tar.gz` (4,300+ entries) completes without inode exhaustion or allocation errors. |
+| **MemFS File Deletion & Recompile** | Deleting `.o` files and recompiling begins writing at byte offset 0 with valid `\0asm` headers. |
+| **Raylib 5.5 Compilation & Linking** | Programs using `InitWindow` link with `-lraylib` and run in the runtime worker without undefined symbols. |
+| **Interactive Canvas Window** | Calling `InitWindow(640, 480, "Demo")` opens Graphical Console at requested dimensions. |
+| **Zero-Copy Frame Rendering** | Shapes and text render to canvas at ~60 FPS via `ImageBitmap` without main UI thread lag. |
+| **Concurrent Terminal I/O** | `printf` and `scanf` in the same program interact with `xterm.js` while graphics render on the canvas. |
+| **Compiler Preprocessing (`gcc -E`)** | `gcc -E main.c` streams preprocessed output to terminal or `main.i` via `-o` without linking. |
+| **Compiler Assembly (`gcc -S`)** | `gcc -S main.c` compiles to WebAssembly assembly text (`main.s` or `-o <file>`) without linking. |
+| **Compiler Macros & Diagnostics (`-D`, `-v`)** | Macros defined via `-D` substitute cleanly; `-v` prints verbose toolchain invocations and search paths. |
+| **Static Archiver Creation (`ar rcs`)** | `ar rcs libmath.a add.o sub.o` generates compliant `!<arch>\n` archive with big-endian symbol index. |
+| **Static Archiver Linkage (`wasm-ld`)** | Programs link against generated `.a` archives using `-Lworkspace -lmath` or direct file path `workspace/libmath.a`. |
+| **Shared Object Creation (`gcc -shared`)** | `gcc -shared -fPIC math.c -o libmath.so` produces valid WebAssembly shared library with `dylink.0` section. |
+| **Shared Object Linkage (`gcc main.c libmath.so`)** | Executable links against `.so`, generating `dylink.0` dynamic dependency records and `env.<symbol>` imports. |
+| **Shared Object Runtime Execution** | Executable dynamically loads and executes functions from `.so` at runtime without unresolved symbol traps. |
+| **C++ Shared Object (`g++ -shared -fPIC`)** | C++ code compiles to position-independent `.so` and exports `extern "C"` functions cleanly. |
+| **Interactive `scanf` & `Ctrl-D` EOF** | Stdin blocks via `SharedArrayBuffer` until Enter; `Ctrl-D` triggers EOF cleanly. |
+| **Pipelines & Redirections** | Command pipelines (`|`) and stream redirections (`<`, `>`, `>>`) execute deterministically across stages. |
+| **Direct Shell Script Execution** | `./build.sh` or `/workspace/script.sh` executes shell commands without manual `sh` prefix. |
+| **Offline PWA Operation** | LLVM 19 toolchain and Raylib assets execute while disconnected from the internet via Service Worker caching. |

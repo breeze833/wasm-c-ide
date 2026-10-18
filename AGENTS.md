@@ -20,6 +20,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 /
 ├── SPEC.md                    # Technical specification & architectural ground truth (v1 baseline)
 ├── SPECv2.md                  # Extended technical specification with Raylib 5.5 graphics
+├── SPECv3.md                  # Extended technical specification with LLVM 19 WASI toolchain
 ├── AGENTS.md                  # Agent operating protocols (this file)
 ├── KNOWN_ISSUES.md            # Documented toolchain version gaps, limits, and MemFS invariants
 ├── README.md                  # User-facing project documentation & deployment guides
@@ -61,7 +62,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── manifest.webmanifest   # Web App Manifest for PWA installation
 │   ├── icons/                 # PWA application icons (192, 512, svg)
 │   └── sysroot/
-│       ├── wasm/              # Prebuilt clang.wasm, lld.wasm, memfs.wasm, libraylib.a, sysroot.tar
+│       ├── wasm/              # Prebuilt clang.wasm, lld.wasm, memfs.wasm, libraylib.a, sysroot.tar.gz
 │       └── include/           # Minimal fallback libc headers & raylib headers
 └── test/
     ├── ar.test.js             # Static archiver creation, extraction, table, and wasm-ld linkage tests
@@ -70,6 +71,7 @@ You are an autonomous senior systems and web engineer implementing the project s
     ├── raylib.test.js         # Raylib graphics compilation, input sync, and canvas UI tests
     ├── runtime.test.js        # SharedArrayBuffer Atomics protocol and Ctrl-D EOF tests
     ├── shell.test.js          # Shell argument parsing, globs, pushd/popd, mv/cp, and direct scripts
+    ├── so.test.js             # WebAssembly shared object (.so) compilation, linking, and runtime execution tests
     ├── sw.test.js             # Service Worker, PWA manifest, and offline COOP/COEP tests
     ├── toolchain.test.js      # Toolchain driver, MemFS directory, unlink guardrails, and libc tests
     ├── vfs.test.js            # VFS hierarchy, permissions, and zip round-trip tests
@@ -166,7 +168,14 @@ Agents executing this project should proceed milestone-by-milestone:
   - Standard POSIX/BSD `ar` tool mounted under `/usr/bin/ar` and available in `which`, shell worker, and `make`.
   - Operations: `rcs` (create/replace with symbol index), `t`/`tv` (table of contents), `x` (extract), `d` (delete), `q` (quick append), `s` (regenerate symbol index).
   - WebAssembly relocatable object parsing: parse custom `linking` section (subtype 8, `WASM_SYMBOL_TABLE`) to extract defined, non-local symbols.
-  - Big-endian symbol index (`/`) generation and GNU long filename table (`//`) support, fully compatible with LLVM 8.0.1 `wasm-ld`.
+  - Big-endian symbol index (`/`) generation and GNU long filename table (`//`) support, fully compatible with LLVM 8 through LLVM 19 `wasm-ld`.
+
+### Milestone 12: Modern LLVM 19.1.0 WASI Toolchain Upgrade & Upstream Integration
+- Upgrade `clang.wasm` and `lld.wasm` to modern **LLVM 19.1.0 (`wasm32-wasip1`)** using prebuilt release assets from [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi).
+- Upgrade `sysroot.tar.gz` to modern LLVM 19 WASI Preview 1 sysroot with libc, libc++, compiler-rt runtime builtins (`libclang_rt.builtins.a`), and headers (`/include/wasm32-wasip1`, `/lib/clang/19/include`), compressed with gzip to 30MB for GitHub file size compliance and fast client loading.
+- Upgrade `libraylib.a` to Raylib 5.5 WASI compiled with LLVM 19 from [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi).
+- Integrate native WASI Preview 1 `memfs.wasm` from `clang-wasi` with dynamic node allocation, standard WASI Preview 1 ABI alignment, safe `FindNode`, explicit buffer deallocation on unlink, and `path_link` export.
+- Remove redundant repository-local build files and maintain single-source upstream toolchain integration.
 
 ---
 
@@ -192,6 +201,10 @@ Before marking any task complete, agents must verify:
 | **Static Archiver Creation (`ar rcs`)** | `ar rcs libmath.a add.o sub.o` generates compliant `!<arch>\n` archive with big-endian symbol index extracted from Wasm relocatable objects. |
 | **Static Archiver Linkage (`wasm-ld`)** | Programs link against generated `.a` archives using `-Lworkspace -lmath` or direct file path `workspace/libmath.a`. |
 | **Static Archiver Table & Extraction (`ar t`, `ar x`)** | `ar t` lists member files; `ar x` unpacks members into current directory; `ar d` deletes members. |
+| **Shared Object Creation (`gcc -shared`)** | `gcc -shared -fPIC math.c -o libmath.so` produces compliant WebAssembly shared library with `dylink.0` section. |
+| **Shared Object Linkage (`gcc main.c libmath.so`)** | Executables link against `.so` shared libraries, creating dynamic `dylink.0` dependencies and `env.<symbol>` imports. |
+| **Shared Object Runtime Execution** | Executable dynamically loads and invokes functions exported from `.so` without unresolved symbols. |
+| **C++ Shared Object (`g++ -shared -fPIC`)** | C++ code compiles to position-independent `.so` and exports `extern "C"` symbols properly. |
 | **Infinite Loop Interruption** | `while(1);` can be interrupted via `Ctrl+C` or UI Stop button; terminal returns to prompt. |
 | **Refresh Persistence** | Modifying files, closing tab, and reopening keeps files intact via IndexedDB. |
 | **Zip Round-Trip** | Exporting project to zip and re-importing preserves directory hierarchy. |

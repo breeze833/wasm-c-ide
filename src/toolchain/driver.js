@@ -67,6 +67,8 @@ export function parseCompilerArgs(args, cwd = '/workspace') {
       }
     } else if (arg.startsWith('-U')) {
       compilerFlags.push(arg);
+    } else if (arg === '-shared' || arg === '--shared') {
+      linkerFlags.push('-shared');
     } else if (arg.startsWith('-Wl,')) {
       linkerFlags.push(...arg.substring(4).split(','));
     } else if (arg.startsWith('-')) {
@@ -80,7 +82,7 @@ export function parseCompilerArgs(args, cwd = '/workspace') {
       arg.endsWith('.s')
     ) {
       sources.push(arg);
-    } else if (arg.endsWith('.o') || arg.endsWith('.a')) {
+    } else if (arg.endsWith('.o') || arg.endsWith('.a') || arg.endsWith('.so')) {
       objects.push(arg);
     }
   }
@@ -204,6 +206,7 @@ export async function executeGccCommand({
         const libraylib = vfs.readFile('/usr/lib/libraylib.a', false);
         await toolchain.syncFileToMemfs('usr/lib/libraylib.a', libraylib);
         await toolchain.syncFileToMemfs('lib/wasm32-wasi/libraylib.a', libraylib);
+        await toolchain.syncFileToMemfs('lib/wasm32-wasip1/libraylib.a', libraylib);
       }
     } else {
       if (typeof toolchain.removeFileFromMemfs === 'function') {
@@ -212,6 +215,9 @@ export async function executeGccCommand({
         }
         if (hasInMemfs('lib/wasm32-wasi/libraylib.a')) {
           toolchain.removeFileFromMemfs('lib/wasm32-wasi/libraylib.a');
+        }
+        if (hasInMemfs('lib/wasm32-wasip1/libraylib.a')) {
+          toolchain.removeFileFromMemfs('lib/wasm32-wasip1/libraylib.a');
         }
       }
     }

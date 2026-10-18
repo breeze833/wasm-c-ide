@@ -64,7 +64,7 @@ class Memory {
 
 const ESUCCESS = 0;
 
-class MemFS {
+export class MemFS {
   constructor(memfsBuffer, hostWrite = () => {}, instance = null) {
     this.hostWrite = hostWrite;
     this.hostMem_ = null;
@@ -265,7 +265,7 @@ class MemFS {
   }
 }
 
-class AppInstance {
+export class AppInstance {
   constructor(memfs, name, ...args) {
     this.argv = [name, ...args];
     this.environ = { USER: 'student', PWD: '/workspace' };
@@ -325,8 +325,16 @@ class AppInstance {
         crypto.getRandomValues(data);
         return ESUCCESS;
       },
-      clock_time_get: () => ESUCCESS,
+      clock_time_get: (id, precision, time_out) => {
+        this.mem.check();
+        const now = BigInt(Date.now()) * 1000000n;
+        const low = Number(now & 0xFFFFFFFFn);
+        const high = Number((now >> 32n) & 0xFFFFFFFFn);
+        this.mem.write64(time_out, low, high);
+        return ESUCCESS;
+      },
       poll_oneoff: () => ESUCCESS,
+      path_link: () => 52,
     };
 
     // Overlay memfs WASI filesystem operations
@@ -395,10 +403,27 @@ export class WasmToolchain {
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
-      onProgress('Loading compiler components...');
+      const fetchSysroot = async () => {
+        try {
+          const res = await fetch(`${this.basePath}/sysroot.tar.gz`);
+          if (res) {
+            const buf = await res.arrayBuffer();
+            const u8 = new Uint8Array(buf);
+            if (u8.length >= 2 && u8[0] === 0x1f && u8[1] === 0x8b) {
+              if (typeof DecompressionStream !== 'undefined') {
+                const stream = new Response(u8).body.pipeThrough(new DecompressionStream('gzip'));
+                return await new Response(stream).arrayBuffer();
+              }
+            }
+            return buf;
+          }
+        } catch {}
+        return await fetch(`${this.basePath}/sysroot.tar`).then(r => r.arrayBuffer());
+      };
+
       const [memfsBuf, sysrootTarBuf] = await Promise.all([
         fetch(`${this.basePath}/memfs.wasm`).then(r => r.arrayBuffer()),
-        fetch(`${this.basePath}/sysroot.tar`).then(r => r.arrayBuffer()),
+        fetchSysroot(),
       ]);
 
       this.memfs = await MemFS.create(memfsBuf, (str) => {
@@ -421,16 +446,28 @@ export class WasmToolchain {
       const tar = new Tar(sysrootTarBuf);
       const entries = tar.getEntries();
       for (const entry of entries) {
+        const cleanName = (entry.filename || '').replace(/^\.?\/+/, '');
+        if (!cleanName) continue;
         if (entry.type === '5') {
-          this.memfs.addDirectory(entry.filename);
+          this.memfs.addDirectory(cleanName);
         } else if (entry.contents) {
-          this.memfs.addFile(entry.filename, entry.contents);
+          this.memfs.addFile(cleanName, entry.contents);
 
           // Mirror standard libraries to /usr/lib in MemFS and VFS
-          if (entry.filename.startsWith('lib/wasm32-wasi/')) {
-            const libName = entry.filename.substring('lib/wasm32-wasi/'.length);
+          if (cleanName.startsWith('lib/wasm32-wasip1/')) {
+            const libName = cleanName.substring('lib/wasm32-wasip1/'.length);
             if (libName) {
               this.memfs.addFile(`usr/lib/${libName}`, entry.contents);
+              this.memfs.addFile(`lib/wasm32-wasi/${libName}`, entry.contents);
+              if (this.vfs) {
+                this.vfs.writeFile(`/usr/lib/${libName}`, entry.contents, Date.now(), true);
+              }
+            }
+          } else if (cleanName.startsWith('lib/wasm32-wasi/')) {
+            const libName = cleanName.substring('lib/wasm32-wasi/'.length);
+            if (libName) {
+              this.memfs.addFile(`usr/lib/${libName}`, entry.contents);
+              this.memfs.addFile(`lib/wasm32-wasip1/${libName}`, entry.contents);
               if (this.vfs) {
                 this.vfs.writeFile(`/usr/lib/${libName}`, entry.contents, Date.now(), true);
               }
@@ -510,21 +547,39 @@ export class WasmToolchain {
 
     const args = [
       '-cc1',
+      '-triple', 'wasm32-unknown-wasi',
       stageFlag,
       '-disable-free',
       '-isysroot', '/',
+      '-internal-isystem', '/include/wasm32-wasip1',
       '-internal-isystem', '/include',
       '-internal-isystem', '/include/c++/v1',
+      '-internal-isystem', '/lib/clang/19/include',
+      '-internal-isystem', '/lib/clang/19.1.0/include',
       '-internal-isystem', '/lib/clang/8.0.1/include',
       '-I/workspace/include',
       '-I/workspace',
       '-ferror-limit', '19',
-      '-fmessage-length', '80',
+      '-fmessage-length=80',
       '-fcolor-diagnostics',
     ];
 
+    // Filter and map PIC flags
+    const processedFlags = [];
+    let isPic = false;
+    for (const flag of customFlags) {
+      if (flag === '-fPIC' || flag === '-fpic' || flag === '-fPIE' || flag === '-fpie') {
+        isPic = true;
+      } else {
+        processedFlags.push(flag);
+      }
+    }
+    if (isPic) {
+      args.push('-mrelocation-model', 'pic', '-pic-level', '2');
+    }
+
     // Check if customFlags has an optimization flag like -O0, -O1, -O2, -O3, -Os, -Oz
-    const hasOptFlag = customFlags.some(f => /^-O[0-3sz]?$/.test(f));
+    const hasOptFlag = processedFlags.some(f => /^-O[0-3sz]?$/.test(f));
     if (!hasOptFlag) {
       args.push('-O2');
     }
@@ -537,7 +592,7 @@ export class WasmToolchain {
       args.push('-x', 'c++', '-std=c++17', '-Wall', '-Wextra');
     }
 
-    args.push(...customFlags);
+    args.push(...processedFlags);
     args.push('-o', cleanObj, cleanSrc);
 
     try {
@@ -565,24 +620,53 @@ export class WasmToolchain {
       this.memfs.ensureDirectory(cleanOut.substring(0, lastSlash));
     }
 
+    const isShared = customFlags.includes('-shared') || customFlags.includes('--shared') || cleanOut.endsWith('.so');
+
     const stackSize = 1024 * 1024;
-    const libdir = 'lib/wasm32-wasi';
+    const libdir = (this.memfs && this.memfs.hasFile('lib/wasm32-wasip1/crt1.o'))
+      ? 'lib/wasm32-wasip1'
+      : 'lib/wasm32-wasi';
     const crt1 = `${libdir}/crt1.o`;
 
     const args = [
-      '--no-threads',
+      '-flavor', 'wasm',
       '--allow-undefined',
-      '-z', `stack-size=${stackSize}`,
-      `-L${libdir}`,
-      `-Lusr/lib`,
-      crt1,
-      ...cleanObjs,
-      '-lc',
-      '-lc++',
-      '-lc++abi',
-      ...customFlags,
-      '-o', cleanOut,
     ];
+
+    if (isShared) {
+      args.push(
+        '--shared',
+        `-L${libdir}`,
+        `-Llib/wasm32-wasip1`,
+        `-Llib/wasm32-wasi`,
+        `-Llib/clang/19/lib/wasm32-unknown-wasip1`,
+        `-Llib/clang/19/lib/wasm32-unknown-wasi`,
+        `-Lusr/lib`,
+        ...cleanObjs,
+        '-lc',
+        '-lclang_rt.builtins',
+        ...customFlags.filter(f => f !== '-shared' && f !== '--shared'),
+        '-o', cleanOut,
+      );
+    } else {
+      args.push(
+        '-z', `stack-size=${stackSize}`,
+        `-L${libdir}`,
+        `-Llib/wasm32-wasip1`,
+        `-Llib/wasm32-wasi`,
+        `-Llib/clang/19/lib/wasm32-unknown-wasip1`,
+        `-Llib/clang/19/lib/wasm32-unknown-wasi`,
+        `-Lusr/lib`,
+        crt1,
+        ...cleanObjs,
+        '-lc',
+        '-lclang_rt.builtins',
+        '-lc++',
+        '-lc++abi',
+        ...customFlags,
+        '-o', cleanOut,
+      );
+    }
 
     try {
       const app = await AppInstance.create(lld, this.memfs, 'wasm-ld', ...args);

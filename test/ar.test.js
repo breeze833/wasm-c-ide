@@ -105,7 +105,7 @@ console.log('✓ ar t and ar tv list member table of contents');
 // Test 6: Linking against generated libmath.a with wasm-ld (-Lworkspace -lmath)
 tc.memfs.addFile(
   'workspace/main.c',
-  'int add(int, int); int sub(int, int); int main() { return add(10, 20) + sub(30, 5); }\n'
+  'int add(int, int); int sub(int, int); int main(void) { return add(10, 20) + sub(30, 5); }\n'
 );
 code = await tc.compile('workspace/main.c', 'workspace/main.o', 'c', []);
 assert.strictEqual(code, 0);

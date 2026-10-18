@@ -208,7 +208,6 @@ console.log('✓ Direct compile & link argument parsing passed');
 {
   import('node:fs').then(async (fs) => {
     const memfsBuf = fs.readFileSync('public/sysroot/wasm/memfs.wasm');
-    const sysrootBuf = fs.readFileSync('public/sysroot/wasm/sysroot.tar');
 
     globalThis.fetch = async (url) => {
       const filePath = url.replace(/^\/?sysroot\//, 'public/sysroot/');
@@ -400,7 +399,7 @@ console.log('✓ Direct compile & link argument parsing passed');
       write: wrErr
     });
     assert.notStrictEqual(code, 0, 'Compiling main.c without calc.h must fail');
-    assert.match(diagOutput, /calc\.h.*not found/i, 'Must report calc.h not found in compiler diagnostics');
+    assert.match(diagOutput, /calc\.h[\s\S]*not\s*found/i, 'Must report calc.h not found in compiler diagnostics');
     console.log('✓ Ghost file prevention and missing header/source validation verified');
 
     // Test 10: Compiler CLI options parsing via parseCompilerArgs
@@ -489,7 +488,7 @@ console.log('✓ Direct compile & link argument parsing passed');
     console.log('✓ gcc -S -o - assembly streaming to stdout verified');
 
     // Test 15: gcc -D macro definitions and -v verbose diagnostics
-    vfs.writeFile('/workspace/flags.c', '#ifndef CUSTOM_FLAG\n#error "CUSTOM_FLAG not defined"\n#endif\nint test() { return CUSTOM_FLAG; }\n');
+    vfs.writeFile('/workspace/flags.c', '#ifndef CUSTOM_FLAG\n#error "CUSTOM_FLAG not defined"\n#endif\nint test(void) { return CUSTOM_FLAG; }\n');
     let verboseStdout = '';
     code = await executeGccCommand({
       cmd: 'gcc',
