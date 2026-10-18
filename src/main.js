@@ -262,7 +262,7 @@ export class App {
         capturedStdout += str;
       }
       if (!stdoutRedirect) {
-        this.terminal.write(str);
+        this.terminal.write(str.replace(/\r?\n/g, '\r\n'));
       }
     };
 

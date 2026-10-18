@@ -396,7 +396,7 @@ console.log('✓ Direct compile & link argument parsing passed');
       vfs,
       toolchain: tc,
       mode: 'c',
-      write: wrErr
+      write: (msg) => { diagOutput += msg; }
     });
     assert.notStrictEqual(code, 0, 'Compiling main.c without calc.h must fail');
     assert.match(diagOutput, /calc\.h[\s\S]*not\s*found/i, 'Must report calc.h not found in compiler diagnostics');
@@ -503,6 +503,30 @@ console.log('✓ Direct compile & link argument parsing passed');
     assert.strictEqual(vfs.exists('/workspace/flags.o'), true, 'flags.o must be created');
     assert.match(verboseStdout, /clang -cc1/i, 'Verbose output must include compiler invocations');
     console.log('✓ gcc -D macro definitions and -v diagnostics verified');
+
+    // Test 16: No duplicated error output or double-printing
+    vfs.writeFile('/workspace/syntax_err.c', 'inbt main() { return 0; }\n');
+    let errOutputSingle = '';
+    let hostWriteCalls = 0;
+    tc.hostWrite = (msg) => { hostWriteCalls++; };
+
+    code = await executeGccCommand({
+      cmd: 'gcc',
+      args: ['-c', 'syntax_err.c', '-o', 'syntax_err.o'],
+      cwd: '/workspace',
+      vfs,
+      toolchain: tc,
+      mode: 'c',
+      write: (m) => { errOutputSingle += m; }
+    });
+    assert.notStrictEqual(code, 0, 'Syntax error must fail compilation');
+    assert.strictEqual(hostWriteCalls, 0, 'prevHostWrite must not be called when write callback is provided');
+    const cleanOutput = errOutputSingle.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.match(cleanOutput, /error:\s*unknown\s*type\s*name/i, 'Must report unknown type name');
+    assert.doesNotMatch(cleanOutput, /error:\s*error:/i, 'Error message must not be double-printed');
+    assert.doesNotMatch(cleanOutput, /unknownunknown/i, 'Tokens must not be duplicated');
+    assert.doesNotMatch(cleanOutput, /typetype/i, 'Words must not be duplicated');
+    console.log('✓ Compiler diagnostic single-printing and deduplication verified');
 
     console.log('--- ALL TOOLCHAIN DRIVER TESTS PASSED ---');
   });

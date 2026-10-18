@@ -125,11 +125,10 @@ export async function executeGccCommand({
   const prevHostWrite = toolchain ? toolchain.hostWrite : null;
   if (toolchain) {
     toolchain.hostWrite = (str) => {
-      if (typeof prevHostWrite === 'function') {
-        prevHostWrite(str);
-      }
-      if (typeof write === 'function' && write !== prevHostWrite) {
+      if (typeof write === 'function') {
         write(str);
+      } else if (typeof prevHostWrite === 'function') {
+        prevHostWrite(str);
       }
     };
   }
