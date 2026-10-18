@@ -3,3 +3,5 @@ dist/
 .DS_Store
 *.log
 *.zip
+public/sysroot/wasm/
+public/sysroot/include/raylib/

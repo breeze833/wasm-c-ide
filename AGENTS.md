@@ -27,6 +27,8 @@ You are an autonomous senior systems and web engineer implementing the project s
 ├── index.html                 # Main entry point (loads /coi-serviceworker.js)
 ├── package.json               # Development tooling, dependencies, and test scripts
 ├── vite.config.js             # Vite configuration (COOP/COEP headers, workers, wasm support)
+├── scripts/
+│   └── download-sysroot.js    # Automated LLVM 19 & Raylib WASI asset downloader and unpacker
 ├── src/
 │   ├── main.js                # App bootstrap, DOM layout, and UI event binding
 │   ├── style.css              # Dark theme styling, button color hierarchy, tooltips
@@ -61,7 +63,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── coi-serviceworker.js   # Unified cross-origin isolation and CacheStorage offline worker
 │   ├── manifest.webmanifest   # Web App Manifest for PWA installation
 │   ├── icons/                 # PWA application icons (192, 512, svg)
-│   └── sysroot/
+│   └── sysroot/               # Downloaded on-demand via scripts/download-sysroot.js (git-ignored)
 │       ├── wasm/              # Prebuilt clang.wasm, lld.wasm, memfs.wasm, libraylib.a, sysroot.tar.gz
 │       └── include/           # Minimal fallback libc headers & raylib headers
 └── test/
@@ -172,9 +174,10 @@ Agents executing this project should proceed milestone-by-milestone:
 
 ### Milestone 12: Modern LLVM 19.1.0 WASI Toolchain Upgrade & Upstream Integration
 - Upgrade `clang.wasm` and `lld.wasm` to modern **LLVM 19.1.0 (`wasm32-wasip1`)** using prebuilt release assets from [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi).
-- Upgrade `sysroot.tar.gz` to modern LLVM 19 WASI Preview 1 sysroot with libc, libc++, compiler-rt runtime builtins (`libclang_rt.builtins.a`), and headers (`/include/wasm32-wasip1`, `/lib/clang/19/include`), compressed with gzip to 30MB for GitHub file size compliance and fast client loading.
+- Upgrade `sysroot.tar.gz` to modern LLVM 19 WASI Preview 1 sysroot with libc, libc++, compiler-rt runtime builtins (`libclang_rt.builtins.a`), and headers (`/include/wasm32-wasip1`, `/lib/clang/19/include`), compressed with gzip to ~30MB for GitHub file size compliance and fast client loading.
 - Upgrade `libraylib.a` to Raylib 5.5 WASI compiled with LLVM 19 from [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi).
 - Integrate native WASI Preview 1 `memfs.wasm` from `clang-wasi` with dynamic node allocation, standard WASI Preview 1 ABI alignment, safe `FindNode`, explicit buffer deallocation on unlink, and `path_link` export.
+- Remove downloadable prebuilt binaries (`*.wasm`, `sysroot.tar.gz`, `libraylib.a`, Raylib headers) from Git tracking and implement `scripts/download-sysroot.js` to fetch them on demand during `npm install` and build lifecycles.
 - Remove redundant repository-local build files and maintain single-source upstream toolchain integration.
 
 ---

@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "download:sysroot": "node scripts/download-sysroot.js",
+    "postinstall": "node scripts/download-sysroot.js",
+    "predev": "node scripts/download-sysroot.js",
+    "prebuild": "node scripts/download-sysroot.js",
+    "pretest": "node scripts/download-sysroot.js",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",

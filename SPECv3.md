@@ -122,7 +122,7 @@ SPECv3 extends SPECv2 by modernizing the core WebAssembly compilation infrastruc
   - The `; popd` delimiter ensures the user's working directory is always restored even when compilation or program execution fails with a non-zero exit code.
 
 ### 3.3 LLVM 19 C/C++ Toolchain & WASI Preview 1 Sysroot
-- **Prebuilt Binaries**: Modern **Clang 19.1.0** and **wasm-ld 19.1.0** targeting **WASI Preview 1 (`wasm32-wasip1`)** compiled from upstream LLVM 19 releases via [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi), alongside native WASI Preview 1 `memfs.wasm` and [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi).
+- **Prebuilt Binaries & On-Demand Download**: Modern **Clang 19.1.0** and **wasm-ld 19.1.0** targeting **WASI Preview 1 (`wasm32-wasip1`)** compiled from upstream LLVM 19 releases via [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi), alongside native WASI Preview 1 `memfs.wasm` and [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi). Prebuilt binary files (`*.wasm`, `sysroot.tar.gz`, `libraylib.a`, and Raylib headers) are excluded from Git tracking and automatically fetched on demand during the build/install lifecycle via `scripts/download-sysroot.js`.
 - **Compiler (`clang.wasm`)**:
   - LLVM 19.1.0 `-cc1` frontend mapped to commands `gcc`, `clang`, `g++`, and `clang++`.
   - Configured with target triple `-triple wasm32-unknown-wasi`.

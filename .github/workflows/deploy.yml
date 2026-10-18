@@ -32,6 +32,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Download sysroot & toolchain assets
+        run: npm run download:sysroot
+
       - name: Run tests
         run: npm test
 

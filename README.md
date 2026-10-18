@@ -78,7 +78,7 @@ This IDE is specifically engineered for **students and systems programming educa
   - Guarantees that the student's shell working directory is preserved even if compilation or execution exits with an error code.
 
 ### 3. Clang & LLD WebAssembly Toolchain
-- **Modern LLVM 19.1.0 Toolchain**: Powered by real WebAssembly builds of LLVM Clang 19.1.0 and `wasm-ld` 19.1.0 targeting **WASI Preview 1 (`wasm32-wasip1`)**, directly integrated from [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi).
+- **Modern LLVM 19.1.0 Toolchain**: Powered by real WebAssembly builds of LLVM Clang 19.1.0 and `wasm-ld` 19.1.0 targeting **WASI Preview 1 (`wasm32-wasip1`)**, directly integrated from [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi) and [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi). Toolchain and sysroot assets are downloaded on demand during the build/install lifecycle via `scripts/download-sysroot.js`, keeping the repository clean and free of large binary blobs.
 - **Native WebAssembly Section 12 Support**: `wasm-ld` natively parses and links relocatable object files containing Section 12 (`DataCount`) emitted by modern Clang for bulk-memory operations.
 - **Sysroot & Standard Libraries**:
   - Bundles standard WASI Preview 1 headers under `/usr/include/`, `/include/wasm32-wasip1/`, `/lib/clang/19/include/`, and C++ headers under `/usr/include/c++/v1/`.
@@ -161,6 +161,8 @@ git clone https://github.com/your-username/wasm-c-ide.git
 cd wasm-c-ide
 npm install
 ```
+
+> **Note**: `npm install` triggers a `postinstall` hook that automatically runs `scripts/download-sysroot.js`, downloading the required LLVM 19 WASI binaries (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar.gz`) and Raylib 5.5 assets from upstream GitHub releases into `public/sysroot/`. You can also manually trigger this download anytime with `npm run download:sysroot`.
 
 ### Development Server
 Start the local Vite development server:
