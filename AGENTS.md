@@ -34,7 +34,6 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── style.css              # Dark theme styling, button color hierarchy, tooltips
 │   ├── components/
 │   │   ├── filetree.js        # File tree sidebar, directory expansion, file operations
-│   │   ├── graphics-window.js # Dedicated floating/pop-out canvas console with FPS & dimensions
 │   │   ├── settings.js        # Project settings modal with decoupled Save and Generate buttons
 │   │   └── toast.js           # Non-blocking notification toasts
 │   ├── editor/

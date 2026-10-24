@@ -345,7 +345,7 @@ const mockDoc = {
 };
 
 globalThis.document = mockDoc;
-const { GraphicsWindowUI } = await import('../src/components/graphics-window.js');
+const { GraphicsWindowUI } = await import('canvas-wasi');
 const gw = new GraphicsWindowUI();
 assert.strictEqual(gw.isOpen(), false, 'Window should initially be closed');
 

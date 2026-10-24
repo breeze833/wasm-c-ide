@@ -12,7 +12,8 @@ import { RuntimeManager } from './terminal/runtime.js';
 import { WasmToolchain } from './toolchain/wasm-clang.js';
 import { executeGccCommand } from './toolchain/driver.js';
 import { executeArCommand } from './toolchain/ar.js';
-import { GraphicsWindowUI } from './components/graphics-window.js';
+import { GraphicsWindowUI } from 'canvas-wasi';
+import 'canvas-wasi/style.css';
 
 import { SettingsModal } from './components/settings.js';
 import { runMake } from './toolchain/make.js';

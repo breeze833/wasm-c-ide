@@ -85,7 +85,7 @@ globalThis.document = {
   }
 };
 
-const { GraphicsWindowUI } = await import('../src/components/graphics-window.js');
+const { GraphicsWindowUI } = await import('canvas-wasi');
 const win = new GraphicsWindowUI();
 assert.strictEqual(win.container.innerHTML.includes('id="graphics-canvas"'), true, 'Container must include canvas with id="graphics-canvas"');
 assert.strictEqual(win.title, 'Graphics Display', 'Default title must be Graphics Display');
