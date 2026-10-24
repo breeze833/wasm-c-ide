@@ -238,6 +238,7 @@ Users can select between two build strategies in the Project Settings UI:
     - Styles & Line: `canvas_set_fill_style`, `canvas_set_stroke_style`, `canvas_set_fill_rgb`, `canvas_set_line_width`, `canvas_set_line_cap`.
     - Typography: `canvas_fill_text`, `canvas_stroke_text`, `canvas_set_font`.
     - Matrix Transforms: `canvas_save`, `canvas_restore`, `canvas_translate`, `canvas_rotate`, `canvas_scale`.
+    - Pixel-Level Manipulation & Framebuffer Interop: `canvas_get_image_data`, `canvas_put_image_data`, `canvas_get_pixels`, `canvas_put_pixels`, `canvas_get_pixel`, `canvas_set_pixel`. Bridged directly to `CanvasRenderingContext2D` (`getImageData` / `putImageData`) and WebAssembly linear memory (`memoryInstance.buffer`).
 - **Opt-In Game Engine (Raylib 5.5)**:
   - Opt-in Raylib 5.5 integration via [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) without Emscripten, compiled with LLVM 19.
   - Shares the identical runtime graphics protocol (`graphics_init`, `frame`, `fps`, `graphics_close`).
@@ -268,6 +269,7 @@ Users can select between two build strategies in the Project Settings UI:
     - `02_raylib_interactive.c`: Raylib 5.5 GLES2 interactive demo with mouse tracking, bouncing balls on mouse click, and arrow-key/WASD box movement.
     - `03_framebuffer_graphics.c`: Pure C direct software framebuffer (`<graphics.h>`) rendering a 60 FPS procedural plasma via 512-entry sine lookup table, glowing hover cursor dot, persistent white paint strokes layer on click/drag, and 'C'/Space canvas clearing.
     - `04_canvas_vector.c`: HTML5 2D vector canvas demo (`<graphics_canvas.h>`) rendering anti-aliased geometry, orbiting shapes with matrix transformations (`canvas_rotate`, `canvas_scale`), drop shadows, and typography.
+    - `05_canvas_pixels.c`: HTML5 Canvas 2D pixel manipulation & image processing demo (`<graphics_canvas.h>`) combining vector scene underlay with direct pixel access and 2D spatial convolution filters in pure C (Sobel edge detection gradient filter, 3x3 box blur, grayscale & contrast adjustment, color inversion, and interactive mouse spotlight lens).
     - `README.md`: Step-by-step user compilation and running guide for all examples.
 
 ---
@@ -330,6 +332,7 @@ Users can select between two build strategies in the Project Settings UI:
 | **Generic Framebuffer Compilation** | Programs using `<graphics.h>` compile with standard Pure C mode without external link flags. |
 | **Generic Framebuffer Rendering** | Passing pixel buffers to `graphics_present` transfers `ImageBitmap` frames to `#graphics-canvas`. |
 | **2D Vector Canvas Compilation & Drawing** | Programs using `<graphics_canvas.h>` compile in pure C and render vector paths, shapes, and typography via OffscreenCanvas 2D context. |
+| **Canvas Pixel Manipulation & Image Processing** | Programs using `canvas_get_pixels`, `canvas_put_pixels`, `canvas_get_image_data`, `canvas_put_image_data`, `canvas_get_pixel`, and `canvas_set_pixel` directly inspect and modify canvas raster memory in pure C. |
 | **Interactive Canvas Window** | Calling `graphics_init(w, h, title)` or `InitWindow(w, h, title)` opens Graphical Console at requested dimensions. |
 | **Zero-Copy Frame Rendering** | Shapes and text render to canvas at ~60 FPS via `ImageBitmap` without main UI thread lag. |
 | **Concurrent Terminal I/O** | `printf` and `scanf` in the same program interact with `xterm.js` while graphics render on the canvas. |
@@ -348,5 +351,6 @@ Users can select between two build strategies in the Project Settings UI:
 | **Synchronous Frame Delivery** | `transferToImageBitmap()` delivers frames synchronously without Promise starvation in Wasm loops. |
 | **Background Activity Indicator** | Presenting frames while window is minimized/hidden activates green pulsating dot on `[🎮 Canvas]` button. |
 | **Dual-Channel Input Coordination** | Mouse movement, clicks, and keys synchronize via `SharedArrayBuffer` with message fallback and `DataView` byte safety. |
-| **Example Programs Suite** | `01_stdio.c`, `02_raylib_interactive.c`, `03_framebuffer_graphics.c`, `04_canvas_vector.c` compile and run without error. |
+| **Example Programs Suite** | `01_stdio.c`, `02_raylib_interactive.c`, `03_framebuffer_graphics.c`, `04_canvas_vector.c`, and `05_canvas_pixels.c` compile and run without error. |
 | **Offline PWA Operation** | LLVM 19 toolchain and Raylib assets execute while disconnected from the internet via Service Worker caching. |
+

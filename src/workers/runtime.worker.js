@@ -669,6 +669,76 @@ async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibShared
       const ctx = get2dContext();
       if (ctx) ctx.scale(sx, sy);
     },
+
+    /* --- Pixel-Level Manipulation & Framebuffer Interop --- */
+    canvas_get_image_data: (sx, sy, sw, sh, outPtr) => {
+      if (!memoryInstance || !outPtr || sw <= 0 || sh <= 0) return;
+      const ctx = get2dContext();
+      if (!ctx) return;
+      try {
+        const imgData = ctx.getImageData(sx, sy, sw, sh);
+        new Uint8Array(memoryInstance.buffer, outPtr, sw * sh * 4).set(imgData.data);
+      } catch (_) {}
+    },
+
+    canvas_put_image_data: (dx, dy, dw, dh, inPtr) => {
+      if (!memoryInstance || !inPtr || dw <= 0 || dh <= 0) return;
+      const ctx = get2dContext();
+      if (!ctx) return;
+      try {
+        const imgData = ctx.createImageData(dw, dh);
+        imgData.data.set(new Uint8Array(memoryInstance.buffer, inPtr, dw * dh * 4));
+        ctx.putImageData(imgData, dx, dy);
+      } catch (_) {}
+    },
+
+    canvas_get_pixels: (outPtr) => {
+      if (!memoryInstance || !outPtr || gfxWidth <= 0 || gfxHeight <= 0) return;
+      const ctx = get2dContext();
+      if (!ctx) return;
+      try {
+        const imgData = ctx.getImageData(0, 0, gfxWidth, gfxHeight);
+        new Uint8Array(memoryInstance.buffer, outPtr, gfxWidth * gfxHeight * 4).set(imgData.data);
+      } catch (_) {}
+    },
+
+    canvas_put_pixels: (inPtr) => {
+      if (!memoryInstance || !inPtr || gfxWidth <= 0 || gfxHeight <= 0) return;
+      const ctx = get2dContext();
+      if (!ctx) return;
+      try {
+        const imgData = ctx.createImageData(gfxWidth, gfxHeight);
+        imgData.data.set(new Uint8Array(memoryInstance.buffer, inPtr, gfxWidth * gfxHeight * 4));
+        ctx.putImageData(imgData, 0, 0);
+      } catch (_) {}
+    },
+
+    canvas_get_pixel: (x, y) => {
+      if (x < 0 || x >= gfxWidth || y < 0 || y >= gfxHeight) return 0;
+      const ctx = get2dContext();
+      if (!ctx) return 0;
+      try {
+        const p = ctx.getImageData(x, y, 1, 1).data;
+        return ((p[3] << 24) | (p[2] << 16) | (p[1] << 8) | p[0]) >>> 0;
+      } catch (_) {
+        return 0;
+      }
+    },
+
+    canvas_set_pixel: (x, y, color) => {
+      if (x < 0 || x >= gfxWidth || y < 0 || y >= gfxHeight) return;
+      const ctx = get2dContext();
+      if (!ctx) return;
+      try {
+        const imgData = ctx.createImageData(1, 1);
+        const d = imgData.data;
+        d[0] = color & 0xFF;
+        d[1] = (color >> 8) & 0xFF;
+        d[2] = (color >> 16) & 0xFF;
+        d[3] = (color >> 24) & 0xFF;
+        ctx.putImageData(imgData, x, y);
+      } catch (_) {}
+    },
   };
 
   importObject.graphics = new Proxy(genericGraphics, {

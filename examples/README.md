@@ -70,3 +70,26 @@ You can copy and paste the code from any of these files into the IDE editor (`wo
   gcc 04_canvas_vector.c -o a.out
   ./a.out
   ```
+
+---
+
+## 5. Canvas Pixel Manipulation & 2D Image Processing Program
+* **File**: [`05_canvas_pixels.c`](./05_canvas_pixels.c)
+* **API Used**: `<graphics_canvas.h>`
+* **Features**:
+  * Direct pixel-level framebuffer access from Canvas 2D (`canvas_get_pixels`, `canvas_put_pixels`)
+  * Sub-rectangle pixel data transfer (`canvas_get_image_data`, `canvas_put_image_data`) and single pixel operations (`canvas_get_pixel`, `canvas_set_pixel`)
+  * 2D spatial convolution and image processing filters implemented in pure C:
+    * 3x3 Sobel Edge Detection (horizontal/vertical gradient magnitude)
+    * 3x3 Box Blur (spatial convolution averaging)
+    * Grayscale conversion with contrast adjustment
+    * Color inversion / negative
+  * Real-time interactive spotlight lens tracking the mouse cursor
+  * Hybrid pipeline combining vector scene underlay, pixel filter passes, and crisp vector HUD overlay
+  * Zero external libraries or link flags needed!
+* **How to Compile & Run**:
+  ```bash
+  gcc 05_canvas_pixels.c -o a.out
+  ./a.out
+  ```
+

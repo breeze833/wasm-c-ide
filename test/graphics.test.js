@@ -508,6 +508,124 @@ const link03 = await tc.link(['workspace/03_framebuffer_graphics.o'], 'workspace
 assert.strictEqual(link03, 0, 'examples/03_framebuffer_graphics.c must link without errors');
 console.log('✓ examples/03_framebuffer_graphics.c end-to-end compilation & linkage verified');
 
+// Test 12: Verify graphics_canvas.h declares pixel-level manipulation APIs
+const canvasHeader = vfs.readFile('/usr/include/graphics_canvas.h');
+assert.strictEqual(canvasHeader.includes('canvas_get_image_data'), true);
+assert.strictEqual(canvasHeader.includes('canvas_put_image_data'), true);
+assert.strictEqual(canvasHeader.includes('canvas_get_pixels'), true);
+assert.strictEqual(canvasHeader.includes('canvas_put_pixels'), true);
+assert.strictEqual(canvasHeader.includes('canvas_get_pixel'), true);
+assert.strictEqual(canvasHeader.includes('canvas_set_pixel'), true);
+console.log('✓ graphics_canvas.h pixel manipulation API signatures verified');
+
+// Test 13: End-to-end compilation and runtime execution of canvas pixel manipulation
+const pixelTestCode = `
+#include <graphics_canvas.h>
+#include <stdint.h>
+
+int main(void) {
+    graphics_init(100, 100, "Pixel Test");
+
+    // Write a pixel
+    canvas_set_pixel(10, 20, 0xFF00FF00); // Green
+    uint32_t p = canvas_get_pixel(10, 20);
+
+    // Get & put sub-rectangle
+    uint32_t sub[4];
+    canvas_get_image_data(0, 0, 2, 2, sub);
+    sub[0] = 0xFFFF0000;
+    canvas_put_image_data(5, 5, 2, 2, sub);
+
+    // Get & put all pixels
+    uint32_t full[100 * 100];
+    canvas_get_pixels(full);
+    full[0] = p;
+    canvas_put_pixels(full);
+
+    canvas_present();
+    graphics_close();
+    return 0;
+}
+`;
+
+tc.memfs.addFile('workspace/pixel_test.c', pixelTestCode);
+const compPixel = await tc.compile('workspace/pixel_test.c', 'workspace/pixel_test.o', 'c', ['-I/include', '-I/workspace']);
+assert.strictEqual(compPixel, 0, 'Compilation of pixel_test.c must succeed');
+const linkPixel = await tc.link(['workspace/pixel_test.o'], 'workspace/pixel_test.out');
+assert.strictEqual(linkPixel, 0, 'Linkage of pixel_test.c must succeed');
+
+const pixelWasmBytes = tc.getFileFromMemfs('workspace/pixel_test.out');
+const pixelModule = new WebAssembly.Module(pixelWasmBytes);
+const pixelImportNames = new Set(WebAssembly.Module.imports(pixelModule).map(i => i.name));
+assert.strictEqual(pixelImportNames.has('canvas_set_pixel'), true);
+assert.strictEqual(pixelImportNames.has('canvas_get_pixel'), true);
+assert.strictEqual(pixelImportNames.has('canvas_get_image_data'), true);
+assert.strictEqual(pixelImportNames.has('canvas_put_image_data'), true);
+assert.strictEqual(pixelImportNames.has('canvas_get_pixels'), true);
+assert.strictEqual(pixelImportNames.has('canvas_put_pixels'), true);
+
+let getPixelsCalled = 0, putPixelsCalled = 0, getImageDataCalled = 0, putImageDataCalled = 0;
+let getPixelCalled = 0, setPixelCalled = 0;
+let pixelRuntimeMem = null;
+
+const pixelHostBridge = {
+  ...canvasHostBridge,
+  canvas_set_pixel(x, y, color) {
+    setPixelCalled++;
+    assert.strictEqual(x, 10);
+    assert.strictEqual(y, 20);
+    assert.strictEqual(color >>> 0, 0xFF00FF00 >>> 0);
+  },
+  canvas_get_pixel(x, y) {
+    getPixelCalled++;
+    return 0xFF00FF00 >>> 0;
+  },
+  canvas_get_image_data(sx, sy, sw, sh, outPtr) {
+    getImageDataCalled++;
+    assert.strictEqual(sw, 2);
+    assert.strictEqual(sh, 2);
+  },
+  canvas_put_image_data(dx, dy, dw, dh, inPtr) {
+    putImageDataCalled++;
+    assert.strictEqual(dx, 5);
+    assert.strictEqual(dy, 5);
+  },
+  canvas_get_pixels(outPtr) {
+    getPixelsCalled++;
+  },
+  canvas_put_pixels(inPtr) {
+    putPixelsCalled++;
+  }
+};
+
+const pixelInstance = await WebAssembly.instantiate(pixelModule, {
+  wasi_unstable: wasiStub,
+  wasi_snapshot_preview1: wasiStub,
+  env: new Proxy(pixelHostBridge, { get: (t, p) => p in t ? t[p] : () => 0 }),
+  graphics: new Proxy(pixelHostBridge, { get: (t, p) => p in t ? t[p] : () => 0 }),
+  canvas: new Proxy(pixelHostBridge, { get: (t, p) => p in t ? t[p] : () => 0 })
+});
+pixelRuntimeMem = pixelInstance.exports.memory;
+pixelInstance.exports._start();
+
+assert.strictEqual(setPixelCalled, 1);
+assert.strictEqual(getPixelCalled, 1);
+assert.strictEqual(getImageDataCalled, 1);
+assert.strictEqual(putImageDataCalled, 1);
+assert.strictEqual(getPixelsCalled, 1);
+assert.strictEqual(putPixelsCalled, 1);
+console.log('✓ Canvas pixel manipulation runtime execution and host bridging verified');
+
+// Test 14: Verify examples/05_canvas_pixels.c compiles and links cleanly
+const example05Code = fs.readFileSync(path.resolve('examples/05_canvas_pixels.c'), 'utf-8');
+tc.memfs.addFile('workspace/05_canvas_pixels.c', example05Code);
+const comp05 = await tc.compile('workspace/05_canvas_pixels.c', 'workspace/05_canvas_pixels.o', 'c', ['-I/include', '-I/workspace']);
+assert.strictEqual(comp05, 0, 'examples/05_canvas_pixels.c must compile without errors');
+const link05 = await tc.link(['workspace/05_canvas_pixels.o'], 'workspace/05_canvas_pixels.out');
+assert.strictEqual(link05, 0, 'examples/05_canvas_pixels.c must link without errors');
+console.log('✓ examples/05_canvas_pixels.c end-to-end compilation & linkage verified');
+
 console.log('--- ALL GENERIC & 2D VECTOR GRAPHICS TESTS PASSED ---');
+
 
 

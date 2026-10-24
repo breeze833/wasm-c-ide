@@ -131,9 +131,10 @@ This IDE is specifically engineered for **students and systems programming educa
   - Mounted by default in `/usr/include/graphics.h` for all standard C projects with zero external flags or dependencies.
   - Minimal API: `graphics_init(w, h, title)`, `graphics_present(pixels)`, `graphics_present_rgba(rgba, w, h)`, `graphics_wait_frame(fps)`, `graphics_get_mouse(&x, &y, &btn, &wheel)`, `graphics_is_key_down(key)`, `graphics_should_close()`, `graphics_close()`.
   - Enables writing direct pixel software renderers, fractal generators, and retro plasma demos in pure C.
-- **Enhanced HTML5 Canvas 2D Vector C API (`<graphics_canvas.h>`)**:
+- **Enhanced HTML5 Canvas 2D Vector & Pixel C API (`<graphics_canvas.h>`)**:
   - Direct C bridge to the browser's native `OffscreenCanvas` 2D context (`CanvasRenderingContext2D`).
   - Vector primitives: `canvas_fill_rect`, `canvas_stroke_rect`, `canvas_clear_rect`, `canvas_arc`, `canvas_begin_path`, `canvas_fill`, `canvas_stroke`, `canvas_set_fill_style`, `canvas_set_stroke_style`, `canvas_fill_text`, `canvas_set_font`, `canvas_save`, `canvas_restore`, `canvas_rotate`, `canvas_scale`, `canvas_present`.
+  - Pixel manipulation & framebuffer interop: `canvas_get_pixels`, `canvas_put_pixels`, `canvas_get_image_data`, `canvas_put_image_data`, `canvas_get_pixel`, `canvas_set_pixel` for direct pixel-level reading, writing, and 2D image processing filter implementation.
 - **Opt-In Raylib 5.5 Game Engine**:
   - Full-featured 2D/3D GLES2/WebGL game engine integration via [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) without Emscripten, compiled natively with LLVM 19.
 - **Synchronous Zero-Copy Frame Delivery**:
@@ -159,6 +160,7 @@ The repository includes a ready-to-run suite of single-file C programs in the `e
 - **`02_raylib_interactive.c`**: Raylib 5.5 GLES2 interactive demo with mouse position tracking, bouncing balls on mouse click, and keyboard-controlled box movement.
 - **`03_framebuffer_graphics.c`**: Pure C direct software framebuffer (`<graphics.h>`) rendering a 60 FPS procedural plasma via a 512-entry sine lookup table, glowing hover cursor dot, persistent white paint strokes layer on click/drag, and 'C'/Space canvas clearing.
 - **`04_canvas_vector.c`**: HTML5 2D vector canvas demo (`<graphics_canvas.h>`) rendering anti-aliased geometry, orbiting shapes with matrix transformations (`canvas_rotate`, `canvas_scale`), drop shadows, and typography.
+- **`05_canvas_pixels.c`**: HTML5 Canvas 2D pixel manipulation & image processing demo (`<graphics_canvas.h>`) combining vector scene underlay with direct pixel access and 2D spatial convolution filters in pure C (Sobel edge detection gradient filter, 3x3 box blur, grayscale & contrast adjustment, color inversion, and interactive mouse spotlight lens).
 - **`examples/README.md`**: Step-by-step user compilation and running guide for each example.
 
 ### 8. Virtual File System & Storage

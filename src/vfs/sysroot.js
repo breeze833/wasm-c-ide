@@ -491,6 +491,14 @@ void canvas_translate(float x, float y);
 void canvas_rotate(float radians);
 void canvas_scale(float sx, float sy);
 
+/* --- Pixel-Level Manipulation & Framebuffer Interop --- */
+void canvas_get_image_data(int sx, int sy, int sw, int sh, uint32_t *pixels_out);
+void canvas_put_image_data(int dx, int dy, int dw, int dh, const uint32_t *pixels_in);
+void canvas_get_pixels(uint32_t *pixels_out);
+void canvas_put_pixels(const uint32_t *pixels_in);
+uint32_t canvas_get_pixel(int x, int y);
+void canvas_set_pixel(int x, int y, uint32_t color);
+
 #ifdef __cplusplus
 }
 #endif
