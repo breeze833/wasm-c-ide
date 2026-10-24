@@ -23,6 +23,34 @@ export function checkIsolation() {
   return isIsolated;
 }
 
+// Synchronously register PWA install prompt listener at module evaluation to prevent race conditions
+let globalDeferredInstallPrompt = null;
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    globalDeferredInstallPrompt = e;
+    if (window.__ideApp) {
+      window.__ideApp.deferredInstallPrompt = e;
+    }
+    const btnInstall = document.getElementById('btn-install');
+    if (btnInstall) {
+      btnInstall.style.display = 'inline-flex';
+    }
+  });
+
+  window.addEventListener('appinstalled', () => {
+    globalDeferredInstallPrompt = null;
+    if (window.__ideApp) {
+      window.__ideApp.deferredInstallPrompt = null;
+    }
+    const btnInstall = document.getElementById('btn-install');
+    if (btnInstall) {
+      btnInstall.style.display = 'none';
+    }
+    showToast('Wasm C/C++ IDE successfully installed!', 'success', 3500);
+  });
+}
+
 export class App {
   constructor() {
     this.vfs = new VFS();
@@ -126,23 +154,13 @@ export class App {
     this.setupSplitResizer();
 
     // PWA Install Prompt & Connection Status Listeners
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      this.deferredInstallPrompt = e;
+    if (globalDeferredInstallPrompt) {
+      this.deferredInstallPrompt = globalDeferredInstallPrompt;
       const btnInstall = document.getElementById('btn-install');
       if (btnInstall) {
         btnInstall.style.display = 'inline-flex';
       }
-    });
-
-    window.addEventListener('appinstalled', () => {
-      this.deferredInstallPrompt = null;
-      const btnInstall = document.getElementById('btn-install');
-      if (btnInstall) {
-        btnInstall.style.display = 'none';
-      }
-      showToast('Wasm C/C++ IDE successfully installed!', 'success', 3500);
-    });
+    }
 
     window.addEventListener('online', () => {
       showToast('Network restored: Online', 'info', 3000);
@@ -626,13 +644,15 @@ export class App {
     const btnInstall = document.getElementById('btn-install');
     if (btnInstall) {
       btnInstall.addEventListener('click', async () => {
-        if (!this.deferredInstallPrompt) return;
-        this.deferredInstallPrompt.prompt();
-        const { outcome } = await this.deferredInstallPrompt.userChoice;
+        const promptEvent = this.deferredInstallPrompt || globalDeferredInstallPrompt;
+        if (!promptEvent) return;
+        promptEvent.prompt();
+        const { outcome } = await promptEvent.userChoice;
         if (outcome === 'accepted') {
           btnInstall.style.display = 'none';
         }
         this.deferredInstallPrompt = null;
+        globalDeferredInstallPrompt = null;
       });
     }
   }
