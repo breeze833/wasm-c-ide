@@ -217,6 +217,9 @@ Users can select between two build strategies in the Project Settings UI:
   - Enables 100% offline development: cached toolchain and Raylib assets execute locally without network access.
 
 ### 3.8 Generic Graphics Subsystem & Dedicated Graphical Console
+- **Modular Subsystem Package (`canvas-wasi`)**:
+  - The generic graphics console, HTML5 Canvas 2D vector primitives, window control, input coordination, and WebAssembly host bindings are decoupled into an independent, zero-dependency package: [`breeze833/canvas-wasi`](https://github.com/breeze833/canvas-wasi) (consumed via `"canvas-wasi": "github:breeze833/canvas-wasi"`).
+  - `wasm-c-ide` mounts system headers directly from `canvas-wasi/headers`, instantiates host imports in `runtime.worker.js` via `createGraphicsImports` from `canvas-wasi/worker`, and renders the UI via `GraphicsWindowUI` from `canvas-wasi`.
 - **Framework-Agnostic Presentation Layer**: The graphical console operates independently of any specific graphics framework, displaying zero-copy `ImageBitmap` frames on `<canvas id="graphics-canvas">` (and popup canvas `<canvas id="graphics-popup-canvas">`) via `ImageBitmapRenderingContext`.
 - **Generic Framebuffer C API (`/usr/include/graphics.h`)**:
   - Mounted by default in sysroot for all C/C++ projects without requiring external dependencies or compiler flags.

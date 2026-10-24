@@ -126,6 +126,8 @@ This IDE is specifically engineered for **students and systems programming educa
   - Pressing `Ctrl+C` in `xterm.js` or clicking the UI **Stop** button terminates the runtime worker immediately, returning control to the shell prompt.
 
 ### 6. Unified Graphics Canvas, Vector 2D & Game Engine
+- **Modular Architecture (`canvas-wasi`)**:
+  - The generic graphics console, HTML5 Canvas 2D vector primitives, window control, input coordination, and WebAssembly host bindings are decoupled into the standalone zero-dependency package [`breeze833/canvas-wasi`](https://github.com/breeze833/canvas-wasi) (available via `github:breeze833/canvas-wasi`).
 - **Framework-Agnostic Display**: Operates independently of any single graphics engine, displaying zero-copy `ImageBitmap` frames on `<canvas id="graphics-canvas">` via `ImageBitmapRenderingContext`.
 - **Direct Software Framebuffer C API (`<graphics.h>`)**:
   - Mounted by default in `/usr/include/graphics.h` for all standard C projects with zero external flags or dependencies.
