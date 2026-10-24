@@ -37,9 +37,36 @@ function readStr(u8, offset, len) {
   return str;
 }
 
+let currentMouseX = -1;
+let currentMouseY = -1;
+let currentMouseButtons = 0;
+let currentMouseWheel = 0;
+const currentKeysDown = new Uint8Array(512);
+
 self.onmessage = async (event) => {
   const msg = event.data;
   if (!msg) return;
+
+  if (msg.type === 'input_event' && msg.event) {
+    if (msg.event.type === 'mouse') {
+      currentMouseX = msg.event.x;
+      currentMouseY = msg.event.y;
+      currentMouseButtons = msg.event.buttons;
+      currentMouseWheel = msg.event.wheel;
+    } else if (msg.event.type === 'keydown') {
+      if (msg.event.key >= 0 && msg.event.key < 512) {
+        currentKeysDown[msg.event.key] = 1;
+      }
+    } else if (msg.event.type === 'keyup') {
+      if (msg.event.key >= 0 && msg.event.key < 512) {
+        currentKeysDown[msg.event.key] = 0;
+      }
+    } else if (msg.event.type === 'blur') {
+      currentKeysDown.fill(0);
+      currentMouseButtons = 0;
+    }
+    return;
+  }
 
   if (msg.type === 'run') {
     const { wasmBytes, sharedBuffer, argv = ['./a.out'], environ = {}, stdinBytes, raylibSharedBuffer } = msg;
@@ -186,6 +213,9 @@ async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibShared
     fd_seek() { return ESUCCESS; },
     fd_fdstat_get(fd, stat_out) {
       memU8().fill(0, stat_out, stat_out + 24);
+      if (fd === 0 || fd === 1 || fd === 2) {
+        memU8()[stat_out] = 2; // __WASI_FILETYPE_CHARACTER_DEVICE (identifies tty streams)
+      }
       return ESUCCESS;
     },
     fd_fdstat_set_flags() { return ESUCCESS; },
@@ -338,6 +368,323 @@ async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibShared
   };
 
   let raylibHost = null;
+
+  let gfxWidth = 800;
+  let gfxHeight = 450;
+  let lastFrameTime = performance.now();
+  let frameCount = 0;
+  let lastFpsTime = performance.now();
+
+  let offscreen2d = null;
+  let ctx2d = null;
+
+  const get2dContext = () => {
+    if (!offscreen2d && typeof OffscreenCanvas !== 'undefined') {
+      offscreen2d = new OffscreenCanvas(gfxWidth, gfxHeight);
+      ctx2d = offscreen2d.getContext('2d');
+    } else if (offscreen2d && (offscreen2d.width !== gfxWidth || offscreen2d.height !== gfxHeight)) {
+      offscreen2d.width = gfxWidth;
+      offscreen2d.height = gfxHeight;
+    }
+    return ctx2d;
+  };
+
+  const decodeStr = (ptr) => {
+    if (!ptr || !memoryInstance) return '';
+    try {
+      const u8 = new Uint8Array(memoryInstance.buffer, ptr);
+      let end = 0;
+      while (u8[end] !== 0) end++;
+      return new TextDecoder('utf-8').decode(new Uint8Array(memoryInstance.buffer, ptr, end));
+    } catch (_) {
+      return '';
+    }
+  };
+
+
+  const finishPresent = () => {
+    frameCount++;
+    const now = performance.now();
+    if (now - lastFpsTime >= 1000) {
+      const fps = Math.round((frameCount * 1000) / (now - lastFpsTime));
+      self.postMessage({ type: 'fps', fps });
+      frameCount = 0;
+      lastFpsTime = now;
+    }
+  };
+
+  const presentBuffer = (ptr, w, h) => {
+    if (!memoryInstance || !ptr || w <= 0 || h <= 0) return;
+    const byteLen = w * h * 4;
+    try {
+      const ctx = get2dContext();
+      if (ctx && offscreen2d) {
+        if (offscreen2d.width !== w || offscreen2d.height !== h) {
+          offscreen2d.width = w;
+          offscreen2d.height = h;
+        }
+        const imgData = ctx.createImageData(w, h);
+        imgData.data.set(new Uint8Array(memoryInstance.buffer, ptr, byteLen));
+        ctx.putImageData(imgData, 0, 0);
+
+        if (typeof offscreen2d.transferToImageBitmap === 'function') {
+          try {
+            const bitmap = offscreen2d.transferToImageBitmap();
+            if (bitmap) {
+              self.postMessage({ type: 'frame', bitmap }, [bitmap]);
+              finishPresent();
+              return;
+            }
+          } catch (_) {}
+        }
+      }
+
+      // Synchronous transferable ArrayBuffer fallback for environments without 2D transferToImageBitmap
+      const copyBuffer = memoryInstance.buffer.slice(ptr, ptr + byteLen);
+      self.postMessage({ type: 'frame_buffer', buffer: copyBuffer, width: w, height: h }, [copyBuffer]);
+    } catch (_) {}
+
+    finishPresent();
+  };
+
+  const genericGraphics = {
+    graphics_init: (w, h, titlePtr) => {
+      gfxWidth = w > 0 ? w : 800;
+      gfxHeight = h > 0 ? h : 450;
+      if (offscreen2d) {
+        offscreen2d.width = gfxWidth;
+        offscreen2d.height = gfxHeight;
+      }
+      let titleStr = decodeStr(titlePtr) || 'Graphics Display';
+      self.postMessage({ type: 'graphics_init', width: gfxWidth, height: gfxHeight, title: titleStr });
+    },
+
+    graphics_present: (pixelsPtr) => {
+      presentBuffer(pixelsPtr, gfxWidth, gfxHeight);
+    },
+
+    graphics_present_rgba: (rgbaPtr, w, h) => {
+      presentBuffer(rgbaPtr, w, h);
+    },
+
+    graphics_wait_frame: (targetFps) => {
+      const fps = targetFps > 0 ? targetFps : 60;
+      const targetDelta = 1000 / fps;
+      const now = performance.now();
+      const elapsed = now - lastFrameTime;
+      const waitMs = Math.max(1, Math.floor(targetDelta - elapsed));
+      if (raylibSharedBuffer && typeof Atomics !== 'undefined') {
+        const syncWord = new Int32Array(raylibSharedBuffer, 372, 1);
+        Atomics.wait(syncWord, 0, 0, Math.min(waitMs, 50));
+      }
+      lastFrameTime = performance.now();
+    },
+
+    graphics_should_close: () => {
+      if (raylibSharedBuffer) {
+        const v = new DataView(raylibSharedBuffer);
+        return v.getInt32(20, true) !== 0 ? 1 : 0;
+      }
+      return 0;
+    },
+
+    graphics_close: () => {
+      self.postMessage({ type: 'graphics_close' });
+    },
+
+    graphics_get_mouse: (xPtr, yPtr, btnPtr, wheelPtr) => {
+      let mx = -1;
+      let my = -1;
+      let btn = 0;
+      let wheel = 0;
+
+      if (raylibSharedBuffer) {
+        const v = new DataView(raylibSharedBuffer);
+        mx = Math.round(v.getFloat32(24, true));
+        my = Math.round(v.getFloat32(28, true));
+        wheel = Math.round(v.getFloat32(36, true));
+        btn = v.getUint32(40, true);
+      } else {
+        mx = currentMouseX;
+        my = currentMouseY;
+        btn = currentMouseButtons;
+        wheel = currentMouseWheel;
+      }
+
+      if (memoryInstance) {
+        const memView = new DataView(memoryInstance.buffer);
+        if (xPtr) memView.setInt32(xPtr, mx, true);
+        if (yPtr) memView.setInt32(yPtr, my, true);
+        if (btnPtr) memView.setUint32(btnPtr, btn, true);
+        if (wheelPtr) memView.setInt32(wheelPtr, wheel, true);
+      }
+    },
+
+    graphics_is_key_down: (key) => {
+      if (raylibSharedBuffer && key >= 0 && key < 512) {
+        const v = new DataView(raylibSharedBuffer);
+        const word = Math.floor(key / 32);
+        const bit = key % 32;
+        const wordVal = v.getUint32(44 + word * 4, true);
+        if ((wordVal >>> bit) & 1) return 1;
+      }
+      if (key >= 0 && key < 512) {
+        return currentKeysDown[key] ? 1 : 0;
+      }
+      return 0;
+    },
+
+    /* --- HTML5 Canvas 2D Vector Primitives --- */
+    canvas_present: () => {
+      if (!offscreen2d) return;
+      if (typeof offscreen2d.transferToImageBitmap === 'function') {
+        try {
+          const bitmap = offscreen2d.transferToImageBitmap();
+          if (bitmap) {
+            self.postMessage({ type: 'frame', bitmap }, [bitmap]);
+            finishPresent();
+            return;
+          }
+        } catch (_) {}
+      }
+      if (typeof createImageBitmap !== 'undefined') {
+        createImageBitmap(offscreen2d).then((bitmap) => {
+          self.postMessage({ type: 'frame', bitmap }, [bitmap]);
+        }).catch(() => {});
+      }
+      finishPresent();
+    },
+
+    canvas_clear_rect: (x, y, w, h) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.clearRect(x, y, w, h);
+    },
+
+    canvas_fill_rect: (x, y, w, h) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.fillRect(x, y, w, h);
+    },
+
+    canvas_stroke_rect: (x, y, w, h) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.strokeRect(x, y, w, h);
+    },
+
+    canvas_begin_path: () => {
+      const ctx = get2dContext();
+      if (ctx) ctx.beginPath();
+    },
+
+    canvas_close_path: () => {
+      const ctx = get2dContext();
+      if (ctx) ctx.closePath();
+    },
+
+    canvas_move_to: (x, y) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.moveTo(x, y);
+    },
+
+    canvas_line_to: (x, y) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.lineTo(x, y);
+    },
+
+    canvas_arc: (x, y, radius, startAngle, endAngle, counterclockwise) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.arc(x, y, radius, startAngle, endAngle, Boolean(counterclockwise));
+    },
+
+    canvas_fill: () => {
+      const ctx = get2dContext();
+      if (ctx) ctx.fill();
+    },
+
+    canvas_stroke: () => {
+      const ctx = get2dContext();
+      if (ctx) ctx.stroke();
+    },
+
+    canvas_set_fill_style: (stylePtr) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.fillStyle = decodeStr(stylePtr);
+    },
+
+    canvas_set_stroke_style: (stylePtr) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.strokeStyle = decodeStr(stylePtr);
+    },
+
+    canvas_set_fill_rgb: (r, g, b) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.fillStyle = `rgb(${r & 255},${g & 255},${b & 255})`;
+    },
+
+    canvas_set_line_width: (width) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.lineWidth = width;
+    },
+
+    canvas_set_line_cap: (capPtr) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.lineCap = decodeStr(capPtr);
+    },
+
+    canvas_fill_text: (textPtr, x, y) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.fillText(decodeStr(textPtr), x, y);
+    },
+
+    canvas_stroke_text: (textPtr, x, y) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.strokeText(decodeStr(textPtr), x, y);
+    },
+
+    canvas_set_font: (fontPtr) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.font = decodeStr(fontPtr);
+    },
+
+    canvas_save: () => {
+      const ctx = get2dContext();
+      if (ctx) ctx.save();
+    },
+
+    canvas_restore: () => {
+      const ctx = get2dContext();
+      if (ctx) ctx.restore();
+    },
+
+    canvas_translate: (x, y) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.translate(x, y);
+    },
+
+    canvas_rotate: (rad) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.rotate(rad);
+    },
+
+    canvas_scale: (sx, sy) => {
+      const ctx = get2dContext();
+      if (ctx) ctx.scale(sx, sy);
+    },
+  };
+
+  importObject.graphics = new Proxy(genericGraphics, {
+    get(t, p) {
+      if (p in t) return t[p];
+      return () => 0;
+    }
+  });
+  importObject.fb = importObject.graphics;
+  importObject.canvas = importObject.graphics;
+
+  // Also bind to env for programs linking graphics_* / canvas_* into default env module
+  for (const [name, fn] of Object.entries(genericGraphics)) {
+    env[name] = fn;
+  }
+
   if (hasRaylib && typeof OffscreenCanvas !== 'undefined') {
     const offscreen = new OffscreenCanvas(800, 450);
     const gl = offscreen.getContext('webgl', {
@@ -366,7 +713,7 @@ async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibShared
         self.postMessage({ type: 'fps', fps });
       },
       onClose: () => {
-        self.postMessage({ type: 'raylib_close' });
+        self.postMessage({ type: 'graphics_close' });
       },
     });
 
@@ -385,7 +732,7 @@ async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibShared
           offscreen.height = h;
         }
         const res = raylibImports.raylib.raylib_host_init_window(w, h, titlePtr);
-        let titleStr = 'Raylib Display';
+        let titleStr = 'Graphics Display';
         try {
           if (titlePtr && memoryInstance) {
             const u8 = new Uint8Array(memoryInstance.buffer, titlePtr);
@@ -394,7 +741,7 @@ async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibShared
             titleStr = new TextDecoder('utf-8').decode(new Uint8Array(memoryInstance.buffer, titlePtr, end));
           }
         } catch (_) {}
-        self.postMessage({ type: 'raylib_init', width: w, height: h, title: titleStr });
+        self.postMessage({ type: 'graphics_init', width: w, height: h, title: titleStr });
         return res;
       },
     }, {

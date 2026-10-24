@@ -36,7 +36,8 @@ export class InputCoordinator {
     height?: number;
     dpiScale?: number;
   });
-  attachListeners(canvas: HTMLCanvasElement): void;
+  detach(): void;
+  attachListeners(canvas: HTMLCanvasElement, windowTarget?: Window | HTMLElement | null): void;
   updateSharedState(): void;
   pollToWasm(statePtr: number, wasmMemory: WebAssembly.Memory): void;
 }

@@ -476,6 +476,20 @@ export class WasmToolchain {
         }
       }
 
+      // Mirror system headers from VFS /usr/include (e.g. graphics.h, graphics_canvas.h) into MemFS include/
+      if (this.vfs && typeof this.vfs.exists === 'function' && this.vfs.exists('/usr/include')) {
+        const includeFiles = this.vfs.getAllFiles('/usr/include');
+        for (const f of includeFiles) {
+          if (!f.isDir) {
+            const relPath = f.path.substring('/usr/include/'.length);
+            const memfsHeaderPath = `include/${relPath}`;
+            if (!this.memfs.hasFile(memfsHeaderPath)) {
+              this.memfs.addFile(memfsHeaderPath, f.content);
+            }
+          }
+        }
+      }
+
       onProgress('Compiler ready.');
       this.initialized = true;
     })();

@@ -216,15 +216,59 @@ Users can select between two build strategies in the Project Settings UI:
   - `manifest.webmanifest` defining standalone display, theme colors, and icons.
   - Enables 100% offline development: cached toolchain and Raylib assets execute locally without network access.
 
-### 3.8 Raylib 5.5 Graphics Subsystem & Dedicated Graphical Console
-- **First-Class Graphics Support**: Opt-in Raylib 5.5 integration via [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) without Emscripten, compiled with LLVM 19.
-- **Dedicated Graphical Console**: Floating, resizable in-page window running alongside `xterm.js`.
-  - Dynamic resolution adaptation based on `InitWindow(width, height, title)`.
-  - Zero-copy GPU frame transfer (`ImageBitmap` / WebGL) rendered at 60 FPS.
+### 3.8 Generic Graphics Subsystem & Dedicated Graphical Console
+- **Framework-Agnostic Presentation Layer**: The graphical console operates independently of any specific graphics framework, displaying zero-copy `ImageBitmap` frames on `<canvas id="graphics-canvas">` (and popup canvas `<canvas id="graphics-popup-canvas">`) via `ImageBitmapRenderingContext`.
+- **Generic Framebuffer C API (`/usr/include/graphics.h`)**:
+  - Mounted by default in sysroot for all C/C++ projects without requiring external dependencies or compiler flags.
+  - Minimal, educational API functions:
+    - `void graphics_init(int width, int height, const char *title)`: Opens graphical window at requested dimensions.
+    - `void graphics_present(const uint32_t *pixels)`: Presents a 32-bit RGBA pixel framebuffer to the display.
+    - `void graphics_present_rgba(const uint8_t *rgba, int width, int height)`: Presents arbitrary-sized byte buffers.
+    - `bool graphics_should_close(void)`: Polls window close status.
+    - `void graphics_close(void)`: Closes the graphics window.
+    - `void graphics_wait_frame(int target_fps)`: Synchronizes frame pacing using `Atomics.wait()`.
+    - `void graphics_get_mouse(int *x, int *y, int *buttons, int *wheel)`: Reads mouse coordinates, button states, and wheel delta.
+    - `bool graphics_is_key_down(int key)`: Inspects active keyboard key states.
+- **Enhanced 2D Vector Canvas C API (`/usr/include/graphics_canvas.h`)**:
+  - Includes `<graphics.h>` and provides high-level 2D vector drawing primitives backed by the browser's native `OffscreenCanvas` 2D context (`CanvasRenderingContext2D`).
+  - Supported APIs:
+    - Frame swap: `void canvas_present(void)`: Renders 2D canvas drawing to the display.
+    - Rectangles: `canvas_clear_rect`, `canvas_fill_rect`, `canvas_stroke_rect`.
+    - Paths & Arcs: `canvas_begin_path`, `canvas_close_path`, `canvas_move_to`, `canvas_line_to`, `canvas_arc`, `canvas_fill`, `canvas_stroke`.
+    - Styles & Line: `canvas_set_fill_style`, `canvas_set_stroke_style`, `canvas_set_fill_rgb`, `canvas_set_line_width`, `canvas_set_line_cap`.
+    - Typography: `canvas_fill_text`, `canvas_stroke_text`, `canvas_set_font`.
+    - Matrix Transforms: `canvas_save`, `canvas_restore`, `canvas_translate`, `canvas_rotate`, `canvas_scale`.
+- **Opt-In Game Engine (Raylib 5.5)**:
+  - Opt-in Raylib 5.5 integration via [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) without Emscripten, compiled with LLVM 19.
+  - Shares the identical runtime graphics protocol (`graphics_init`, `frame`, `fps`, `graphics_close`).
+- **Synchronous Zero-Copy Frame Delivery**:
+  - Eliminates microtask starvation in synchronous WebAssembly interactive game loops (`while (!graphics_should_close())`). Because the Web Worker call stack never unwinds during synchronous execution, Promise-based APIs (`createImageBitmap().then(...)`) cannot fire.
+  - `presentBuffer` and `canvas_present` in `runtime.worker.js` invoke `offscreen2d.transferToImageBitmap()`, generating an `ImageBitmap` **synchronously** without Promises.
+  - The bitmap is transferred immediately via `self.postMessage({ type: 'frame', bitmap }, [bitmap])` to the main UI thread, where `ImageBitmapRenderingContext.transferFromImageBitmap` presents it with zero copy.
+  - In environments where 2D `transferToImageBitmap` is unavailable, `presentBuffer` falls back to transferring the raw pixel buffer synchronously via `self.postMessage({ type: 'frame_buffer', buffer, width, height }, [buffer])` for immediate rendering on the main thread.
+- **Dual-Channel Input Coordination & Memory Safety**:
+  - Coordinates mouse position, buttons, wheel deltas, and keystrokes using a 512-byte `SharedArrayBuffer` for zero-latency cross-thread synchronization.
+  - `graphics_get_mouse` writes coordinates, button bitmasks, and wheel states into WebAssembly linear memory using `DataView.setInt32` / `DataView.setUint32` with explicit little-endian encoding, guaranteeing strict byte-alignment safety across Wasm memory growth boundaries (`malloc`/`calloc`).
+  - Supports clean mouse hover state: pointer coordinates initialize and reset to `(-1, -1)` on blur or `mouseleave`, ensuring hover indicators only render when the pointer actively resides within canvas bounds.
+  - When running in a decoupled or non-isolated context, forwards an event stream (`postMessage({ type: 'input_event', event })`) as a seamless fallback.
+- **Dedicated Graphical Console & Window Ergonomics**:
+  - Floating, draggable, resizable in-page window (`#graphics-canvas`) running alongside `xterm.js`.
+  - Dynamic resolution adaptation based on `graphics_init(width, height, title)` or `InitWindow(width, height, title)`.
+  - Zero-copy GPU frame transfer (`ImageBitmap` / WebGL) rendered at a fluid 60 FPS.
   - Real-time FPS counter and resolution badge.
-  - Pop-Out (`↗`) to external browser window and Dock (`↙`) back.
-  - Frame pacing via `Atomics.wait()` in `EndDrawing()` based on `SetTargetFPS()`.
-  - Keyboard and mouse input coordination with 512-byte `SharedArrayBuffer` and clean focus/blur lifecycle resets.
+  - Pop-Out (`↗`) to external browser window (`#graphics-popup-canvas`) with auto-focus and full keyboard event capture (`windowTarget`), and clean Dock (`↙`) back.
+  - Frame pacing via `Atomics.wait()` in `graphics_wait_frame` based on target FPS.
+  - **Background Frame Activity Indicator**:
+    - The `[🎮 Canvas]` toolbar button is permanently accessible in the top header.
+    - When new frames are presented while the graphics window is closed or minimized, the canvas button activates a pulsating green indicator dot and tooltip alert (`Canvas (New frames rendering in background - Click to show)`), notifying the user without forcefully popping up or occluding terminal inspection.
+    - Automatically clears when the user opens the window, un-minimizes the window, or when process execution terminates.
+- **Interactive Educational Examples Suite (`/examples/`)**:
+  - Bundled single-file C examples for immediate manual testing and demonstration:
+    - `01_stdio.c`: Interactive console standard I/O (menu navigation, Fibonacci, Factorial, Prime check) configured with unbuffered stdout (`setbuf(stdout, NULL)`) and immediate prompt flushing (`fflush(stdout)`).
+    - `02_raylib_interactive.c`: Raylib 5.5 GLES2 interactive demo with mouse tracking, bouncing balls on mouse click, and arrow-key/WASD box movement.
+    - `03_framebuffer_graphics.c`: Pure C direct software framebuffer (`<graphics.h>`) rendering a 60 FPS procedural plasma via 512-entry sine lookup table, glowing hover cursor dot, persistent white paint strokes layer on click/drag, and 'C'/Space canvas clearing.
+    - `04_canvas_vector.c`: HTML5 2D vector canvas demo (`<graphics_canvas.h>`) rendering anti-aliased geometry, orbiting shapes with matrix transformations (`canvas_rotate`, `canvas_scale`), drop shadows, and typography.
+    - `README.md`: Step-by-step user compilation and running guide for all examples.
 
 ---
 
@@ -283,7 +327,10 @@ Users can select between two build strategies in the Project Settings UI:
 | **MemFS Capacity & Dynamic Nodes** | Extracting `sysroot.tar.gz` (4,300+ entries) completes without inode exhaustion or allocation errors. |
 | **MemFS File Deletion & Recompile** | Deleting `.o` files and recompiling begins writing at byte offset 0 with valid `\0asm` headers. |
 | **Raylib 5.5 Compilation & Linking** | Programs using `InitWindow` link with `-lraylib` and run in the runtime worker without undefined symbols. |
-| **Interactive Canvas Window** | Calling `InitWindow(640, 480, "Demo")` opens Graphical Console at requested dimensions. |
+| **Generic Framebuffer Compilation** | Programs using `<graphics.h>` compile with standard Pure C mode without external link flags. |
+| **Generic Framebuffer Rendering** | Passing pixel buffers to `graphics_present` transfers `ImageBitmap` frames to `#graphics-canvas`. |
+| **2D Vector Canvas Compilation & Drawing** | Programs using `<graphics_canvas.h>` compile in pure C and render vector paths, shapes, and typography via OffscreenCanvas 2D context. |
+| **Interactive Canvas Window** | Calling `graphics_init(w, h, title)` or `InitWindow(w, h, title)` opens Graphical Console at requested dimensions. |
 | **Zero-Copy Frame Rendering** | Shapes and text render to canvas at ~60 FPS via `ImageBitmap` without main UI thread lag. |
 | **Concurrent Terminal I/O** | `printf` and `scanf` in the same program interact with `xterm.js` while graphics render on the canvas. |
 | **Compiler Preprocessing (`gcc -E`)** | `gcc -E main.c` streams preprocessed output to terminal or `main.i` via `-o` without linking. |
@@ -298,4 +345,8 @@ Users can select between two build strategies in the Project Settings UI:
 | **Interactive `scanf` & `Ctrl-D` EOF** | Stdin blocks via `SharedArrayBuffer` until Enter; `Ctrl-D` triggers EOF cleanly. |
 | **Pipelines & Redirections** | Command pipelines (`|`) and stream redirections (`<`, `>`, `>>`) execute deterministically across stages. |
 | **Direct Shell Script Execution** | `./build.sh` or `/workspace/script.sh` executes shell commands without manual `sh` prefix. |
+| **Synchronous Frame Delivery** | `transferToImageBitmap()` delivers frames synchronously without Promise starvation in Wasm loops. |
+| **Background Activity Indicator** | Presenting frames while window is minimized/hidden activates green pulsating dot on `[🎮 Canvas]` button. |
+| **Dual-Channel Input Coordination** | Mouse movement, clicks, and keys synchronize via `SharedArrayBuffer` with message fallback and `DataView` byte safety. |
+| **Example Programs Suite** | `01_stdio.c`, `02_raylib_interactive.c`, `03_framebuffer_graphics.c`, `04_canvas_vector.c` compile and run without error. |
 | **Offline PWA Operation** | LLVM 19 toolchain and Raylib assets execute while disconnected from the internet via Service Worker caching. |

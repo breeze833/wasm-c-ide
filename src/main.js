@@ -182,6 +182,18 @@ export class App {
           this.runtimeManager.inputCoordinator.updateSharedState();
         }
       },
+      onFrameActivity: (hasActivity) => {
+        const btn = document.getElementById('btn-graphics-window');
+        if (btn) {
+          if (hasActivity) {
+            btn.classList.add('has-frame-activity');
+            btn.setAttribute('title', 'Canvas (New frames rendering in background - Click to show)');
+          } else {
+            btn.classList.remove('has-frame-activity');
+            btn.setAttribute('title', 'Toggle Graphics Canvas Window');
+          }
+        }
+      },
     });
     this.runtimeManager.setGraphicsWindow(this.graphicsWindow);
 
@@ -444,9 +456,7 @@ export class App {
   }
 
   async syncRaylibState(enabled) {
-    const btnGraphics = document.getElementById('btn-graphics-window');
     if (enabled) {
-      if (btnGraphics) btnGraphics.style.display = 'inline-flex';
       if (!this.vfs.exists('/usr/include/raylib.h') || !this.vfs.exists('/usr/lib/libraylib.a')) {
         try {
           let basePath = './';
@@ -475,8 +485,6 @@ export class App {
         }
       }
     } else {
-      if (btnGraphics) btnGraphics.style.display = 'none';
-      if (this.graphicsWindow) this.graphicsWindow.close();
       unmountRaylibSysroot(this.vfs, this.toolchain);
     }
     if (this.fileTreeUI) this.fileTreeUI.render();
@@ -773,12 +781,13 @@ export function initApp() {
           </svg>
           <span>Stop</span>
         </button>
-        <button id="btn-graphics-window" class="btn btn-graphics" title="Open Raylib Graphical Window" style="display: none;">
+        <button id="btn-graphics-window" class="btn btn-graphics" title="Toggle Graphics Canvas Window">
           <svg class="btn-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <path d="M11.5 6.027a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0zm-1.5 1.5a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1zm2.5-.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0zm-1.5 1.5a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1zM4 6.5A.5.5 0 0 1 4.5 6h1a.5.5 0 0 1 0 1h-1A.5.5 0 0 1 4 6.5z"/>
             <path d="M3.051 3.26a.5.5 0 0 1 .615-.357c.563.155 1.564.402 2.678.583a27.18 27.18 0 0 1 3.312 0c1.114-.181 2.115-.428 2.678-.583a.5.5 0 0 1 .59.822c-.2.25-.436.564-.69 1.018a10.985 10.985 0 0 0-.616 1.488c-.126.438-.204.887-.204 1.341v.003c0 1.25.405 2.44 1.134 3.411.396.527.877.986 1.408 1.353a.5.5 0 0 1 .15.688l-.75 1.25a.5.5 0 0 1-.774.137 11.026 11.026 0 0 1-2.112-2.164 12.185 12.185 0 0 1-2.81 0 11.025 11.025 0 0 1-2.112 2.164.5.5 0 0 1-.774-.137l-.75-1.25a.5.5 0 0 1 .15-.688 8.016 8.016 0 0 0 1.408-1.353c.729-.97 1.134-2.16 1.134-3.411v-.003c0-.454-.078-.903-.204-1.341a10.986 10.986 0 0 0-.616-1.488 12.24 12.24 0 0 0-.69-1.018.5.5 0 0 1 .025-.465z"/>
           </svg>
           <span>Canvas</span>
+          <span class="canvas-active-dot" id="canvas-active-dot" title="Graphics frame update in background"></span>
         </button>
         <button id="btn-settings" class="btn" title="Project Settings">
           <svg class="btn-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">

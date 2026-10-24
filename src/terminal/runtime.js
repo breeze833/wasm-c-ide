@@ -44,13 +44,30 @@ export class RuntimeManager {
       this.sharedInt32 = null;
       this.sharedUint8 = null;
       this.raylibSharedBuffer = null;
-      this.inputCoordinator = null;
+      this.inputCoordinator = new InputCoordinator({
+        sharedBuffer: null,
+        width: 800,
+        height: 450,
+      });
+      if (this.graphicsWindow && typeof this.graphicsWindow.setInputCoordinator === 'function') {
+        this.graphicsWindow.setInputCoordinator(this.inputCoordinator);
+      }
+    }
+
+    if (this.inputCoordinator) {
+      this.inputCoordinator.addListener((event) => {
+        if (this.worker && this.isRunning) {
+          try {
+            this.worker.postMessage({ type: 'input_event', event });
+          } catch (_) {}
+        }
+      });
     }
   }
 
   setGraphicsWindow(graphicsWindow) {
     this.graphicsWindow = graphicsWindow;
-    if (this.inputCoordinator && this.graphicsWindow) {
+    if (this.inputCoordinator && this.graphicsWindow && typeof this.graphicsWindow.setInputCoordinator === 'function') {
       this.graphicsWindow.setInputCoordinator(this.inputCoordinator);
     }
   }
@@ -101,7 +118,7 @@ export class RuntimeManager {
           } else if (!options.captureStdout) {
             this.terminal.write(msg.data.replace(/\r?\n/g, '\r\n'));
           }
-        } else if (msg.type === 'raylib_init') {
+        } else if (msg.type === 'graphics_init') {
           if (this.graphicsWindow) {
             this.graphicsWindow.open(msg.width, msg.height, msg.title);
           }
@@ -109,11 +126,15 @@ export class RuntimeManager {
           if (this.graphicsWindow) {
             this.graphicsWindow.renderFrame(msg.bitmap);
           }
+        } else if (msg.type === 'frame_buffer') {
+          if (this.graphicsWindow) {
+            this.graphicsWindow.renderFrameBuffer(msg.buffer, msg.width, msg.height);
+          }
         } else if (msg.type === 'fps') {
           if (this.graphicsWindow) {
             this.graphicsWindow.updateFPS(msg.fps);
           }
-        } else if (msg.type === 'raylib_close') {
+        } else if (msg.type === 'graphics_close') {
           if (this.graphicsWindow) {
             this.graphicsWindow.close();
           }
@@ -305,6 +326,9 @@ export class RuntimeManager {
     this.stdinLineBuffer = '';
     if (this.inputCoordinator) {
       this.inputCoordinator.reset();
+    }
+    if (this.graphicsWindow && typeof this.graphicsWindow.clearActivity === 'function') {
+      this.graphicsWindow.clearActivity();
     }
     if (this.worker) {
       this.worker.terminate();
