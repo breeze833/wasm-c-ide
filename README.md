@@ -17,7 +17,10 @@ A zero-backend, installation-free, multi-file C/C++ development and learning env
   - [Clang & LLD WebAssembly Toolchain](#3-clang--lld-webassembly-toolchain)
   - [Dual Build Systems (Shell Script & Makefile)](#4-dual-build-systems-shell-script--makefile)
   - [Execution Sandbox with Synchronous Stdin](#5-execution-sandbox-with-synchronous-stdin)
-  - [Virtual File System & Storage](#6-virtual-file-system--storage)
+  - [Unified Graphics Canvas, Vector 2D & Game Engine](#6-unified-graphics-canvas-vector-2d--game-engine)
+  - [Interactive Educational Examples Suite](#7-interactive-educational-examples-suite)
+  - [Virtual File System & Storage](#8-virtual-file-system--storage)
+  - [Progressive Web App (PWA) & Offline Execution](#9-progressive-web-app-pwa--offline-execution)
 - [Getting Started & Local Development](#getting-started--local-development)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
@@ -122,22 +125,51 @@ This IDE is specifically engineered for **students and systems programming educa
 - **Execution Interruption**:
   - Pressing `Ctrl+C` in `xterm.js` or clicking the UI **Stop** button terminates the runtime worker immediately, returning control to the shell prompt.
 
-### 6. Raylib 5.5 2D/3D Game Engine & Dual Console
-- **First-Class Graphics Support**: Opt-in Raylib 5.5 integration via [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) without Emscripten, compiled with LLVM 19.
-- **Dedicated Graphical Console**: Floating, resizable in-page window running alongside `xterm.js`.
-  - Dynamic resolution adaptation based on `InitWindow(width, height, title)`.
-  - Zero-copy GPU frame transfer (`ImageBitmap` / WebGL) rendered at 60 FPS.
+### 6. Unified Graphics Canvas, Vector 2D & Game Engine
+- **Framework-Agnostic Display**: Operates independently of any single graphics engine, displaying zero-copy `ImageBitmap` frames on `<canvas id="graphics-canvas">` via `ImageBitmapRenderingContext`.
+- **Direct Software Framebuffer C API (`<graphics.h>`)**:
+  - Mounted by default in `/usr/include/graphics.h` for all standard C projects with zero external flags or dependencies.
+  - Minimal API: `graphics_init(w, h, title)`, `graphics_present(pixels)`, `graphics_present_rgba(rgba, w, h)`, `graphics_wait_frame(fps)`, `graphics_get_mouse(&x, &y, &btn, &wheel)`, `graphics_is_key_down(key)`, `graphics_should_close()`, `graphics_close()`.
+  - Enables writing direct pixel software renderers, fractal generators, and retro plasma demos in pure C.
+- **Enhanced HTML5 Canvas 2D Vector & Pixel C API (`<graphics_canvas.h>`)**:
+  - Direct C bridge to the browser's native `OffscreenCanvas` 2D context (`CanvasRenderingContext2D`).
+  - Vector primitives: `canvas_fill_rect`, `canvas_stroke_rect`, `canvas_clear_rect`, `canvas_arc`, `canvas_begin_path`, `canvas_fill`, `canvas_stroke`, `canvas_set_fill_style`, `canvas_set_stroke_style`, `canvas_fill_text`, `canvas_set_font`, `canvas_save`, `canvas_restore`, `canvas_rotate`, `canvas_scale`, `canvas_present`.
+  - Pixel manipulation & framebuffer interop: `canvas_get_pixels`, `canvas_put_pixels`, `canvas_get_image_data`, `canvas_put_image_data`, `canvas_get_pixel`, `canvas_set_pixel` for direct pixel-level reading, writing, and 2D image processing filter implementation.
+- **Opt-In Raylib 5.5 Game Engine**:
+  - Full-featured 2D/3D GLES2/WebGL game engine integration via [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) without Emscripten, compiled natively with LLVM 19.
+- **Synchronous Zero-Copy Frame Delivery**:
+  - Prevents microtask starvation during synchronous WebAssembly execution loops (`while (!graphics_should_close())`).
+  - Invokes `offscreen2d.transferToImageBitmap()`, creating an `ImageBitmap` **synchronously** without Promise delays and posting it directly to the UI thread via `postMessage({ type: 'frame', bitmap }, [bitmap])`.
+  - Features transferable ArrayBuffer fallback (`frame_buffer`) for universal browser compatibility.
+- **Dedicated Floating & Pop-Out Canvas Window**:
+  - Floating, draggable, resizable window (`#graphics-canvas`) running alongside `xterm.js`.
+  - Dynamic resolution adaptation based on `graphics_init(width, height, title)` or `InitWindow(width, height, title)`.
   - Real-time FPS counter and resolution badge.
-  - Pop-Out (`↗`) to external browser window and Dock (`↙`) back.
-- **Dual Console Ergonomics**: Run interactive games that use keyboard/mouse inputs on canvas while concurrently accepting terminal commands or `printf`/`scanf` in `xterm.js`.
+  - Pop-Out (`↗`) to external browser window (`#graphics-popup-canvas`) with auto-focus and keyboard capturing (`windowTarget`), and clean Dock (`↙`) back.
+  - **Background Frame Activity Indicator**:
+    - The `[🎮 Canvas]` toolbar button is permanently accessible in the top header.
+    - When new frames render while the window is closed or minimized, the canvas button activates a pulsating green indicator dot and tooltip alert (`Canvas (New frames rendering in background - Click to show)`), notifying the user without forcefully popping up or occluding terminal inspection.
+    - Automatically clears when the user opens the window, un-minimizes the window, or when process execution terminates.
+- **Dual-Channel Input Coordination**:
+  - Zero-latency 512-byte `SharedArrayBuffer` tracking mouse position, buttons, wheel, and keys with safe `DataView` byte alignment. Clean hover coordinates (`-1, -1`) on mouse leave.
+  - Event stream message fallback for decoupled or non-isolated environments.
 
-### 7. Virtual File System & Storage
+### 7. Interactive Educational Examples Suite
+The repository includes a ready-to-run suite of single-file C programs in the `examples/` directory for manual testing and pedagogical demonstration:
+- **`01_stdio.c`**: Interactive console standard I/O (menu navigation, Fibonacci generator, Factorial, Prime tester) configured with unbuffered stdout (`setbuf(stdout, NULL)`) and prompt flushing (`fflush(stdout)`).
+- **`02_raylib_interactive.c`**: Raylib 5.5 GLES2 interactive demo with mouse position tracking, bouncing balls on mouse click, and keyboard-controlled box movement.
+- **`03_framebuffer_graphics.c`**: Pure C direct software framebuffer (`<graphics.h>`) rendering a 60 FPS procedural plasma via a 512-entry sine lookup table, glowing hover cursor dot, persistent white paint strokes layer on click/drag, and 'C'/Space canvas clearing.
+- **`04_canvas_vector.c`**: HTML5 2D vector canvas demo (`<graphics_canvas.h>`) rendering anti-aliased geometry, orbiting shapes with matrix transformations (`canvas_rotate`, `canvas_scale`), drop shadows, and typography.
+- **`05_canvas_pixels.c`**: HTML5 Canvas 2D pixel manipulation & image processing demo (`<graphics_canvas.h>`) combining vector scene underlay with direct pixel access and 2D spatial convolution filters in pure C (Sobel edge detection gradient filter, 3x3 box blur, grayscale & contrast adjustment, color inversion, and interactive mouse spotlight lens).
+- **`examples/README.md`**: Step-by-step user compilation and running guide for each example.
+
+### 8. Virtual File System & Storage
 - **In-Memory VFS**: Fast hierarchical tree representation shared across the editor, shell, and toolchain.
 - **IndexedDB Persistence**: Automatically persists `/workspace` across browser sessions and page refreshes.
 - **Zip Import & Export**: One-click export of `/workspace` into a standard `.zip` file using JSZip, and direct zip unpacking into the workspace.
 - **Sysroot Protection**: Read-only protection on system root paths (`/usr`, `/bin`).
 
-### 8. Progressive Web App (PWA) & Offline Execution
+### 9. Progressive Web App (PWA) & Offline Execution
 - **Installable Desktop/Mobile App**: Certified PWA with Web App Manifest (`manifest.webmanifest`), dark theme colors, and icons.
 - **In-App Install Prompt**: Automatically reveals an **Install** button in the header toolbar when the browser detects installability.
 - **100% Offline Capability**:

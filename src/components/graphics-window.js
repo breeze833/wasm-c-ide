@@ -16,12 +16,14 @@ export class GraphicsWindowUI {
     this.isMinimized = false;
     this.width = 800;
     this.height = 450;
-    this.title = 'Raylib Display';
+    this.title = 'Graphics Display';
 
     this.onCloseRequested = options.onCloseRequested || (() => {});
     this.onFocusChange = options.onFocusChange || (() => {});
+    this.onFrameActivity = options.onFrameActivity || (() => {});
     this.sharedBuffer = options.sharedBuffer || null;
     this.inputCoordinator = options.inputCoordinator || null;
+    this._hasBackgroundActivity = false;
 
     this.initDOM();
   }
@@ -52,11 +54,11 @@ export class GraphicsWindowUI {
         </div>
       </div>
       <div class="graphics-body" id="graphics-body">
-        <canvas id="raylib-canvas" width="${this.width}" height="${this.height}" tabindex="0"></canvas>
+        <canvas id="graphics-canvas" width="${this.width}" height="${this.height}" tabindex="0"></canvas>
       </div>
     `;
 
-    this.canvas = this.container.querySelector('#raylib-canvas');
+    this.canvas = this.container.querySelector('#graphics-canvas');
     try {
       this.ctx = this.canvas.getContext('bitmaprenderer');
     } catch (_) {
@@ -107,7 +109,9 @@ export class GraphicsWindowUI {
   setInputCoordinator(inputCoordinator) {
     this.inputCoordinator = inputCoordinator;
     if (this.inputCoordinator && typeof this.inputCoordinator.attachListeners === 'function') {
-      this.inputCoordinator.attachListeners(this.isPoppedOut && this.popupCanvas ? this.popupCanvas : this.canvas);
+      const targetCanvas = (this.isPoppedOut && this.popupCanvas) ? this.popupCanvas : this.canvas;
+      const targetWindow = (this.isPoppedOut && this.popupWindow) ? this.popupWindow : null;
+      this.inputCoordinator.attachListeners(targetCanvas, targetWindow);
     }
   }
 
@@ -156,7 +160,7 @@ export class GraphicsWindowUI {
   initWindow(width, height, title) {
     this.width = width || 800;
     this.height = height || 450;
-    this.title = title || 'Raylib Display';
+    this.title = title || 'Graphics Display';
 
     if (this.canvas) {
       this.canvas.width = this.width;
@@ -179,12 +183,33 @@ export class GraphicsWindowUI {
       this.inputCoordinator.updateSharedState();
     }
 
+    // Keep within viewport if previously dragged
+    if (this.container && (this.container.style.left || this.container.style.top)) {
+      const curLeft = parseInt(this.container.style.left, 10);
+      const curTop = parseInt(this.container.style.top, 10);
+      const maxLeft = Math.max(10, (typeof window !== 'undefined' ? window.innerWidth : 1024) - this.width - 40);
+      const maxTop = Math.max(10, (typeof window !== 'undefined' ? window.innerHeight : 768) - this.height - 80);
+      if (!isNaN(curLeft) && curLeft > maxLeft) {
+        this.container.style.left = `${maxLeft}px`;
+      }
+      if (!isNaN(curTop) && curTop > maxTop) {
+        this.container.style.top = `${maxTop}px`;
+      }
+    }
+
     if (this.popupWindow && !this.popupWindow.closed && this.popupCanvas) {
       this.popupCanvas.width = this.width;
       this.popupCanvas.height = this.height;
       this.popupCanvas.style.width = `${this.width}px`;
       this.popupCanvas.style.height = `${this.height}px`;
       this.popupWindow.document.title = `${this.title} (${this.width}x${this.height})`;
+      this.popupWindow.focus();
+    }
+
+    if (this.inputCoordinator && typeof this.inputCoordinator.attachListeners === 'function') {
+      const targetCanvas = (this.isPoppedOut && this.popupCanvas) ? this.popupCanvas : this.canvas;
+      const targetWindow = (this.isPoppedOut && this.popupWindow) ? this.popupWindow : null;
+      this.inputCoordinator.attachListeners(targetCanvas, targetWindow);
     }
 
     this.show();
@@ -205,18 +230,58 @@ export class GraphicsWindowUI {
   }
 
   isOpen() {
-    if (this.isPoppedOut && this.popupWindow && !this.popupWindow.closed) {
-      return true;
+    if (this.isPoppedOut) {
+      if (this.popupWindow && !this.popupWindow.closed) {
+        return true;
+      }
+      this.isPoppedOut = false;
+      this.popupWindow = null;
+      this.popupCanvas = null;
+      this.popupCtx = null;
     }
     return Boolean(this.container && this.container.style.display !== 'none');
   }
 
+  isCanvasVisible() {
+    if (this.isPoppedOut) {
+      return Boolean(this.popupWindow && !this.popupWindow.closed);
+    }
+    return Boolean(this.container && this.container.style.display !== 'none' && !this.isMinimized);
+  }
+
+  setActivity(active) {
+    const next = Boolean(active);
+    if (this._hasBackgroundActivity !== next) {
+      this._hasBackgroundActivity = next;
+      try {
+        this.onFrameActivity(next);
+      } catch (err) {
+        console.warn('Error in onFrameActivity callback:', err);
+      }
+    }
+  }
+
+  clearActivity() {
+    this.setActivity(false);
+  }
+
   show() {
-    if (this.isPoppedOut && this.popupWindow && !this.popupWindow.closed) {
-      this.popupWindow.focus();
-      return;
+    this.clearActivity();
+    if (this.isPoppedOut) {
+      if (this.popupWindow && !this.popupWindow.closed) {
+        this.popupWindow.focus();
+        return;
+      }
+      this.isPoppedOut = false;
+      this.popupWindow = null;
+      this.popupCanvas = null;
+      this.popupCtx = null;
+      if (this.inputCoordinator && typeof this.inputCoordinator.attachListeners === 'function') {
+        this.inputCoordinator.attachListeners(this.canvas);
+      }
     }
     this.container.style.display = 'flex';
+    this.container.style.zIndex = '1000';
     this.isMinimized = false;
     this.container.classList.remove('minimized');
     if (this.canvas && typeof this.canvas.focus === 'function') {
@@ -241,6 +306,7 @@ export class GraphicsWindowUI {
   }
 
   close() {
+    this.clearActivity();
     this.hide();
     if (this.popupWindow && !this.popupWindow.closed) {
       this.popupWindow.close();
@@ -259,6 +325,7 @@ export class GraphicsWindowUI {
       this.container.classList.add('minimized');
     } else {
       this.container.classList.remove('minimized');
+      this.clearActivity();
     }
   }
 
@@ -312,10 +379,10 @@ export class GraphicsWindowUI {
       <div style="position: absolute; top: 8px; right: 12px;">
         <button id="btn-dock" style="background: #252526; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 3px 8px; cursor: pointer; font-size: 12px;">↙ Dock into IDE</button>
       </div>
-      <canvas id="raylib-popup-canvas" width="${this.width}" height="${this.height}" style="background: #000; box-shadow: 0 4px 16px rgba(0,0,0,0.6); max-width: 96vw; max-height: 90vh; object-fit: contain;"></canvas>
+      <canvas id="graphics-popup-canvas" width="${this.width}" height="${this.height}" tabindex="0" style="background: #000; box-shadow: 0 4px 16px rgba(0,0,0,0.6); max-width: 96vw; max-height: 90vh; object-fit: contain; outline: none;"></canvas>
     `;
 
-    this.popupCanvas = this.popupWindow.document.getElementById('raylib-popup-canvas');
+    this.popupCanvas = this.popupWindow.document.getElementById('graphics-popup-canvas');
     this.popupCtx = this.popupCanvas.getContext('bitmaprenderer');
 
     const btnDock = this.popupWindow.document.getElementById('btn-dock');
@@ -324,8 +391,14 @@ export class GraphicsWindowUI {
     });
 
     if (this.inputCoordinator && typeof this.inputCoordinator.attachListeners === 'function') {
-      this.inputCoordinator.attachListeners(this.popupCanvas);
+      this.inputCoordinator.attachListeners(this.popupCanvas, this.popupWindow);
     }
+
+    this.popupWindow.addEventListener('click', () => {
+      if (this.popupCanvas && typeof this.popupCanvas.focus === 'function') {
+        this.popupCanvas.focus();
+      }
+    });
 
     this.popupWindow.addEventListener('unload', () => {
       if (this.isPoppedOut) {
@@ -333,6 +406,9 @@ export class GraphicsWindowUI {
         this.popupWindow = null;
         this.popupCanvas = null;
         this.popupCtx = null;
+        if (this.inputCoordinator && typeof this.inputCoordinator.attachListeners === 'function') {
+          this.inputCoordinator.attachListeners(this.canvas);
+        }
         this.show();
       }
     });
@@ -360,6 +436,13 @@ export class GraphicsWindowUI {
   renderBitmap(bitmap) {
     if (!bitmap) return;
     try {
+      if (this.isPoppedOut && (!this.popupWindow || this.popupWindow.closed)) {
+        this.isPoppedOut = false;
+        this.popupWindow = null;
+        this.popupCanvas = null;
+        this.popupCtx = null;
+        this.show();
+      }
       const activeCtx = (this.isPoppedOut && this.popupCtx) ? this.popupCtx : this.ctx;
       if (activeCtx) {
         if (typeof activeCtx.transferFromImageBitmap === 'function') {
@@ -379,6 +462,44 @@ export class GraphicsWindowUI {
 
   renderFrame(bitmap) {
     this.renderBitmap(bitmap);
+    if (!this.isCanvasVisible()) {
+      this.setActivity(true);
+    } else {
+      this.setActivity(false);
+    }
+  }
+
+  renderFrameBuffer(buffer, width, height) {
+    if (!buffer || width <= 0 || height <= 0) return;
+    try {
+      if (this.isPoppedOut && (!this.popupWindow || this.popupWindow.closed)) {
+        this.isPoppedOut = false;
+        this.popupWindow = null;
+        this.popupCanvas = null;
+        this.popupCtx = null;
+        this.show();
+      }
+      const activeCtx = (this.isPoppedOut && this.popupCtx) ? this.popupCtx : this.ctx;
+      if (!activeCtx) return;
+
+      const clamped = new Uint8ClampedArray(buffer);
+      if (typeof ImageData !== 'undefined') {
+        const imgData = new ImageData(clamped, width, height);
+        if (typeof activeCtx.putImageData === 'function') {
+          activeCtx.putImageData(imgData, 0, 0);
+        } else if (typeof createImageBitmap !== 'undefined') {
+          createImageBitmap(imgData).then((bitmap) => {
+            this.renderBitmap(bitmap);
+          }).catch(() => {});
+        }
+      }
+    } catch (_) {}
+
+    if (!this.isCanvasVisible()) {
+      this.setActivity(true);
+    } else {
+      this.setActivity(false);
+    }
   }
 
   updateFps(fps) {

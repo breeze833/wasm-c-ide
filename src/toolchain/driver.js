@@ -171,13 +171,6 @@ export async function executeGccCommand({
       }
     }
 
-    // Sync or unsync Raylib sysroot files in toolchain MemFS according to VFS presence
-    const raylibHeaders = [
-      { vfs: '/usr/include/raylib.h', memfs: 'include/raylib.h' },
-      { vfs: '/usr/include/raymath.h', memfs: 'include/raymath.h' },
-      { vfs: '/usr/include/rlgl.h', memfs: 'include/rlgl.h' },
-    ];
-
     const hasInMemfs = (path) => {
       if (typeof toolchain.hasFileInMemfs === 'function') {
         return toolchain.hasFileInMemfs(path);
@@ -188,15 +181,29 @@ export async function executeGccCommand({
       return false;
     };
 
+    // Sync system headers from VFS /usr/include (e.g. graphics.h, graphics_canvas.h, raylib.h) into MemFS
+    if (vfs.exists('/usr/include')) {
+      const includeFiles = vfs.getAllFiles('/usr/include');
+      for (const f of includeFiles) {
+        if (!f.isDir) {
+          const relPath = f.path.substring('/usr/include/'.length);
+          const memfsHeaderPath = `include/${relPath}`;
+          if (!hasInMemfs(memfsHeaderPath)) {
+            await toolchain.syncFileToMemfs(memfsHeaderPath, f.content);
+          }
+        }
+      }
+    }
+
+    // Purge Raylib headers from MemFS if unmounted from VFS
+    const raylibHeaders = [
+      { vfs: '/usr/include/raylib.h', memfs: 'include/raylib.h' },
+      { vfs: '/usr/include/raymath.h', memfs: 'include/raymath.h' },
+      { vfs: '/usr/include/rlgl.h', memfs: 'include/rlgl.h' },
+    ];
     for (const h of raylibHeaders) {
-      if (vfs.exists(h.vfs)) {
-        if (!hasInMemfs(h.memfs)) {
-          await toolchain.syncFileToMemfs(h.memfs, vfs.readFile(h.vfs, true));
-        }
-      } else {
-        if (typeof toolchain.removeFileFromMemfs === 'function' && hasInMemfs(h.memfs)) {
-          toolchain.removeFileFromMemfs(h.memfs);
-        }
+      if (!vfs.exists(h.vfs) && typeof toolchain.removeFileFromMemfs === 'function' && hasInMemfs(h.memfs)) {
+        toolchain.removeFileFromMemfs(h.memfs);
       }
     }
 

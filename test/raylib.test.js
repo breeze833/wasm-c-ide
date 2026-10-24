@@ -435,4 +435,49 @@ assert.strictEqual(rmGwClosed, true, 'Graphics window must be closed when kill()
 assert.strictEqual(settledRes, 130, 'Promise must resolve with SIGINT exitCode 130 on kill()');
 console.log('✓ RuntimeManager.kill terminates process, hides graphics window, and resolves with exitCode 130 verified');
 
+// Test 11: Pop-out window keyboard events, blur reset, and dock back re-attach
+const popSharedBuffer = new SharedArrayBuffer(512);
+const popCoord = new InputCoordinator({ sharedBuffer: popSharedBuffer });
+const mockInPageCanvas = {
+  width: 800,
+  height: 450,
+  getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 450 }),
+  addEventListener(evt, fn) { this.listeners[evt] = fn; },
+  removeEventListener(evt, fn) { delete this.listeners[evt]; },
+  listeners: {}
+};
+const mockPopupWindow = {
+  addEventListener(evt, fn) { this.listeners[evt] = fn; },
+  removeEventListener(evt, fn) { delete this.listeners[evt]; },
+  listeners: {}
+};
+
+// Initial in-page attach
+popCoord.attachListeners(mockInPageCanvas);
+assert.ok(mockInPageCanvas.listeners.keydown, 'keydown listener should be attached to in-page canvas');
+
+// Pop out: attach to mockPopupWindow
+popCoord.attachListeners(mockInPageCanvas, mockPopupWindow);
+assert.strictEqual(mockInPageCanvas.listeners.keydown, undefined, 'keydown listener removed from canvas when windowTarget provided');
+assert.ok(mockPopupWindow.listeners.keydown, 'keydown listener attached to popup window');
+
+// Simulate pressing ArrowRight (rayKey 262) on popup window
+mockPopupWindow.listeners.keydown({ code: 'ArrowRight', keyCode: 262, preventDefault() {} });
+const popView = new DataView(popSharedBuffer);
+const arrowWord = Math.floor(262 / 32);
+const arrowBit = 262 % 32;
+assert.strictEqual((popView.getUint32(44 + arrowWord * 4, true) & (1 << arrowBit)) !== 0, true, 'ArrowRight bit should be set in SharedArrayBuffer');
+assert.strictEqual(popView.getInt32(108, true), 1, 'keyPressedQueue should have 1 entry');
+assert.strictEqual(popView.getInt32(112, true), 262, 'keyPressedQueue[0] should be 262');
+
+// Simulate blur on popup window
+mockPopupWindow.listeners.blur();
+assert.strictEqual(popView.getUint32(44 + arrowWord * 4, true), 0, 'keysDown should be cleared on blur');
+
+// Dock back: re-attach to in-page canvas
+popCoord.attachListeners(mockInPageCanvas);
+assert.strictEqual(mockPopupWindow.listeners.keydown, undefined, 'popup window listeners should be removed on detach');
+assert.ok(mockInPageCanvas.listeners.keydown, 'in-page canvas listener restored');
+console.log('✓ Pop-out window keyboard events, blur reset, and dock back re-attach verified');
+
 console.log('--- ALL RAYLIB TESTS PASSED ---');
