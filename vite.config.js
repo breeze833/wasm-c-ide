@@ -22,4 +22,16 @@ export default defineConfig({
   optimizeDeps: {
     include: ['@xterm/xterm', '@xterm/addon-fit'],
   },
+  build: {
+    chunkSizeWarningLimit: 4000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          monaco: ['monaco-editor'],
+          xterm: ['@xterm/xterm', '@xterm/addon-fit'],
+          jszip: ['jszip'],
+        },
+      },
+    },
+  },
 });
