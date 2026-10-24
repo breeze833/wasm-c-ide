@@ -730,13 +730,12 @@ async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibShared
       const ctx = get2dContext();
       if (!ctx) return;
       try {
-        const imgData = ctx.createImageData(1, 1);
-        const d = imgData.data;
-        d[0] = color & 0xFF;
-        d[1] = (color >> 8) & 0xFF;
-        d[2] = (color >> 16) & 0xFF;
-        d[3] = (color >> 24) & 0xFF;
-        ctx.putImageData(imgData, x, y);
+        const r = color & 0xFF;
+        const g = (color >> 8) & 0xFF;
+        const b = (color >> 16) & 0xFF;
+        const a = ((color >> 24) & 0xFF) / 255;
+        ctx.fillStyle = `rgba(${r},${g},${b},${a})`;
+        ctx.fillRect(x, y, 1, 1);
       } catch (_) {}
     },
   };
