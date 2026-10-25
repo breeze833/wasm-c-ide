@@ -42,11 +42,11 @@ SPECv3 extends SPECv2 by modernizing the core WebAssembly compilation infrastruc
 |                         Web Worker Execution Sandboxes                           |
 |                                                                                  |
 |  +--------------------------+          +--------------------------------------+  |
-|  |    POSIX Shell Worker    |          |  Wasm Runtime (Target App + Raylib)  |  |
+|  |    POSIX Shell Worker    |          |  Wasm Runtime (App + Raylib / Turtle)|  |
 |  |  - History & Autocomplete|          |  - SharedArrayBuffer (Stdin & Input) |  |
 |  |  - Directory Stack & Globs|         |  - Atomics.wait (Blocking IO & FPS)  |  |
-|  +-------------+------------+          |  - OffscreenCanvas (WebGL Context)   |  |
-|                | (executes commands)   |  - raylib-host.js (GLES2/Input Bridge)|  |
+|  +-------------+------------+          |  - OffscreenCanvas (WebGL/2D Context)|  |
+|                | (executes commands)   |  - raylib-host.js & canvas-wasi host |  |
 |                v                       +------------------+-------------------+  |
 |  +--------------------------------------------------------+                      |
 |  |  LLVM 19 Clang / LLD / Make Wasm Toolchain (Async)     |                      |
@@ -59,8 +59,8 @@ SPECv3 extends SPECv2 by modernizing the core WebAssembly compilation infrastruc
 |  +------------------------------------+------------------------------------------+
 |  | Virtual File System (VFS - Single Source of Truth)                            |
 |  | - /workspace (Read-Write, IndexedDB Sync, .zip Export/Import)                |
-|  | - /usr/include & /include/wasm32-wasip1 (Standard C/C++ Headers & raylib.h)   |
-|  | - /usr/lib & /lib/wasm32-wasip1 (libc, libc++, compiler-rt, libraylib.a)     |
+|  | - /usr/include & /include/wasm32-wasip1 (C/C++, graphics, turtle, raylib)     |
+|  | - /usr/lib & /lib/wasm32-wasip1 (libc, libc++, compiler-rt, libturtle, raylib)|
 |  | - /bin & /usr/bin (POSIX and Toolchain Binaries: gcc, g++, ar, make, etc.)   |
 |  +-------------------------------------------------------------------------------+
 +----------------------------------------------------------------------------------+
@@ -130,7 +130,7 @@ SPECv3 extends SPECv2 by modernizing the core WebAssembly compilation infrastruc
 - **Linker (`lld.wasm`)**:
   - `wasm-ld` 19.1.0 mapped to handle object linking (`-flavor wasm`).
   - Native support for WebAssembly Section 12 (`DataCount`), modern relocation records (`R_WASM_TABLE_INDEX_REL_SLEB`, 64-bit table indices), and builtin compiler-rt runtime (`libclang_rt.builtins.a`).
-  - Links standard libraries: `-lc -lclang_rt.builtins -lc++ -lc++abi`, and conditionally `-lraylib`.
+  - Links standard libraries: `-lc -lclang_rt.builtins -lc++ -lc++abi`, `-lturtle` (or `-lturtle_canvas-wasi`), and conditionally `-lraylib` / `-lturtle_raylib`.
 - **Static Archiver (`ar`)**:
   - Standard POSIX/BSD `ar` tool mounted under `/usr/bin/ar` and available in `which`, shell worker, and `make`.
   - Generates standard `!<arch>\n` archives with 60-byte headers and even-byte newline padding.
@@ -138,7 +138,7 @@ SPECv3 extends SPECv2 by modernizing the core WebAssembly compilation infrastruc
   - Supports GNU long filename tables (`//`) for member names exceeding 15 characters.
 - **Sysroot & Standard Libraries (`sysroot.tar.gz`)**:
   - Bundles standard WASI Preview 1 sysroot (compressed to 30MB with gzip, decompressed on the fly via `DecompressionStream`) with headers mounted under `/usr/include`, `/include/wasm32-wasip1`, `/lib/clang/19/include`, and `/usr/include/c++/v1`.
-  - Static libraries mounted under `/usr/lib` and `/lib/wasm32-wasip1`: `crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libclang_rt.builtins.a`, `libm.a`, `libpthread.a`.
+  - Static libraries mounted under `/usr/lib` and `/lib/wasm32-wasip1`: `crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libclang_rt.builtins.a`, `libm.a`, `libpthread.a`, `libturtle.a`, `libturtle_canvas-wasi.a` (and `libturtle_raylib.a` when Raylib is enabled).
 - **WebAssembly Shared Object (`.so`) Support**:
   - **Position-Independent Code (`-fPIC`, `-fpic`)**: Compiles position-independent code with `-mrelocation-model pic -pic-level 2`, emitting relocatable WebAssembly objects with dynamic relocation entries.
   - **Shared Library Generation (`-shared`, `--shared`)**: Links objects into WebAssembly dynamic libraries (`.so`) with `wasm-ld --shared`, omitting `crt1.o` and generating standard `dylink.0` dynamic linking custom sections. Shared libraries export functions and ctors (`__wasm_call_ctors`, `__wasm_apply_data_relocs`) while importing `env.memory`, `env.__memory_base`, and `env.__table_base`.
@@ -196,8 +196,8 @@ Users can select between two build strategies in the Project Settings UI:
 - Single Source of Truth shared across Editor, Shell Worker, and Toolchain.
 - **Directory Layout**:
   - `/workspace`: Root of the user project (Read-Write, persisted in IndexedDB).
-  - `/usr/include` & `/include/wasm32-wasip1`: Read-only sysroot standard C and C++ headers. When Raylib is enabled, contains `raylib.h`, `raymath.h`, and `rlgl.h`.
-  - `/usr/lib` & `/lib/wasm32-wasip1`: Read-only static runtime archives (`crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libclang_rt.builtins.a`, `libm.a`, `libpthread.a`). When Raylib is enabled, contains `libraylib.a`.
+  - `/usr/include` & `/include/wasm32-wasip1`: Read-only sysroot standard C and C++ headers, `graphics.h`, `graphics_canvas.h`, `turtle.h`, and `turtle_backend_canvas_wasi.h`. When Raylib is enabled, also contains `raylib.h`, `raymath.h`, `rlgl.h`, and `turtle_backend_raylib.h`.
+  - `/usr/lib` & `/lib/wasm32-wasip1`: Read-only static runtime archives (`crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libclang_rt.builtins.a`, `libm.a`, `libpthread.a`, `libturtle.a`, `libturtle_canvas-wasi.a`). When Raylib is enabled, also contains `libraylib.a` and `libturtle_raylib.a`.
   - `/bin`: Read-only POSIX utilities (`sh`, `ls`, `cat`, `rm`, `mkdir`, `cp`, `mv`, `pwd`, `clear`, `echo`, `pushd`, `popd`, `dirs`).
   - `/usr/bin`: Read-only toolchain binaries (`gcc`, `clang`, `g++`, `clang++`, `ar`, `make`, `wasm-ld`).
 - **Persistence**: Synchronized with browser `IndexedDB`. Survives page refreshes.
@@ -273,7 +273,39 @@ Users can select between two build strategies in the Project Settings UI:
     - `03_framebuffer_graphics.c`: Pure C direct software framebuffer (`<graphics.h>`) rendering a 60 FPS procedural plasma via 512-entry sine lookup table, glowing hover cursor dot, persistent white paint strokes layer on click/drag, and 'C'/Space canvas clearing.
     - `04_canvas_vector.c`: HTML5 2D vector canvas demo (`<graphics_canvas.h>`) rendering anti-aliased geometry, orbiting shapes with matrix transformations (`canvas_rotate`, `canvas_scale`), drop shadows, and typography.
     - `05_canvas_pixels.c`: HTML5 Canvas 2D pixel manipulation & image processing demo (`<graphics_canvas.h>`) combining vector scene underlay with direct pixel access and 2D spatial convolution filters in pure C (Sobel edge detection gradient filter, 3x3 box blur, grayscale & contrast adjustment, color inversion, and interactive mouse spotlight lens).
+    - `06_turtle_canvas.c`: Progressive turtle graphics demo using the default canvas-wasi backend (`<turtle.h>`, `<turtle_backend_canvas_wasi.h>`) drawing a multi-colored animated star spiral with stylized turtle cursor.
+    - `07_turtle_raylib.c`: Progressive turtle graphics demo using the Raylib backend (`<turtle.h>`, `<turtle_backend_raylib.h>`) drawing a geometric rosette pattern.
     - `README.md`: Step-by-step user compilation and running guide for all examples.
+
+### 3.9 Turtle Graphics Subsystem (`libturtle`)
+- **Modular Educational Turtle Architecture**:
+  - Decouples high-level geometric navigation logic from rasterization backends using a Hardware Abstraction Layer (HAL) specified in [`breeze833/libturtle`](https://github.com/breeze833/libturtle).
+  - Mathematical Cartesian Coordinates:
+    - Viewport center is $(0.0, 0.0)$.
+    - $+X$ points East (Right), $+Y$ points North (Up).
+    - Default heading is $90.0^\circ$ (pointing North).
+    - Rotation angles follow standard math conventions: counter-clockwise (CCW) is positive.
+    - Double-precision coordinates and angles prevent cumulative floating-point drift.
+  - Packed 32-bit RGBA integer colors (`0xRRGGBBAA`) and standard palette macros (`TURTLE_BLACK`, `TURTLE_RED`, `TURTLE_GREEN`, `TURTLE_BLUE`, `TURTLE_YELLOW`, `TURTLE_MAGENTA`, `TURTLE_CYAN`, `TURTLE_WHITE`).
+  - Progressive drawing and frame animation via `turtle_delay(double ms)`.
+  - Stylized turtle cursor with carapace, flippers, head, and eyes, rendered non-destructively without corrupting canvas art.
+- **Dual Backend Integration**:
+  1. **Canvas-WASI Backend (`libturtle_canvas-wasi.a` / `libturtle.a`)**:
+     - **Enabled by Default**: Because `<graphics_canvas.h>` and `<graphics.h>` are always available in the sysroot, the `canvas-wasi` backend is mounted and available out of the box.
+     - Headers: `<turtle.h>` and `<turtle_backend_canvas_wasi.h>` mounted in `/usr/include`.
+     - Static Library: Mounted as `/usr/lib/libturtle.a` and `/usr/lib/libturtle_canvas-wasi.a`.
+     - Link Command: Programs link with `-lturtle` (e.g. `gcc main.c -lturtle`).
+     - Driven by native `OffscreenCanvas` 2D context via `canvas-wasi` bridge.
+  2. **Raylib Backend (`libturtle_raylib.a`)**:
+     - **Opt-in / Dynamically Mounted**: When Raylib graphics support is enabled in Project Settings, the Raylib turtle backend is mounted alongside Raylib sysroot assets.
+     - Headers: `<turtle_backend_raylib.h>` mounted in `/usr/include`.
+     - Static Library: Mounted as `/usr/lib/libturtle_raylib.a`.
+     - Link Command: Programs link with `-lturtle_raylib -lraylib`.
+     - Unmounting Raylib in Project Settings cleanly unmounts `<turtle_backend_raylib.h>` and `libturtle_raylib.a` from both VFS and MemFS.
+- **Build Scripts Linking Rules (`build.sh` & `Makefile`)**:
+  - `(1)` Raylib disabled && `turtle_backend_canvas_wasi.h` included $\implies$ `-lturtle`
+  - `(2)` Raylib enabled && `turtle_backend_canvas_wasi.h` included $\implies$ `-lturtle`
+  - `(3)` Raylib enabled && `turtle_backend_raylib.h` included $\implies$ `-lturtle_raylib -lraylib`
 
 ---
 
@@ -354,6 +386,9 @@ Users can select between two build strategies in the Project Settings UI:
 | **Synchronous Frame Delivery** | `transferToImageBitmap()` delivers frames synchronously without Promise starvation in Wasm loops. |
 | **Background Activity Indicator** | Presenting frames while window is minimized/hidden activates green pulsating dot on `[🎮 Canvas]` button. |
 | **Dual-Channel Input Coordination** | Mouse movement, clicks, and keys synchronize via `SharedArrayBuffer` with message fallback and `DataView` byte safety. |
-| **Example Programs Suite** | `01_stdio.c`, `02_raylib_interactive.c`, `03_framebuffer_graphics.c`, `04_canvas_vector.c`, and `05_canvas_pixels.c` compile and run without error. |
+| **Example Programs Suite** | `01_stdio.c`, `02_raylib_interactive.c`, `03_framebuffer_graphics.c`, `04_canvas_vector.c`, `05_canvas_pixels.c`, `06_turtle_canvas.c`, and `07_turtle_raylib.c` compile and run without error. |
+| **Canvas Turtle Graphics (`-lturtle`)** | Programs using `<turtle.h>` and `<turtle_backend_canvas_wasi.h>` compile by default and animate with `turtle_delay()`. |
+| **Raylib Turtle Graphics (`-lturtle_raylib`)** | Enabling Raylib mounts `<turtle_backend_raylib.h>` and `libturtle_raylib.a`, compiling and rendering in Raylib mode. |
+| **Turtle Sysroot Dynamic Unmount** | Disabling Raylib unmounts `<turtle_backend_raylib.h>` and `libturtle_raylib.a` from VFS and MemFS cleanly. |
 | **Offline PWA Operation** | LLVM 19 toolchain and Raylib assets execute while disconnected from the internet via Service Worker caching. |
 

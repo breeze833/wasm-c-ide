@@ -5,7 +5,7 @@ import path from 'node:path';
 import { VFS } from '../src/vfs/vfs.js';
 import { mountRaylibSysroot, unmountRaylibSysroot } from '../src/vfs/sysroot.js';
 import { SettingsModal } from '../src/components/settings.js';
-import { InputCoordinator } from '../src/toolchain/raylib-host.js';
+import { InputCoordinator, createRaylibHost } from '../src/toolchain/raylib-host.js';
 import { WasmToolchain } from '../src/toolchain/wasm-clang.js';
 
 console.log('--- Running Raylib 5.5 Graphics Unit Tests ---');
@@ -479,5 +479,41 @@ popCoord.attachListeners(mockInPageCanvas);
 assert.strictEqual(mockPopupWindow.listeners.keydown, undefined, 'popup window listeners should be removed on detach');
 assert.ok(mockInPageCanvas.listeners.keydown, 'in-page canvas listener restored');
 console.log('✓ Pop-out window keyboard events, blur reset, and dock back re-attach verified');
+
+// Test 11: createRaylibHost calculates and emits onFPS in raylib_host_swap_buffers
+let reportedFps = null;
+let simulatedNow = 1000;
+const origPerformanceNow = globalThis.performance ? globalThis.performance.now : null;
+if (globalThis.performance) {
+  globalThis.performance.now = () => simulatedNow;
+}
+
+const hostTest = createRaylibHost({
+  width: 320,
+  height: 240,
+  onFPS: (fps) => {
+    reportedFps = fps;
+  }
+});
+const hostImports = hostTest.getImports();
+hostImports.raylib.raylib_host_init_window(320, 240, 0);
+
+// Perform 60 swaps over 1000ms
+for (let i = 0; i < 59; i++) {
+  simulatedNow += 16.666;
+  hostImports.raylib.raylib_host_swap_buffers();
+}
+assert.strictEqual(reportedFps, null, 'Should not emit onFPS before 1 second elapsed');
+
+// 60th frame pushes elapsed time >= 1000ms
+simulatedNow += 17;
+hostImports.raylib.raylib_host_swap_buffers();
+
+if (origPerformanceNow && globalThis.performance) {
+  globalThis.performance.now = origPerformanceNow;
+}
+
+assert.strictEqual(reportedFps, 60, 'Should calculate and emit 60 FPS');
+console.log('✓ createRaylibHost onFPS tracking and calculation verified');
 
 console.log('--- ALL RAYLIB TESTS PASSED ---');

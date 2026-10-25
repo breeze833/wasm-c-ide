@@ -18,9 +18,10 @@ A zero-backend, installation-free, multi-file C/C++ development and learning env
   - [Dual Build Systems (Shell Script & Makefile)](#4-dual-build-systems-shell-script--makefile)
   - [Execution Sandbox with Synchronous Stdin](#5-execution-sandbox-with-synchronous-stdin)
   - [Unified Graphics Canvas, Vector 2D & Game Engine](#6-unified-graphics-canvas-vector-2d--game-engine)
-  - [Interactive Educational Examples Suite](#7-interactive-educational-examples-suite)
-  - [Virtual File System & Storage](#8-virtual-file-system--storage)
-  - [Progressive Web App (PWA) & Offline Execution](#9-progressive-web-app-pwa--offline-execution)
+  - [Turtle Graphics Subsystem (libturtle)](#7-turtle-graphics-subsystem-libturtle)
+  - [Interactive Educational Examples Suite](#8-interactive-educational-examples-suite)
+  - [Virtual File System & Storage](#9-virtual-file-system--storage)
+  - [Progressive Web App (PWA) & Offline Execution](#10-progressive-web-app-pwa--offline-execution)
 - [Getting Started & Local Development](#getting-started--local-development)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
@@ -156,26 +157,54 @@ This IDE is specifically engineered for **students and systems programming educa
   - Zero-latency 512-byte `SharedArrayBuffer` tracking mouse position, buttons, wheel, and keys with safe `DataView` byte alignment. Clean hover coordinates (`-1, -1`) on mouse leave.
   - Event stream message fallback for decoupled or non-isolated environments.
 
-### 7. Interactive Educational Examples Suite
+### 7. Turtle Graphics Subsystem (`libturtle`)
+- **Modular Educational Turtle Architecture**:
+  - Decouples high-level geometric navigation logic from rasterization backends using the Hardware Abstraction Layer (HAL) specified in [`breeze833/libturtle`](https://github.com/breeze833/libturtle).
+  - **Mathematical Cartesian Coordinates**:
+    - Viewport center is $(0.0, 0.0)$.
+    - $+X$ points East (Right), $+Y$ points North (Up).
+    - Default heading is $90.0^\circ$ (pointing North).
+    - Rotation angles follow standard mathematical conventions: counter-clockwise (CCW) is positive.
+    - Double-precision coordinates and angles prevent cumulative floating-point drift.
+  - **32-Bit RGBA Colors & Standard Palette**: Packed `0xRRGGBBAA` values and palette macros (`TURTLE_BLACK`, `TURTLE_RED`, `TURTLE_GREEN`, `TURTLE_BLUE`, `TURTLE_YELLOW`, `TURTLE_MAGENTA`, `TURTLE_CYAN`, `TURTLE_WHITE`).
+  - **Progressive Animation & Stylized Turtle Cursor**: Frame animation via `turtle_delay(ms)` and an animated visual turtle cursor with carapace, flippers, head, and eyes, rendered non-destructively over canvas artwork.
+- **Dual Backend Integration**:
+  1. **Canvas-WASI Backend (`libturtle.a` / `libturtle_canvas-wasi.a`)**:
+     - **Enabled by Default**: Mounted out of the box in the sysroot (`/usr/include/turtle.h`, `/usr/include/turtle_backend_canvas_wasi.h`, `/usr/lib/libturtle.a`, `/usr/lib/libturtle_canvas-wasi.a`).
+     - Links directly with `-lturtle` (e.g. `gcc main.c -lturtle`) with zero additional flags or setup.
+     - Driven by native `OffscreenCanvas` 2D context via the `canvas-wasi` bridge.
+  2. **Raylib Backend (`libturtle_raylib.a`)**:
+     - **Opt-In / Dynamically Mounted**: Mounted when Raylib graphics support is enabled in Project Settings (`/usr/include/turtle_backend_raylib.h`, `/usr/lib/libturtle_raylib.a`).
+     - Links with `-lturtle_raylib -lraylib`.
+     - Unmounting Raylib in Project Settings cleanly unmounts `<turtle_backend_raylib.h>` and `libturtle_raylib.a` from both VFS and MemFS.
+- **Automatic Build Script Linking Rules**:
+  - When generating `build.sh` or `Makefile`, the IDE automatically detects backend headers:
+    - Raylib disabled && `turtle_backend_canvas_wasi.h` included $\implies$ `-lturtle`
+    - Raylib enabled && `turtle_backend_canvas_wasi.h` included $\implies$ `-lturtle`
+    - Raylib enabled && `turtle_backend_raylib.h` included $\implies$ `-lturtle_raylib -lraylib`
+
+### 8. Interactive Educational Examples Suite
 The repository includes a ready-to-run suite of single-file C programs in the `examples/` directory for manual testing and pedagogical demonstration:
 - **`01_stdio.c`**: Interactive console standard I/O (menu navigation, Fibonacci generator, Factorial, Prime tester) configured with unbuffered stdout (`setbuf(stdout, NULL)`) and prompt flushing (`fflush(stdout)`).
 - **`02_raylib_interactive.c`**: Raylib 5.5 GLES2 interactive demo with mouse position tracking, bouncing balls on mouse click, and keyboard-controlled box movement.
 - **`03_framebuffer_graphics.c`**: Pure C direct software framebuffer (`<graphics.h>`) rendering a 60 FPS procedural plasma via a 512-entry sine lookup table, glowing hover cursor dot, persistent white paint strokes layer on click/drag, and 'C'/Space canvas clearing.
 - **`04_canvas_vector.c`**: HTML5 2D vector canvas demo (`<graphics_canvas.h>`) rendering anti-aliased geometry, orbiting shapes with matrix transformations (`canvas_rotate`, `canvas_scale`), drop shadows, and typography.
 - **`05_canvas_pixels.c`**: HTML5 Canvas 2D pixel manipulation & image processing demo (`<graphics_canvas.h>`) combining vector scene underlay with direct pixel access and 2D spatial convolution filters in pure C (Sobel edge detection gradient filter, 3x3 box blur, grayscale & contrast adjustment, color inversion, and interactive mouse spotlight lens).
+- **`06_turtle_canvas.c`**: Progressive turtle graphics demo using the default canvas-wasi backend (`<turtle.h>`, `<turtle_backend_canvas_wasi.h>`) drawing a multi-colored animated star spiral with stylized turtle cursor.
+- **`07_turtle_raylib.c`**: Progressive turtle graphics demo using the Raylib backend (`<turtle.h>`, `<turtle_backend_raylib.h>`) drawing a geometric rosette pattern.
 - **`examples/README.md`**: Step-by-step user compilation and running guide for each example.
 
-### 8. Virtual File System & Storage
+### 9. Virtual File System & Storage
 - **In-Memory VFS**: Fast hierarchical tree representation shared across the editor, shell, and toolchain.
 - **IndexedDB Persistence**: Automatically persists `/workspace` across browser sessions and page refreshes.
 - **Zip Import & Export**: One-click export of `/workspace` into a standard `.zip` file using JSZip, and direct zip unpacking into the workspace.
-- **Sysroot Protection**: Read-only protection on system root paths (`/usr`, `/bin`).
+- **Sysroot Protection**: Read-only protection on system root paths (`/usr`, `/bin`), pre-mounting standard C/C++ headers, `<graphics.h>`, `<graphics_canvas.h>`, `<turtle.h>`, and runtime static libraries (`libc.a`, `libturtle.a`, and conditionally `libraylib.a`).
 
-### 9. Progressive Web App (PWA) & Offline Execution
+### 10. Progressive Web App (PWA) & Offline Execution
 - **Installable Desktop/Mobile App**: Certified PWA with Web App Manifest (`manifest.webmanifest`), dark theme colors, and icons.
 - **In-App Install Prompt**: Automatically reveals an **Install** button in the header toolbar when the browser detects installability.
 - **100% Offline Capability**:
-  - Unified Service Worker caches App Shell, fonts, editor modules, WebAssembly compiler binaries (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar.gz`), and precompiled Raylib libraries.
+  - Unified Service Worker caches App Shell, fonts, editor modules, WebAssembly compiler binaries (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar.gz`), Raylib assets, and Turtle static archives.
   - Seamless offline execution with retained `COOP: same-origin` and `COEP: require-corp` isolation headers so `SharedArrayBuffer` remains operational without an internet connection.
   - Automatic connection status notifications when transitioning between online and offline modes.
 
@@ -196,7 +225,7 @@ cd wasm-c-ide
 npm install
 ```
 
-> **Note**: `npm install` triggers a `postinstall` hook that automatically runs `scripts/download-sysroot.js`, downloading the required LLVM 19 WASI binaries (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar.gz`) and Raylib 5.5 assets from upstream GitHub releases into `public/sysroot/`. You can also manually trigger this download anytime with `npm run download:sysroot`.
+> **Note**: `npm install` triggers a `postinstall` hook that automatically runs `scripts/download-sysroot.js`, downloading the required LLVM 19 WASI binaries (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar.gz`), Raylib 5.5 assets, and prebuilding `libturtle` static libraries (`libturtle.a`, `libturtle_canvas-wasi.a`, `libturtle_raylib.a`) from upstream GitHub releases into `public/sysroot/`. You can also manually trigger this download anytime with `npm run download:sysroot`.
 
 ### Development Server
 Start the local Vite development server:
@@ -210,7 +239,7 @@ Open your browser and navigate to `http://localhost:5173`.
 > **Note**: Vite is configured with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` HTTP headers to enable `SharedArrayBuffer` support out of the box during development.
 
 ### Running Tests
-Execute the full unit test suite (covering VFS, Shell parser, Toolchain driver, Runtime Atomics, and Make engine):
+Execute the full unit test suite (covering VFS, Shell parser, Toolchain driver, Static Archiver, Runtime Atomics, Make engine, PWA Service Worker, Zoom controls, Pipelines & Redirections, Raylib graphics, Generic Graphics / Canvas 2D, Shared Objects, and Turtle Graphics):
 
 ```bash
 npm test

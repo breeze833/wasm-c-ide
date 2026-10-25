@@ -87,9 +87,34 @@ You can copy and paste the code from any of these files into the IDE editor (`wo
   * Real-time interactive spotlight lens tracking the mouse cursor
   * Hybrid pipeline combining vector scene underlay, pixel filter passes, and crisp vector HUD overlay
   * Zero external libraries or link flags needed!
+## 6. Turtle Graphics with Canvas-WASI Backend
+* **File**: [`06_turtle_canvas.c`](./06_turtle_canvas.c)
+* **API Used**: `<turtle.h>`, `<turtle_backend_canvas_wasi.h>`
+* **Features**:
+  * Cartesian coordinate system centered at `(0, 0)` with standard mathematical counter-clockwise angles
+  * Progressive animated drawing via `turtle_delay(35.0)`
+  * Visual stylized turtle cursor indicator with carapace, flippers, head, and eyes
+  * Enabled by default with zero external configuration!
 * **How to Compile & Run**:
   ```bash
-  gcc 05_canvas_pixels.c -o a.out
+  gcc 06_turtle_canvas.c -lturtle -o a.out
+  ./a.out
+  ```
+
+---
+
+## 7. Turtle Graphics with Raylib Backend
+* **File**: [`07_turtle_raylib.c`](./07_turtle_raylib.c)
+* **API Used**: `<turtle.h>`, `<turtle_backend_raylib.h>`
+* **Features**:
+  * Hardware-accelerated Raylib 5.5 rendering loop driving turtle geometry
+  * 72-segment geometric rosette with progressive sub-frame animation
+  * Non-destructive overlay cursor rendering over persistent canvas
+* **Prerequisite**:
+  * In the IDE header bar, click **Settings** and ensure **Enable Raylib** is checked.
+* **How to Compile & Run**:
+  ```bash
+  gcc 07_turtle_raylib.c -lturtle_raylib -lraylib -o a.out
   ./a.out
   ```
 

@@ -403,7 +403,92 @@ extern int errno;
 `,
 
   'graphics.h': GRAPHICS_H,
-  'graphics_canvas.h': GRAPHICS_CANVAS_H
+  'graphics_canvas.h': GRAPHICS_CANVAS_H,
+  'turtle.h': `/* Public C Turtle Graphics API */
+#ifndef TURTLE_H
+#define TURTLE_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#define TURTLE_RGBA(r, g, b, a) \\
+    (((uint32_t)(r) << 24) | ((uint32_t)(g) << 16) | ((uint32_t)(b) << 8) | (uint32_t)(a))
+
+/* Standard 8 Primary/Secondary Colors */
+#define TURTLE_BLACK   TURTLE_RGBA(0,   0,   0,   255)
+#define TURTLE_RED     TURTLE_RGBA(255, 0,   0,   255)
+#define TURTLE_GREEN   TURTLE_RGBA(0,   255, 0,   255)
+#define TURTLE_BLUE    TURTLE_RGBA(0,   0,   255, 255)
+#define TURTLE_YELLOW  TURTLE_RGBA(255, 255, 0,   255)
+#define TURTLE_MAGENTA TURTLE_RGBA(255, 0,   255, 255)
+#define TURTLE_CYAN    TURTLE_RGBA(0,   255, 255, 255)
+#define TURTLE_WHITE   TURTLE_RGBA(255, 255, 255, 255)
+
+/* Lifecycle & Canvas Control */
+bool turtle_begin(void *context);
+void turtle_end(void);
+void turtle_clear(uint32_t color);
+void turtle_home(void);
+void turtle_delay(double ms);         /* Pause execution & flush canvas for progressive drawing */
+
+/* Movement & Orientation */
+void turtle_forward(double steps);   /* Positive = forward, Negative = backward */
+void turtle_turn(double deg);        /* Math convention: CCW positive */
+void turtle_turn_left(double deg);   /* Counter-clockwise */
+void turtle_turn_right(double deg);  /* Clockwise */
+
+/* Pen State Management */
+void turtle_pen_down(void);
+void turtle_pen_up(void);
+int  turtle_is_pen_down(void);
+void turtle_pen_stroke(double stroke);
+void turtle_pen_color(uint32_t color);
+void turtle_pen(double stroke, uint32_t color, int is_down);
+
+/* Cursor Visibility */
+void turtle_set_visible(bool visible);
+bool turtle_is_visible(void);
+
+/* State Inspection (Useful for students implementing turtle_goto) */
+double turtle_get_x(void);
+double turtle_get_y(void);
+double turtle_get_heading(void);
+
+#endif /* TURTLE_H */
+`,
+  'turtle_backend_canvas_wasi.h': `/* Turtle Graphics canvas-wasi Backend Context */
+#ifndef TURTLE_BACKEND_CANVAS_WASI_H
+#define TURTLE_BACKEND_CANVAS_WASI_H
+
+typedef struct {
+    int width;
+    int height;
+    const char *title;
+} turtle_canvas_wasi_context_t;
+
+/* Alias for backwards compatibility */
+typedef turtle_canvas_wasi_context_t turtle_htmlcanvas_context_t;
+
+#endif /* TURTLE_BACKEND_CANVAS_WASI_H */
+`
+};
+
+export const TURTLE_HEADERS = {
+  'turtle.h': STANDARD_C_HEADERS['turtle.h'],
+  'turtle_backend_canvas_wasi.h': STANDARD_C_HEADERS['turtle_backend_canvas_wasi.h'],
+  'turtle_backend_raylib.h': `/* Turtle Graphics Raylib Backend Context */
+#ifndef TURTLE_BACKEND_RAYLIB_H
+#define TURTLE_BACKEND_RAYLIB_H
+
+typedef struct {
+    int width;
+    int height;
+    const char *title;
+    int target_fps;
+} turtle_raylib_context_t;
+
+#endif /* TURTLE_BACKEND_RAYLIB_H */
+`
 };
 
 export const STANDARD_CPP_HEADERS = {
@@ -551,6 +636,8 @@ export const STANDARD_LIBS = [
   'libc++abi.a',
   'libm.a',
   'libpthread.a',
+  'libturtle.a',
+  'libturtle_canvas-wasi.a',
 ];
 
 export const BIN_COMMANDS = [
@@ -608,7 +695,7 @@ export function mountSysroot(vfs) {
   }
 }
 
-export function mountRaylibSysroot(vfs, headers = {}, libBuffer = null) {
+export function mountRaylibSysroot(vfs, headers = {}, libBuffer = null, turtleHeaders = {}, turtleRaylibLib = null) {
   if (headers['raylib.h']) {
     vfs.writeFile('/usr/include/raylib.h', headers['raylib.h'], Date.now(), true);
   }
@@ -621,6 +708,16 @@ export function mountRaylibSysroot(vfs, headers = {}, libBuffer = null) {
   if (libBuffer) {
     vfs.writeFile('/usr/lib/libraylib.a', libBuffer, Date.now(), true);
   }
+
+  // Mount Raylib backend for turtle graphics
+  const raylibTurtleHeader = headers['turtle_backend_raylib.h'] || turtleHeaders['turtle_backend_raylib.h'] || TURTLE_HEADERS['turtle_backend_raylib.h'];
+  if (raylibTurtleHeader) {
+    vfs.writeFile('/usr/include/turtle_backend_raylib.h', raylibTurtleHeader, Date.now(), true);
+  }
+  const raylibTurtleLibBuffer = turtleRaylibLib || headers['libturtle_raylib.a'];
+  if (raylibTurtleLibBuffer) {
+    vfs.writeFile('/usr/lib/libturtle_raylib.a', raylibTurtleLibBuffer, Date.now(), true);
+  }
 }
 
 export function unmountRaylibSysroot(vfs, toolchain = null) {
@@ -629,12 +726,22 @@ export function unmountRaylibSysroot(vfs, toolchain = null) {
   if (vfs.exists('/usr/include/rlgl.h')) vfs.remove('/usr/include/rlgl.h', false, true);
   if (vfs.exists('/usr/lib/libraylib.a')) vfs.remove('/usr/lib/libraylib.a', false, true);
 
+  // Unmount Raylib turtle backend
+  if (vfs.exists('/usr/include/turtle_backend_raylib.h')) vfs.remove('/usr/include/turtle_backend_raylib.h', false, true);
+  if (vfs.exists('/usr/lib/libturtle_raylib.a')) vfs.remove('/usr/lib/libturtle_raylib.a', false, true);
+
   if (toolchain && typeof toolchain.removeFileFromMemfs === 'function') {
     toolchain.removeFileFromMemfs('include/raylib.h');
     toolchain.removeFileFromMemfs('include/raymath.h');
     toolchain.removeFileFromMemfs('include/rlgl.h');
     toolchain.removeFileFromMemfs('usr/lib/libraylib.a');
     toolchain.removeFileFromMemfs('lib/wasm32-wasi/libraylib.a');
+    toolchain.removeFileFromMemfs('lib/wasm32-wasip1/libraylib.a');
+
+    toolchain.removeFileFromMemfs('include/turtle_backend_raylib.h');
+    toolchain.removeFileFromMemfs('usr/lib/libturtle_raylib.a');
+    toolchain.removeFileFromMemfs('lib/wasm32-wasi/libturtle_raylib.a');
+    toolchain.removeFileFromMemfs('lib/wasm32-wasip1/libturtle_raylib.a');
   }
 }
 

@@ -24,11 +24,20 @@ You are an autonomous senior systems and web engineer implementing the project s
 ├── AGENTS.md                  # Agent operating protocols (this file)
 ├── KNOWN_ISSUES.md            # Documented toolchain version gaps, limits, and MemFS invariants
 ├── README.md                  # User-facing project documentation & deployment guides
+├── examples/                  # Bundled pedagogical single-file C examples & guide
+│   ├── 01_stdio.c             # Standard I/O console menu demo
+│   ├── 02_raylib_interactive.c # Interactive Raylib 5.5 GLES2 graphics demo
+│   ├── 03_framebuffer_graphics.c # Direct software framebuffer procedural plasma demo
+│   ├── 04_canvas_vector.c     # HTML5 Canvas 2D vector primitives demo
+│   ├── 05_canvas_pixels.c     # Canvas 2D pixel manipulation & image processing demo
+│   ├── 06_turtle_canvas.c     # Turtle graphics animated star spiral (canvas-wasi backend)
+│   ├── 07_turtle_raylib.c     # Turtle graphics geometric rosette (Raylib backend)
+│   └── README.md              # Examples compilation & execution guide
 ├── index.html                 # Main entry point (loads /coi-serviceworker.js)
 ├── package.json               # Development tooling, dependencies, and test scripts
 ├── vite.config.js             # Vite configuration (COOP/COEP headers, workers, wasm support)
 ├── scripts/
-│   └── download-sysroot.js    # Automated LLVM 19 & Raylib WASI asset downloader and unpacker
+│   └── download-sysroot.js    # Automated LLVM 19, Raylib WASI & libturtle asset downloader and unpacker
 ├── src/
 │   ├── main.js                # App bootstrap, DOM layout, and UI event binding
 │   ├── style.css              # Dark theme styling, button color hierarchy, tooltips
@@ -63,10 +72,11 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── manifest.webmanifest   # Web App Manifest for PWA installation
 │   ├── icons/                 # PWA application icons (192, 512, svg)
 │   └── sysroot/               # Downloaded on-demand via scripts/download-sysroot.js (git-ignored)
-│       ├── wasm/              # Prebuilt clang.wasm, lld.wasm, memfs.wasm, libraylib.a, sysroot.tar.gz
-│       └── include/           # Minimal fallback libc headers & raylib headers
+│       ├── wasm/              # Prebuilt clang.wasm, lld.wasm, memfs.wasm, libraylib.a, libturtle.a, libturtle_raylib.a, sysroot.tar.gz
+│       └── include/           # Minimal fallback libc headers, raylib headers & turtle headers
 └── test/
     ├── ar.test.js             # Static archiver creation, extraction, table, and wasm-ld linkage tests
+    ├── graphics.test.js       # Generic framebuffer, 2D vector, and pixel manipulation tests
     ├── make.test.js           # Makefile parsing and incremental build tests
     ├── pipeline.test.js       # Command pipeline (|) and file redirection (<, >, >>) tests
     ├── raylib.test.js         # Raylib graphics compilation, input sync, and canvas UI tests
@@ -75,6 +85,7 @@ You are an autonomous senior systems and web engineer implementing the project s
     ├── so.test.js             # WebAssembly shared object (.so) compilation, linking, and runtime execution tests
     ├── sw.test.js             # Service Worker, PWA manifest, and offline COOP/COEP tests
     ├── toolchain.test.js      # Toolchain driver, MemFS directory, unlink guardrails, and libc tests
+    ├── turtle.test.js         # Turtle graphics compilation, backend switching, and asset unmounting tests
     ├── vfs.test.js            # VFS hierarchy, permissions, and zip round-trip tests
     └── zoom.test.js           # Editor & terminal font zoom, clamping, and persistence tests
 ```
@@ -149,12 +160,16 @@ Agents executing this project should proceed milestone-by-milestone:
 - Support preloaded `stdinBytes` in `runtime.worker.js` for synchronous stream feeding without `Atomics.wait`.
 - Support direct shell script execution (`./build.sh`, `/workspace/script.sh`) in `shell.worker.js` and validate executable Wasm magic headers (`\0asm`) in `main.js`.
 
-### Milestone 10: Raylib 5.5 Graphics Subsystem & Dual Console Integration
+### Milestone 10: Unified Graphics Subsystem (canvas-wasi, Raylib 5.5) & Dual Console Integration
+- Decouple generic graphics console, HTML5 Canvas 2D vector primitives, window control, input coordination, and WebAssembly host bindings into modular package [`breeze833/canvas-wasi`](https://github.com/breeze833/canvas-wasi).
+- Mount direct software framebuffer C API (`<graphics.h>`) by default in sysroot for writing software renderers and procedural visual demos in pure C without external dependencies.
+- Mount enhanced HTML5 Canvas 2D vector & pixel manipulation C API (`<graphics_canvas.h>`) for vector drawing and 2D spatial convolution filters (Sobel edge detection, blur, grayscale, inversion).
 - Integrate Raylib 5.5 WASI static library (`libraylib.a`) and headers (`raylib.h`, `raymath.h`, `rlgl.h`) with opt-in project settings toggle.
-- Implement dual-thread rendering: offscreen WebGL canvas in `runtime.worker.js` transferring zero-copy GPU `ImageBitmap` frames to main thread `<canvas id="raylib-canvas">`.
-- Implement frame pacing with `Atomics.wait()` in `EndDrawing()` based on `SetTargetFPS()`.
-- Implement `GraphicsWindowUI` draggable/resizable floating window, pop-out to separate browser window (`window.open`), dock back, dynamic dimension adaptation to `InitWindow()`, and dimension preservation across window toggles.
-- Implement 512-byte `SharedArrayBuffer` keyboard and mouse input coordination with clean focus/blur lifecycle resets.
+- Implement dual-thread rendering: offscreen WebGL / 2D canvas in `runtime.worker.js` transferring zero-copy GPU `ImageBitmap` frames to main thread `<canvas id="graphics-canvas">`.
+- Synchronous zero-copy frame delivery: `transferToImageBitmap()` generates `ImageBitmap` synchronously without Promise delays, with transferable `frame_buffer` fallback.
+- Implement frame pacing with `Atomics.wait()` in `graphics_wait_frame` / `EndDrawing()` based on target FPS.
+- Implement `GraphicsWindowUI` draggable/resizable floating window, pop-out to separate browser window (`window.open`), dock back, dynamic dimension adaptation to `graphics_init()` / `InitWindow()`, dimension preservation across window toggles, and pulsating background frame activity indicator on `[🎮 Canvas]` toolbar button.
+- Implement 512-byte `SharedArrayBuffer` keyboard and mouse input coordination with clean focus/blur lifecycle resets and safe `DataView` little-endian alignment.
 - Decouple Project Settings modal into dedicated **Save** (state & sysroot mounting) and **Generate Build Script** (`build.sh` & `Makefile` generation) actions.
 - Enforce MemFS unlinking invariants: always truncate files to 0 bytes before unlinking (`AddFileNode(len, 0)` then `path_unlink_file`) in `MemFS.removeFile()` to conceal the inode reallocation offset bug and ensure clean recompilation.
 
@@ -178,6 +193,19 @@ Agents executing this project should proceed milestone-by-milestone:
 - Integrate native WASI Preview 1 `memfs.wasm` from `clang-wasi` with dynamic node allocation, standard WASI Preview 1 ABI alignment, safe `FindNode`, explicit buffer deallocation on unlink, and `path_link` export.
 - Remove downloadable prebuilt binaries (`*.wasm`, `sysroot.tar.gz`, `libraylib.a`, Raylib headers) from Git tracking and implement `scripts/download-sysroot.js` to fetch them on demand during `npm install` and build lifecycles.
 - Remove redundant repository-local build files and maintain single-source upstream toolchain integration.
+
+### Milestone 13: Turtle Graphics Subsystem (`libturtle`) Integration
+- Integrate modular C turtle graphics from [`breeze833/libturtle`](https://github.com/breeze833/libturtle) with Cartesian coordinates and Hardware Abstraction Layer (HAL).
+- **Canvas WASI Backend (`libturtle_canvas-wasi.a` / `libturtle.a`)**:
+  - Mounted by default in sysroot (`/usr/include/turtle.h`, `/usr/include/turtle_backend_canvas_wasi.h`, `/usr/lib/libturtle.a`).
+  - Supports progressive drawing via `turtle_delay(ms)` and animated stylized turtle cursor via `<graphics_canvas.h>`.
+  - Links out of the box with `-lturtle` without extra compiler or linker flags.
+- **Raylib Backend (`libturtle_raylib.a`)**:
+  - Mounted dynamically when Raylib graphics support is enabled in Project Settings (`/usr/include/turtle_backend_raylib.h`, `/usr/lib/libturtle_raylib.a`).
+  - Links with `-lturtle_raylib -lraylib`.
+  - Dynamically unmounts from VFS and purges from MemFS when Raylib is disabled.
+- Automated asset pipeline in `scripts/download-sysroot.js` downloading headers and compiling/unpacking static archives for offline execution.
+- Bundled example programs: `06_turtle_canvas.c` and `07_turtle_raylib.c`.
 
 ---
 
@@ -216,9 +244,20 @@ Before marking any task complete, agents must verify:
 | **Async Wasm Loading (8MB Limit)** | Clang (~20MB+) compiles and instantiates asynchronously without triggering main-thread synchronous size errors. |
 | **Raylib Sysroot Mount/Unmount** | Toggling Raylib mounts/unmounts headers and `libraylib.a` in VFS and MemFS cleanly. |
 | **Raylib Compilation & Linking** | Programs using `InitWindow` and drawing primitives link with `-lraylib` and run in runtime worker. |
+| **Generic Framebuffer Compilation** | Programs using `<graphics.h>` compile with standard Pure C mode without external link flags. |
+| **Generic Framebuffer Rendering** | Passing pixel buffers to `graphics_present` transfers `ImageBitmap` frames to `#graphics-canvas`. |
+| **2D Vector Canvas Compilation & Drawing** | Programs using `<graphics_canvas.h>` compile in pure C and render vector paths, shapes, and typography via OffscreenCanvas 2D context. |
+| **Canvas Pixel Manipulation & Image Processing** | Programs using `canvas_get_pixels`, `canvas_put_pixels`, `canvas_get_image_data`, `canvas_put_image_data`, `canvas_get_pixel`, and `canvas_set_pixel` directly inspect and modify canvas raster memory in pure C. |
 | **Dynamic Canvas Dimensions** | Initializing window sets canvas and window frame to requested size; toggling canvas preserves dimensions. |
+| **Synchronous Frame Delivery** | `transferToImageBitmap()` delivers frames synchronously without Promise starvation in Wasm loops. |
+| **Background Activity Indicator** | Presenting frames while window is minimized/hidden activates green pulsating dot on `[🎮 Canvas]` button. |
+| **Dual-Channel Input Coordination** | Mouse movement, clicks, and keys synchronize via `SharedArrayBuffer` with message fallback and `DataView` byte safety. |
 | **Settings Action Decoupling** | Clicking Save updates state and sysroot without modifying `/workspace`; Generate Build Script creates build files. |
 | **MemFS Recompilation Invariant** | Deleting an object file (`build/calc.o`) or deleted source file purges MemFS without ghost files; re-running `make` re-compiles and relinks without corrupted object headers. |
+| **Example Programs Suite** | `01_stdio.c`, `02_raylib_interactive.c`, `03_framebuffer_graphics.c`, `04_canvas_vector.c`, `05_canvas_pixels.c`, `06_turtle_canvas.c`, and `07_turtle_raylib.c` compile and run without error. |
+| **Canvas Turtle Graphics (`-lturtle`)** | Programs using `<turtle.h>` and `<turtle_backend_canvas_wasi.h>` compile by default and animate with `turtle_delay()`. |
+| **Raylib Turtle Graphics (`-lturtle_raylib`)** | Enabling Raylib mounts `<turtle_backend_raylib.h>` and `libturtle_raylib.a`, compiling and rendering in Raylib mode. |
+| **Turtle Sysroot Dynamic Unmount** | Disabling Raylib unmounts `<turtle_backend_raylib.h>` and `libturtle_raylib.a` from VFS and MemFS cleanly. |
 | **Offline PWA Installation** | Application provides valid manifest, registers service worker with COOP/COEP headers, and operates offline. |
 | **Portable Zip Distribution** | `npm run pack` creates a standalone `wasm-c-ide.zip` that runs in any static web server document root. |
 

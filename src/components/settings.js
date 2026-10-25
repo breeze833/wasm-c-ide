@@ -142,19 +142,46 @@ export class SettingsModal {
     const incFlags = this.config.includePaths.map(p => `-I${p}`).join(' ');
     const extraFlags = this.config.compilerFlags.join(' ');
     const compiler = this.config.mode === 'cpp' ? 'g++' : 'gcc';
-    const linkLibs = this.config.enableRaylib ? '-lraylib' : '';
 
-    // Scan workspace for C/C++ source files
+    // Scan workspace for C/C++ source files and detect backend headers
     let sources = [];
+    let hasTurtleCanvasWasi = false;
+    let hasTurtleRaylib = false;
     try {
       const allFiles = this.vfs.getAllFiles('/workspace');
       sources = allFiles
         .filter(f => !f.isDir && (f.path.endsWith('.c') || f.path.endsWith('.cpp')))
         .map(f => f.path.replace(/^\/workspace\/?/, ''));
+
+      for (const s of sources) {
+        try {
+          const content = this.vfs.readFile(`/workspace/${s}`, true);
+          if (typeof content === 'string') {
+            if (content.includes('turtle_backend_canvas_wasi.h')) hasTurtleCanvasWasi = true;
+            if (content.includes('turtle_backend_raylib.h')) hasTurtleRaylib = true;
+          }
+        } catch {}
+      }
     } catch {}
 
     if (sources.length === 0) {
       sources = ['src/calc.c', 'src/main.c'];
+    }
+
+    let linkLibs = '';
+    if (this.config.enableRaylib) {
+      if (hasTurtleRaylib) {
+        // Rule (3): raylib is enabled && turtle_backend_raylib.h is included ==> -lturtle_raylib -lraylib
+        linkLibs = '-lturtle_raylib -lraylib';
+      } else if (hasTurtleCanvasWasi) {
+        // Rule (2): raylib is enabled && turtle_backend_canvas_wasi.h is included ==> -lturtle
+        linkLibs = '-lturtle';
+      } else {
+        linkLibs = '-lraylib';
+      }
+    } else if (hasTurtleCanvasWasi) {
+      // Rule (1): raylib is not enabled && turtle_backend_canvas_wasi.h is included ==> -lturtle
+      linkLibs = '-lturtle';
     }
 
     const objFiles = sources.map(s => {
@@ -181,8 +208,8 @@ export class SettingsModal {
     // 2. Generate /workspace/Makefile
     let makefile = `# Auto-generated Makefile\nCC = ${compiler}\n`;
     makefile += `CFLAGS = ${incFlags} ${extraFlags}\n`;
-    if (this.config.enableRaylib) {
-      makefile += `LDFLAGS = -lraylib\n`;
+    if (linkLibs) {
+      makefile += `LDFLAGS = ${linkLibs}\n`;
     }
     makefile += `TARGET = ${this.config.targetName}\n\n`;
     makefile += `all: $(TARGET)\n\n`;
@@ -192,7 +219,7 @@ export class SettingsModal {
       makefile += `${objFiles[i]}: ${sources[i]} | build\n\t$(CC) $(CFLAGS) -c ${sources[i]} -o ${objFiles[i]}\n\n`;
     }
 
-    const ldFlagsRef = this.config.enableRaylib ? ' $(LDFLAGS)' : '';
+    const ldFlagsRef = linkLibs ? ' $(LDFLAGS)' : '';
     makefile += `$(TARGET): ${objFiles.join(' ')}\n\t$(CC) ${objFiles.join(' ')}${ldFlagsRef} -o $(TARGET)\n\n`;
     makefile += `clean:\n\trm -rf build $(TARGET)\n`;
 

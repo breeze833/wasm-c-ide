@@ -195,11 +195,12 @@ export async function executeGccCommand({
       }
     }
 
-    // Purge Raylib headers from MemFS if unmounted from VFS
+    // Purge Raylib and Raylib-turtle headers from MemFS if unmounted from VFS
     const raylibHeaders = [
       { vfs: '/usr/include/raylib.h', memfs: 'include/raylib.h' },
       { vfs: '/usr/include/raymath.h', memfs: 'include/raymath.h' },
       { vfs: '/usr/include/rlgl.h', memfs: 'include/rlgl.h' },
+      { vfs: '/usr/include/turtle_backend_raylib.h', memfs: 'include/turtle_backend_raylib.h' },
     ];
     for (const h of raylibHeaders) {
       if (!vfs.exists(h.vfs) && typeof toolchain.removeFileFromMemfs === 'function' && hasInMemfs(h.memfs)) {
@@ -225,6 +226,44 @@ export async function executeGccCommand({
         if (hasInMemfs('lib/wasm32-wasip1/libraylib.a')) {
           toolchain.removeFileFromMemfs('lib/wasm32-wasip1/libraylib.a');
         }
+      }
+    }
+
+    if (vfs.exists('/usr/lib/libturtle_raylib.a')) {
+      if (!hasInMemfs('usr/lib/libturtle_raylib.a')) {
+        const libturtleRaylib = vfs.readFile('/usr/lib/libturtle_raylib.a', false);
+        await toolchain.syncFileToMemfs('usr/lib/libturtle_raylib.a', libturtleRaylib);
+        await toolchain.syncFileToMemfs('lib/wasm32-wasi/libturtle_raylib.a', libturtleRaylib);
+        await toolchain.syncFileToMemfs('lib/wasm32-wasip1/libturtle_raylib.a', libturtleRaylib);
+      }
+    } else {
+      if (typeof toolchain.removeFileFromMemfs === 'function') {
+        if (hasInMemfs('usr/lib/libturtle_raylib.a')) {
+          toolchain.removeFileFromMemfs('usr/lib/libturtle_raylib.a');
+        }
+        if (hasInMemfs('lib/wasm32-wasi/libturtle_raylib.a')) {
+          toolchain.removeFileFromMemfs('lib/wasm32-wasi/libturtle_raylib.a');
+        }
+        if (hasInMemfs('lib/wasm32-wasip1/libturtle_raylib.a')) {
+          toolchain.removeFileFromMemfs('lib/wasm32-wasip1/libturtle_raylib.a');
+        }
+      }
+    }
+
+    if (vfs.exists('/usr/lib/libturtle.a')) {
+      if (!hasInMemfs('usr/lib/libturtle.a')) {
+        const libturtle = vfs.readFile('/usr/lib/libturtle.a', false);
+        await toolchain.syncFileToMemfs('usr/lib/libturtle.a', libturtle);
+        await toolchain.syncFileToMemfs('lib/wasm32-wasi/libturtle.a', libturtle);
+        await toolchain.syncFileToMemfs('lib/wasm32-wasip1/libturtle.a', libturtle);
+      }
+    }
+    if (vfs.exists('/usr/lib/libturtle_canvas-wasi.a')) {
+      if (!hasInMemfs('usr/lib/libturtle_canvas-wasi.a')) {
+        const libturtleCanvas = vfs.readFile('/usr/lib/libturtle_canvas-wasi.a', false);
+        await toolchain.syncFileToMemfs('usr/lib/libturtle_canvas-wasi.a', libturtleCanvas);
+        await toolchain.syncFileToMemfs('lib/wasm32-wasi/libturtle_canvas-wasi.a', libturtleCanvas);
+        await toolchain.syncFileToMemfs('lib/wasm32-wasip1/libturtle_canvas-wasi.a', libturtleCanvas);
       }
     }
 

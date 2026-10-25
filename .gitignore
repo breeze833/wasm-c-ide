@@ -5,3 +5,4 @@ dist/
 *.zip
 public/sysroot/wasm/
 public/sysroot/include/raylib/
+public/sysroot/include/turtle/

@@ -1,6 +1,6 @@
 {
   "name": "wasm-c-ide",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "pack": "vite build && (cd dist && zip -r ../wasm-c-ide.zip .)",
-    "test": "node test/vfs.test.js && node test/shell.test.js && node test/toolchain.test.js && node test/ar.test.js && node test/runtime.test.js && node test/make.test.js && node test/sw.test.js && node test/zoom.test.js && node test/pipeline.test.js && node test/raylib.test.js && node test/graphics.test.js && node test/so.test.js"
+    "test": "node test/vfs.test.js && node test/shell.test.js && node test/toolchain.test.js && node test/ar.test.js && node test/runtime.test.js && node test/make.test.js && node test/sw.test.js && node test/zoom.test.js && node test/pipeline.test.js && node test/raylib.test.js && node test/graphics.test.js && node test/so.test.js && node test/turtle.test.js"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

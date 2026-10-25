@@ -75,6 +75,29 @@ export class App {
     // Mount read-only sysroot headers
     mountSysroot(this.vfs);
 
+    // Asynchronously preload libturtle.a into VFS /usr/lib/libturtle.a
+    (async () => {
+      try {
+        let basePath = './';
+        if (typeof window !== 'undefined' && window.location) {
+          const baseUrl = import.meta.env?.BASE_URL || './';
+          let loc = new URL(window.location.href);
+          if (!loc.pathname.endsWith('/') && !loc.pathname.split('/').pop().includes('.')) {
+            loc.pathname += '/';
+          }
+          basePath = new URL(baseUrl, loc.href).href;
+          if (!basePath.endsWith('/')) basePath += '/';
+        }
+        const res = await fetch(`${basePath}sysroot/wasm/libturtle.a`);
+        if (res && res.ok) {
+          const buf = await res.arrayBuffer();
+          const u8 = new Uint8Array(buf);
+          this.vfs.writeFile('/usr/lib/libturtle.a', u8, Date.now(), true);
+          this.vfs.writeFile('/usr/lib/libturtle_canvas-wasi.a', u8, Date.now(), true);
+        }
+      } catch {}
+    })();
+
     // Load workspace from IndexedDB
     await loadWorkspace(this.vfs);
     setupAutoSync(this.vfs);
@@ -488,17 +511,20 @@ export class App {
             basePath = new URL(baseUrl, loc.href).href;
             if (!basePath.endsWith('/')) basePath += '/';
           }
-          const [raylibH, raymathH, rlglH, libA] = await Promise.all([
+          const [raylibH, raymathH, rlglH, libA, turtleRaylibH, turtleRaylibLibA] = await Promise.all([
             fetch(`${basePath}sysroot/include/raylib/raylib.h`).then(r => r.text()),
             fetch(`${basePath}sysroot/include/raylib/raymath.h`).then(r => r.text()),
             fetch(`${basePath}sysroot/include/raylib/rlgl.h`).then(r => r.text()),
             fetch(`${basePath}sysroot/wasm/libraylib.a`).then(r => r.arrayBuffer()),
+            fetch(`${basePath}sysroot/include/turtle/turtle_backend_raylib.h`).then(r => r.ok ? r.text() : '').catch(() => ''),
+            fetch(`${basePath}sysroot/wasm/libturtle_raylib.a`).then(r => r.ok ? r.arrayBuffer() : null).catch(() => null),
           ]);
           mountRaylibSysroot(this.vfs, {
             'raylib.h': raylibH,
             'raymath.h': raymathH,
             'rlgl.h': rlglH,
-          }, new Uint8Array(libA));
+            'turtle_backend_raylib.h': turtleRaylibH,
+          }, new Uint8Array(libA), {}, turtleRaylibLibA ? new Uint8Array(turtleRaylibLibA) : null);
         } catch (err) {
           console.warn('Failed to mount Raylib sysroot:', err);
         }

@@ -476,7 +476,7 @@ export class WasmToolchain {
         }
       }
 
-      // Mirror system headers from VFS /usr/include (e.g. graphics.h, graphics_canvas.h) into MemFS include/
+      // Mirror system headers from VFS /usr/include (e.g. graphics.h, graphics_canvas.h, turtle.h) into MemFS include/
       if (this.vfs && typeof this.vfs.exists === 'function' && this.vfs.exists('/usr/include')) {
         const includeFiles = this.vfs.getAllFiles('/usr/include');
         for (const f of includeFiles) {
@@ -489,6 +489,25 @@ export class WasmToolchain {
           }
         }
       }
+
+      // Preload default libturtle.a into MemFS and VFS
+      try {
+        const turtleRes = await fetch(`${this.basePath}/libturtle.a`);
+        if (turtleRes && turtleRes.ok) {
+          const turtleBuf = await turtleRes.arrayBuffer();
+          const turtleU8 = new Uint8Array(turtleBuf);
+          this.memfs.addFile('usr/lib/libturtle.a', turtleU8);
+          this.memfs.addFile('usr/lib/libturtle_canvas-wasi.a', turtleU8);
+          this.memfs.addFile('lib/wasm32-wasi/libturtle.a', turtleU8);
+          this.memfs.addFile('lib/wasm32-wasi/libturtle_canvas-wasi.a', turtleU8);
+          this.memfs.addFile('lib/wasm32-wasip1/libturtle.a', turtleU8);
+          this.memfs.addFile('lib/wasm32-wasip1/libturtle_canvas-wasi.a', turtleU8);
+          if (this.vfs) {
+            this.vfs.writeFile('/usr/lib/libturtle.a', turtleU8, Date.now(), true);
+            this.vfs.writeFile('/usr/lib/libturtle_canvas-wasi.a', turtleU8, Date.now(), true);
+          }
+        }
+      } catch {}
 
       onProgress('Compiler ready.');
       this.initialized = true;
