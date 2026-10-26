@@ -473,6 +473,7 @@ export class App {
         throw new Error(`${cmd}: not an executable WebAssembly binary`);
       }
       const res = await this.runtimeManager.runBinary(wasmBytes, [cmd, ...args], {
+        vfs: this.vfs,
         stdinBytes: stdinData,
         captureStdout: shouldCapture,
         onStdout: stdoutRedirect ? ((data) => { capturedStdout += data; }) : null,

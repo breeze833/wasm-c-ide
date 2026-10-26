@@ -203,9 +203,13 @@ float fabsf(float x);
 
 typedef unsigned long size_t;
 typedef long ptrdiff_t;
+#ifndef __cplusplus
 typedef int wchar_t;
+#endif
 
-#define offsetof(type, member) ((size_t)&(((type *)0)->member))
+#ifndef offsetof
+#define offsetof(type, member) __builtin_offsetof(type, member)
+#endif
 
 #endif /* _STDDEF_H */
 `,
@@ -589,10 +593,156 @@ namespace std {
         size_t length() const { return _len; }
         size_t size() const { return _len; }
         bool empty() const { return _len == 0; }
+        bool operator==(const char* other) const {
+            if (!_data || !other) return _data == other;
+            return strcmp(_data, other) == 0;
+        }
+        bool operator==(const string& other) const {
+            if (!_data || !other._data) return _data == other._data;
+            return strcmp(_data, other._data) == 0;
+        }
     };
+    inline bool operator==(const char* a, const string& b) {
+        return b == a;
+    }
 }
 
 #endif // _STRING_CPP_
+`,
+
+  'fstream': `// Minimal C++ fstream header
+#ifndef _FSTREAM_
+#define _FSTREAM_
+
+#include <stdio.h>
+#include <string>
+
+namespace std {
+
+class ofstream {
+private:
+    FILE* _f;
+public:
+    ofstream() : _f(nullptr) {}
+    explicit ofstream(const char* filename, const char* mode = "w") {
+        _f = fopen(filename, mode);
+    }
+    explicit ofstream(const std::string& filename, const char* mode = "w") {
+        _f = fopen(filename.c_str(), mode);
+    }
+    ~ofstream() {
+        close();
+    }
+    bool is_open() const { return _f != nullptr; }
+    void open(const char* filename, const char* mode = "w") {
+        if (_f) fclose(_f);
+        _f = fopen(filename, mode);
+    }
+    void close() {
+        if (_f) {
+            fclose(_f);
+            _f = nullptr;
+        }
+    }
+    ofstream& operator<<(const char* s) {
+        if (_f) fputs(s, _f);
+        return *this;
+    }
+    ofstream& operator<<(const std::string& s) {
+        if (_f) fputs(s.c_str(), _f);
+        return *this;
+    }
+    ofstream& operator<<(int val) {
+        if (_f) fprintf(_f, "%d", val);
+        return *this;
+    }
+    ofstream& operator<<(double val) {
+        if (_f) fprintf(_f, "%g", val);
+        return *this;
+    }
+    ofstream& operator<<(char c) {
+        if (_f) fputc(c, _f);
+        return *this;
+    }
+    ofstream& operator<<(ofstream& (*manip)(ofstream&)) {
+        return manip(*this);
+    }
+};
+
+inline ofstream& endl(ofstream& os) {
+    os << '\\n';
+    return os;
+}
+
+class ifstream {
+private:
+    FILE* _f;
+public:
+    ifstream() : _f(nullptr) {}
+    explicit ifstream(const char* filename, const char* mode = "r") {
+        _f = fopen(filename, mode);
+    }
+    explicit ifstream(const std::string& filename, const char* mode = "r") {
+        _f = fopen(filename.c_str(), mode);
+    }
+    ~ifstream() {
+        close();
+    }
+    bool is_open() const { return _f != nullptr; }
+    void open(const char* filename, const char* mode = "r") {
+        if (_f) fclose(_f);
+        _f = fopen(filename, mode);
+    }
+    void close() {
+        if (_f) {
+            fclose(_f);
+            _f = nullptr;
+        }
+    }
+    ifstream& operator>>(int& val) {
+        if (_f) fscanf(_f, "%d", &val);
+        return *this;
+    }
+    ifstream& operator>>(double& val) {
+        if (_f) fscanf(_f, "%lf", &val);
+        return *this;
+    }
+    ifstream& operator>>(char& c) {
+        if (_f) fscanf(_f, " %c", &c);
+        return *this;
+    }
+    ifstream& operator>>(std::string& str) {
+        if (_f) {
+            char buf[512];
+            if (fscanf(_f, "%511s", buf) == 1) {
+                str = std::string(buf);
+            }
+        }
+        return *this;
+    }
+    FILE* handle() const { return _f; }
+};
+
+inline bool getline(ifstream& is, std::string& str) {
+    if (!is.is_open()) return false;
+    char buf[1024];
+    if (fgets(buf, sizeof(buf), is.handle())) {
+        size_t len = strlen(buf);
+        if (len > 0 && (buf[len - 1] == '\\n' || buf[len - 1] == '\\r')) {
+            buf[len - 1] = '\\0';
+            if (len > 1 && buf[len - 2] == '\\r') {
+                buf[len - 2] = '\\0';
+            }
+        }
+        str = std::string(buf);
+        return true;
+    }
+    return false;
+}
+
+} // namespace std
+
+#endif // _FSTREAM_
 `,
 
   'vector': `// Minimal C++ vector header

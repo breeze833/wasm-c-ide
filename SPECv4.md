@@ -191,6 +191,23 @@ Users can select between two build strategies in the Project Settings UI:
     - Pressing `Ctrl-D` (`\x04`) in `xterm.js` while input is pending flushes existing buffer content or signals `STATE_EOF` (`-1`) to `SharedArrayBuffer`.
     - `Atomics.notify()` immediately resumes the waiting worker.
     - WASI `fd_read` sets `*nread = 0` and returns `ESUCCESS` (0), allowing standard C library functions (`scanf`, `getchar`, `fgets`, `cin`) to recognize EOF and terminate input loops cleanly.
+- **In-Code File I/O & WASI Filesystem Bridging (`<stdio.h>`, `<fstream>`)**:
+  - Full runtime support for standard C and C++ file operations (`fopen`, `fread`, `fwrite`, `fseek`, `ftell`, `fclose`, `remove`, `rename`, `std::ifstream`, `std::ofstream`) across all standard access modes:
+    - Text read (`"r"`), write/create/truncate (`"w"`), append (`"a"`).
+    - Binary read (`"rb"`), write/create/truncate (`"wb"`), append (`"ab"`).
+    - Read/write updates (`"r+"`, `"w+"`, `"a+"`, `"r+b"`, `"w+b"`, `"a+b"`).
+  - **Capability-Based Directory Pre-Opens**:
+    - WASI `fd_prestat_get` and `fd_prestat_dir_name` expose pre-opened directory descriptors for `.` (working directory), `/workspace`, and `/`.
+  - **Path Resolution & File Descriptors**:
+    - `path_open` translates relative or absolute paths into `/workspace` VFS paths, allocating runtime descriptors (`fd >= 10`) backed by mutable binary byte buffers.
+    - Honors `__WASI_O_CREAT`, `__WASI_O_TRUNC`, and `__WASI_O_EXCL` flags.
+  - **Random Access & Seeking**:
+    - `fd_seek` implements `SEEK_SET` (0), `SEEK_CUR` (1), and `SEEK_END` (2) updating descriptor offsets; `fd_tell` returns the current byte position.
+    - `fd_filestat_set_size` truncates or expands file buffers dynamically.
+  - **VFS Bidirectional Synchronization**:
+    - Initial file snapshot from VFS `/workspace` is mounted into the worker before execution.
+    - File writes (`fd_write`), flushes (`fd_close`, `fd_sync`), deletions (`path_unlink_file`), and renames (`path_rename`) synchronize back to the IDE's VFS in real time and upon process completion.
+    - Modified files immediately update the File Tree UI, active Monaco tabs, and persist to IndexedDB.
 - **Execution Interruption**:
   - `Ctrl+C` in the terminal or GUI "Stop" button immediately issues worker interruption/termination, closes/resets the graphical window, and resets terminal state.
 
@@ -399,4 +416,5 @@ Users can select between two build strategies in the Project Settings UI:
 | **Raylib Sysroot Headers Mounting** | Standard C headers (`raylib.h`, `raymath.h`, `rlgl.h`) mount into VFS dynamically when Raylib is enabled in Project Settings. |
 | **Raylib Input Coordination Interop** | Raylib execution coordinates inputs through shared `InputCoordinator` across `GraphicsWindowUI` and worker `WasiInputState`. |
 | **Offline PWA Operation** | LLVM 19 toolchain and Raylib assets execute while disconnected from the internet via Service Worker caching. |
+| **In-Code File I/O (`fopen`)** | Programs using `fopen`, `fread`, `fwrite`, `fseek`, `fclose`, and `std::fstream` operate on VFS files across all modes (`r`, `w`, `a`, `rb`, `wb`, `r+`, etc.). |
 

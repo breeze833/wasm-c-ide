@@ -138,9 +138,39 @@ export class RuntimeManager {
           if (this.graphicsWindow) {
             this.graphicsWindow.close();
           }
-        } else if (msg.type === 'stdin_request') {
-          this.isWaitingForStdin = true;
+        } else if (msg.type === 'file_sync') {
+          if (options.vfs && msg.path && msg.data) {
+            try {
+              options.vfs.writeFile(msg.path, msg.data);
+            } catch (_) {}
+          }
+        } else if (msg.type === 'file_delete') {
+          if (options.vfs && msg.path) {
+            try {
+              if (options.vfs.exists(msg.path)) {
+                options.vfs.unlink(msg.path);
+              }
+            } catch (_) {}
+          }
         } else if (msg.type === 'done') {
+          if (options.vfs) {
+            if (msg.changedFiles) {
+              for (const [path, data] of Object.entries(msg.changedFiles)) {
+                try {
+                  options.vfs.writeFile(path, data);
+                } catch (_) {}
+              }
+            }
+            if (Array.isArray(msg.deletedFiles)) {
+              for (const path of msg.deletedFiles) {
+                try {
+                  if (options.vfs.exists(path)) {
+                    options.vfs.unlink(path);
+                  }
+                } catch (_) {}
+              }
+            }
+          }
           const res = this.currentResolve;
           const opt = this.currentOptions;
           this.currentResolve = null;
@@ -195,6 +225,16 @@ export class RuntimeManager {
             : options.stdinBytes)
         : null;
 
+      let filesSnapshot = options.files || {};
+      if (options.vfs && Object.keys(filesSnapshot).length === 0) {
+        filesSnapshot = {};
+        for (const f of options.vfs.getAllFiles('/workspace')) {
+          if (!f.isDir) {
+            filesSnapshot[f.path] = options.vfs.readFile(f.path, false);
+          }
+        }
+      }
+
       this.worker.postMessage({
         type: 'run',
         wasmBytes,
@@ -202,6 +242,7 @@ export class RuntimeManager {
         raylibSharedBuffer: this.raylibSharedBuffer,
         argv,
         stdinBytes,
+        files: filesSnapshot,
       });
     });
   }

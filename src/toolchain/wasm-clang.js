@@ -476,6 +476,27 @@ export class WasmToolchain {
         }
       }
 
+      // Resolve and unpack symlinks (entry.type === '2')
+      for (const entry of entries) {
+        if (entry.type === '2' && entry.linkname) {
+          const cleanName = (entry.filename || '').replace(/^\.?\/+/, '');
+          if (!cleanName) continue;
+          const lastSlash = cleanName.lastIndexOf('/');
+          const parentDir = lastSlash !== -1 ? cleanName.substring(0, lastSlash) : '';
+          let targetPath = entry.linkname.replace(/^\.?\/+/, '');
+          if (parentDir && !entry.linkname.startsWith('/')) {
+            targetPath = `${parentDir}/${targetPath}`;
+          }
+          const cleanTarget = targetPath.replace(/^\/+/, '');
+          if (this.memfs.hasFile(cleanTarget)) {
+            const contents = this.memfs.getFileContents(cleanTarget);
+            if (contents) {
+              this.memfs.addFile(cleanName, contents);
+            }
+          }
+        }
+      }
+
       // Mirror system headers from VFS /usr/include (e.g. graphics.h, graphics_canvas.h, turtle.h) into MemFS include/
       if (this.vfs && typeof this.vfs.exists === 'function' && this.vfs.exists('/usr/include')) {
         const includeFiles = this.vfs.getAllFiles('/usr/include');
@@ -584,9 +605,8 @@ export class WasmToolchain {
       stageFlag,
       '-disable-free',
       '-isysroot', '/',
-      '-internal-isystem', '/include/wasm32-wasip1',
       '-internal-isystem', '/include',
-      '-internal-isystem', '/include/c++/v1',
+      '-internal-isystem', '/include/wasm32-wasip1',
       '-internal-isystem', '/lib/clang/19/include',
       '-internal-isystem', '/lib/clang/19.1.0/include',
       '-internal-isystem', '/lib/clang/8.0.1/include',

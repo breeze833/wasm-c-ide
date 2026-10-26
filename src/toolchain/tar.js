@@ -60,6 +60,7 @@ export class Tar {
     const fullFilename = filenamePrefix ? `${filenamePrefix}/${filename}` : filename;
     const entry = {
       filename: fullFilename,
+      linkname,
       size,
       type: type || '0',
     };

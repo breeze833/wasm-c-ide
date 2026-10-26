@@ -16,7 +16,7 @@ A zero-backend, installation-free, multi-file C/C++ development and learning env
   - [Interactive POSIX Shell & Terminal](#2-interactive-posix-shell--terminal)
   - [Clang & LLD WebAssembly Toolchain](#3-clang--lld-webassembly-toolchain)
   - [Dual Build Systems (Shell Script & Makefile)](#4-dual-build-systems-shell-script--makefile)
-  - [Execution Sandbox with Synchronous Stdin](#5-execution-sandbox-with-synchronous-stdin)
+  - [Execution Sandbox, Synchronous Stdin & In-Code File I/O](#5-execution-sandbox-synchronous-stdin--in-code-file-io)
   - [Unified Graphics Canvas, Vector 2D & Game Engine](#6-unified-graphics-canvas-vector-2d--game-engine)
   - [Turtle Graphics Subsystem (libturtle)](#7-turtle-graphics-subsystem-libturtle)
   - [Interactive Educational Examples Suite](#8-interactive-educational-examples-suite)
@@ -49,7 +49,7 @@ This IDE is specifically engineered for **students and systems programming educa
   - **No Hidden Bridges**: Clicking UI action buttons (Compile, Build, Run) does not invoke private JS APIs; it writes transparent POSIX commands into the terminal emulator.
   - **Explicit Save Habits**: Files never auto-save on build. Modifying a file marks it dirty (`*`). Building with unsaved edits displays a warning that the binary is built from disk state.
   - **Strict Standard C Mode**: Pure C mode enforces `-x c -std=c11 -pedantic-errors -Wall -Wextra`, rejecting C++ extensions (e.g. C++ keywords as identifiers) to teach standard-compliant C.
-  - **Standard C++ Support**: Seamlessly toggleable to C++ mode (`-std=c++17`) with full standard library support (`<iostream>`, `<vector>`, `<string>`, etc.).
+  - **Standard C++ Support**: Seamlessly toggleable to C++ mode (`-std=c++17`) with standard library support (`<iostream>`, `<vector>`, `<string>`, `<fstream>`, etc.).
 
 ---
 
@@ -85,7 +85,7 @@ This IDE is specifically engineered for **students and systems programming educa
 - **Modern LLVM 19.1.0 Toolchain**: Powered by real WebAssembly builds of LLVM Clang 19.1.0 and `wasm-ld` 19.1.0 targeting **WASI Preview 1 (`wasm32-wasip1`)**, directly integrated from [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi) and [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi). Toolchain and sysroot assets are downloaded on demand during the build/install lifecycle via `scripts/download-sysroot.js`, keeping the repository clean and free of large binary blobs.
 - **Native WebAssembly Section 12 Support**: `wasm-ld` natively parses and links relocatable object files containing Section 12 (`DataCount`) emitted by modern Clang for bulk-memory operations.
 - **Sysroot & Standard Libraries**:
-  - Bundles standard WASI Preview 1 headers under `/usr/include/`, `/include/wasm32-wasip1/`, `/lib/clang/19/include/`, and C++ headers under `/usr/include/c++/v1/`.
+  - Bundles standard WASI Preview 1 headers under `/usr/include/`, `/include/wasm32-wasip1/`, `/lib/clang/19/include/`, and standard C++ headers under `/usr/include/` (`<iostream>`, `<vector>`, `<string>`, `<fstream>`).
   - Pre-mounted static runtime archives in `/usr/lib/` and `/lib/wasm32-wasip1/`: `crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libclang_rt.builtins.a`, `libm.a`, `libpthread.a`.
 - **Standard Compiler CLI Options & Stages**:
   - **Preprocess Only (`-E`)**: Inspect preprocessed output streamed directly to stdout or saved via `-o <file>` (e.g., `gcc -E main.c > main.i`, `gcc -E main.c | grep foo`).
@@ -117,12 +117,18 @@ This IDE is specifically engineered for **students and systems programming educa
   - Decoupled **Save** and **Generate Build Script** buttons: save configuration and toggle sysroots without clobbering existing files in `/workspace`.
   - Configure language mode, include directories, compiler warning flags, default build track, target binary name, and optional Raylib graphics.
 
-### 5. Execution Sandbox with Synchronous Stdin
-- **Dedicated Runtime Web Worker**: User executables run in an isolated WebAssembly execution sandbox with WASI emulation.
+### 5. Execution Sandbox, Synchronous Stdin & In-Code File I/O
+- **Dedicated Runtime Web Worker**: User executables run in an isolated WebAssembly execution sandbox with complete WASI Preview 1 filesystem emulation.
 - **Synchronous Blocking Input (`scanf` / `cin`)**:
   - Employs `SharedArrayBuffer` and `Atomics.wait()` / `Atomics.notify()`.
   - When the user's C program invokes `scanf("%d", &val)` or `getchar()`, the runtime worker suspends synchronously without locking the main browser UI thread.
   - Characters typed into `xterm.js` are forwarded to the worker via shared memory upon pressing Enter.
+- **In-Code Standard File I/O (`fopen` & `fstream`)**:
+  - **Standard C File Operations**: Direct in-code file management via `fopen`, `fclose`, `fread`, `fwrite`, `fseek` (`SEEK_SET`, `SEEK_CUR`, `SEEK_END`), `ftell`, `rewind`, `fgetc`, `fputc`, `fgets`, `fputs`, `fprintf`, `fscanf`, `remove`, and `rename`.
+  - **All Standard Modes**: Text (`"r"`, `"w"`, `"a"`, `"r+"`, `"w+"`, `"a+"`) and binary (`"rb"`, `"wb"`, `"ab"`, `"r+b"`, `"w+b"`, `"a+b"`).
+  - **Standard C++ File Streams**: Mounts `<fstream>` with `std::ofstream`, `std::ifstream`, `std::getline`, and `std::endl`.
+  - **Bidirectional VFS Synchronization**: Pre-executes with a complete `/workspace` file tree snapshot; streams live file mutations and deletions back to the host VFS on flush and closure; atomically persists all changes to IndexedDB upon program termination and updates editor tabs and file tree.
+  - **Subdirectory Traversal**: Seamlessly creates, opens, reads, and writes nested files in subdirectories (e.g., `fopen("data/nested.txt", "w")`).
 - **Execution Interruption**:
   - Pressing `Ctrl+C` in `xterm.js` or clicking the UI **Stop** button terminates the runtime worker immediately, returning control to the shell prompt.
 
@@ -197,10 +203,11 @@ The repository includes a ready-to-run suite of single-file C programs in the `e
 - **`examples/README.md`**: Step-by-step user compilation and running guide for each example.
 
 ### 9. Virtual File System & Storage
-- **In-Memory VFS**: Fast hierarchical tree representation shared across the editor, shell, and toolchain.
+- **In-Memory VFS**: Fast hierarchical tree representation shared across the editor, shell, toolchain, and runtime execution worker.
 - **IndexedDB Persistence**: Automatically persists `/workspace` across browser sessions and page refreshes.
+- **Bidirectional Runtime Synchronization**: Changes made to `/workspace` files via C/C++ `fopen`/`fwrite`/`fputs` or C++ `<fstream>` automatically sync back to VFS in real-time and persist to IndexedDB, updating the file tree and editor tabs.
 - **Zip Import & Export**: One-click export of `/workspace` into a standard `.zip` file using JSZip, and direct zip unpacking into the workspace.
-- **Sysroot Protection**: Read-only protection on system root paths (`/usr`, `/bin`), pre-mounting standard C/C++ headers, `<graphics.h>`, `<graphics_canvas.h>`, `<turtle.h>`, and runtime static libraries (`libc.a`, `libturtle.a`, and conditionally `libraylib.a`).
+- **Sysroot Protection**: Read-only protection on system root paths (`/usr`, `/bin`), pre-mounting standard C/C++ headers (`<stdio.h>`, `<stdlib.h>`, `<iostream>`, `<fstream>`, etc.), `<graphics.h>`, `<graphics_canvas.h>`, `<turtle.h>`, and runtime static libraries (`libc.a`, `libturtle.a`, and conditionally `libraylib.a`).
 
 ### 10. Progressive Web App (PWA) & Offline Execution
 - **Installable Desktop/Mobile App**: Certified PWA with Web App Manifest (`manifest.webmanifest`), dark theme colors, and icons.
@@ -241,7 +248,7 @@ Open your browser and navigate to `http://localhost:5173`.
 > **Note**: Vite is configured with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` HTTP headers to enable `SharedArrayBuffer` support out of the box during development.
 
 ### Running Tests
-Execute the full unit test suite (covering VFS, Shell parser, Toolchain driver, Static Archiver, Runtime Atomics, Make engine, PWA Service Worker, Zoom controls, Pipelines & Redirections, Raylib graphics, Generic Graphics / Canvas 2D, Shared Objects, and Turtle Graphics):
+Execute the full unit test suite (covering VFS, Shell parser, Toolchain driver, Static Archiver, Runtime Atomics, Make engine, PWA Service Worker, Zoom controls, Pipelines & Redirections, Raylib graphics, Generic Graphics / Canvas 2D, Shared Objects, Turtle Graphics, and In-Code File I/O):
 
 ```bash
 npm test

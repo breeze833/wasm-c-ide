@@ -21,6 +21,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 ├── SPEC.md                    # Technical specification & architectural ground truth (v1 baseline)
 ├── SPECv2.md                  # Extended technical specification with Raylib 5.5 graphics
 ├── SPECv3.md                  # Extended technical specification with LLVM 19 WASI toolchain
+├── SPECv4.md                  # Extended technical specification with decoupled raylib-wasi & in-code file I/O
 ├── AGENTS.md                  # Agent operating protocols (this file)
 ├── KNOWN_ISSUES.md            # Documented toolchain version gaps, limits, and MemFS invariants
 ├── README.md                  # User-facing project documentation & deployment guides
@@ -75,6 +76,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │       └── include/           # Minimal fallback libc headers, raylib headers & turtle headers
 └── test/
     ├── ar.test.js             # Static archiver creation, extraction, table, and wasm-ld linkage tests
+    ├── fileio.test.js         # In-code standard C/C++ file I/O, fopen modes, seeking, and fstream tests
     ├── graphics.test.js       # Generic framebuffer, 2D vector, and pixel manipulation tests
     ├── make.test.js           # Makefile parsing and incremental build tests
     ├── pipeline.test.js       # Command pipeline (|) and file redirection (<, >, >>) tests
@@ -214,6 +216,24 @@ Agents executing this project should proceed milestone-by-milestone:
 - Enforce strict zero-binary and zero-upstream-header Git repository policies: `libraylib.a` is fetched on demand via GitHub Releases.
 - Align `InputCoordinator` between `canvas-wasi` and `raylib-wasi` over the shared 512-byte `SharedArrayBuffer` layout.
 
+### Milestone 15: In-Code Standard File I/O (`fopen` / `fstream`) & Bidirectional VFS Synchronization
+- Implement complete WASI Preview 1 filesystem syscalls in `src/workers/runtime.worker.js`:
+  - Preopen descriptor `.` (fd 3) routing relative file access directly into `/workspace`.
+  - `path_open` supporting POSIX creation (`WASI_O_CREAT`), truncation (`WASI_O_TRUNC`), exclusive creation (`WASI_O_EXCL`), directory (`WASI_O_DIRECTORY`), and append flags (`WASI_FDFLAG_APPEND`).
+  - Read/write and positioning: `fd_read`, `fd_write` (with automatic seek to EOF in append mode), `fd_seek` (`SEEK_SET`, `SEEK_CUR`, `SEEK_END`), `fd_tell`, `fd_close`, `fd_filestat_get`, `fd_filestat_set_size`, and `fd_fdstat_get` advertising complete capability rights (`0x1fffffffffffffffn`).
+  - File and directory management: `path_unlink_file` (`remove()`), `path_rename` (`rename()`), and `path_create_directory`.
+  - Streaming event notifications (`file_sync`, `file_delete`) on file write/flush/close, with final batch synchronization on process termination.
+- Implement host VFS synchronization bridge in `src/terminal/runtime.js` and `src/main.js`:
+  - Captures `/workspace` file tree snapshot from `VFS` and delivers it to the runtime worker upon execution.
+  - Listens for incremental `file_sync` and `file_delete` events from the worker, immediately updating host `VFS`.
+  - On process termination, commits any remaining modified or deleted files to `VFS`, notifying `FileTreeUI` and persisting changes to IndexedDB.
+- Integrate standard C++ `<fstream>` in `src/vfs/sysroot.js`:
+  - Provide lightweight pedagogical `<fstream>` header (`std::ofstream`, `std::ifstream`, `std::getline`, `std::endl`).
+  - Implement equality operators (`operator==`) for pedagogical `std::string`.
+  - Update `stddef.h` to use compiler builtin `__builtin_offsetof` and guard `wchar_t` typedef with `#ifndef __cplusplus` for strict C++ standard conformance.
+- Implement TAR symlink unpacking in `src/toolchain/tar.js` and `src/toolchain/wasm-clang.js` to preserve and resolve symlink alias headers (`type 2`) from `sysroot.tar.gz`.
+- Implement comprehensive automated test suite in `test/fileio.test.js` validating all standard access modes (`"r"`, `"w"`, `"a"`, `"rb"`, `"wb"`, `"r+"`), `fseek`/`ftell`, `remove()`, `rename()`, subdirectory access, and C++ `<fstream>`.
+
 ---
 
 ## 4. Verification & Testing Checklist
@@ -242,6 +262,7 @@ Before marking any task complete, agents must verify:
 | **Shared Object Linkage (`gcc main.c libmath.so`)** | Executables link against `.so` shared libraries, creating dynamic `dylink.0` dependencies and `env.<symbol>` imports. |
 | **Shared Object Runtime Execution** | Executable dynamically loads and invokes functions exported from `.so` without unresolved symbols. |
 | **C++ Shared Object (`g++ -shared -fPIC`)** | C++ code compiles to position-independent `.so` and exports `extern "C"` symbols properly. |
+| **In-Code Standard File I/O (`fopen`, `fstream`)** | Programs using standard C file operations (`fopen` with "r", "w", "a", "rb", "wb", "r+", `fread`, `fwrite`, `fseek`, `ftell`, `fgets`, `fputs`, `fclose`, `remove`, `rename`) and C++ `<fstream>` (`std::ofstream`, `std::ifstream`) read, write, seek, and mutate files in `/workspace` with bidirectional VFS synchronization. |
 | **Infinite Loop Interruption** | `while(1);` can be interrupted via `Ctrl+C` or UI Stop button; terminal returns to prompt. |
 | **Refresh Persistence** | Modifying files, closing tab, and reopening keeps files intact via IndexedDB. |
 | **Zip Round-Trip** | Exporting project to zip and re-importing preserves directory hierarchy. |
