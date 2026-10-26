@@ -138,8 +138,10 @@ This IDE is specifically engineered for **students and systems programming educa
   - Direct C bridge to the browser's native `OffscreenCanvas` 2D context (`CanvasRenderingContext2D`).
   - Vector primitives: `canvas_fill_rect`, `canvas_stroke_rect`, `canvas_clear_rect`, `canvas_arc`, `canvas_begin_path`, `canvas_fill`, `canvas_stroke`, `canvas_set_fill_style`, `canvas_set_stroke_style`, `canvas_fill_text`, `canvas_set_font`, `canvas_save`, `canvas_restore`, `canvas_rotate`, `canvas_scale`, `canvas_present`.
   - Pixel manipulation & framebuffer interop: `canvas_get_pixels`, `canvas_put_pixels`, `canvas_get_image_data`, `canvas_put_image_data`, `canvas_get_pixel`, `canvas_set_pixel` for direct pixel-level reading, writing, and 2D image processing filter implementation.
-- **Opt-In Raylib 5.5 Game Engine**:
-  - Full-featured 2D/3D GLES2/WebGL game engine integration via [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) without Emscripten, compiled natively with LLVM 19.
+- **Opt-In Raylib 5.5 Game Engine (`raylib-wasi`)**:
+  - Full-featured 2D/3D GLES2/WebGL game engine integration decoupled into the standalone package [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) without Emscripten, compiled natively with LLVM 19.
+  - Zero ad-hoc host dispatchers: WebGL ES 2.0 state machine, handle tables, and Wasm runtime imports (`gl`, `raylib`) are imported directly from `raylib-wasi`.
+  - Shares the 512-byte `SharedArrayBuffer` `InputCoordinator` and floating/dockable `GraphicsWindowUI` with `canvas-wasi`.
 - **Synchronous Zero-Copy Frame Delivery**:
   - Prevents microtask starvation during synchronous WebAssembly execution loops (`while (!graphics_should_close())`).
   - Invokes `offscreen2d.transferToImageBitmap()`, creating an `ImageBitmap` **synchronously** without Promise delays and posting it directly to the UI thread via `postMessage({ type: 'frame', bitmap }, [bitmap])`.

@@ -1,6 +1,6 @@
 {
   "name": "wasm-c-ide",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -20,7 +20,8 @@
     "@xterm/xterm": "^5.5.0",
     "canvas-wasi": "github:breeze833/canvas-wasi",
     "jszip": "^3.10.1",
-    "monaco-editor": "^0.52.2"
+    "monaco-editor": "^0.52.2",
+    "raylib-wasi": "github:breeze833/raylib-wasi"
   },
   "devDependencies": {
     "vite": "^6.2.0"

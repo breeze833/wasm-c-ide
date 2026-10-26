@@ -1,7 +1,7 @@
 // Execution Runtime Host Manager
 // Coordinates runtime.worker.js with SharedArrayBuffer and terminal stdin capture
 
-import { InputCoordinator } from '../toolchain/raylib-host.js';
+import { InputCoordinator } from 'canvas-wasi';
 
 const CONTROL_STATE_IDX = 0;
 const CONTROL_LEN_IDX = 1;

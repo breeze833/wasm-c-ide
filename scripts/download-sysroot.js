@@ -90,6 +90,18 @@ async function downloadRaylibAssets() {
     return;
   }
 
+  const moduleDistLib = path.join(projectRoot, 'node_modules/raylib-wasi/dist/lib/libraylib.a');
+  const moduleDistInc = path.join(projectRoot, 'node_modules/raylib-wasi/dist/include');
+  if (fs.existsSync(moduleDistLib) && fs.existsSync(moduleDistInc)) {
+    fs.mkdirSync(RAYLIB_INC_DIR, { recursive: true });
+    fs.copyFileSync(moduleDistLib, path.join(WASM_DIR, 'libraylib.a'));
+    fs.copyFileSync(path.join(moduleDistInc, 'raylib.h'), path.join(RAYLIB_INC_DIR, 'raylib.h'));
+    fs.copyFileSync(path.join(moduleDistInc, 'raymath.h'), path.join(RAYLIB_INC_DIR, 'raymath.h'));
+    fs.copyFileSync(path.join(moduleDistInc, 'rlgl.h'), path.join(RAYLIB_INC_DIR, 'rlgl.h'));
+    console.log('[sysroot] Copied Raylib assets from node_modules/raylib-wasi/dist.');
+    return;
+  }
+
   const url = `${RAYLIB_WASI_BASE_URL}/raylib-wasi.tar.gz`;
   console.log(`[sysroot] Downloading ${url} ...`);
   const res = await fetch(url);

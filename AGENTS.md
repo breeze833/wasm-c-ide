@@ -56,7 +56,6 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   ├── ar.js              # POSIX ar static library archiver and wasm object symbol extractor
 │   │   ├── driver.js          # gcc / clang command parser and execution coordinator
 │   │   ├── make.js            # Incremental Makefile runner evaluating mtimes
-│   │   ├── raylib-host.js     # Raylib GLES2 / WebGL host calls and input coordination
 │   │   ├── tar.js             # Sysroot tarball extractor
 │   │   └── wasm-clang.js      # Clang, LLD, and MemFS WebAssembly wrappers
 │   ├── vfs/
@@ -206,6 +205,14 @@ Agents executing this project should proceed milestone-by-milestone:
   - Dynamically unmounts from VFS and purges from MemFS when Raylib is disabled.
 - Automated asset pipeline in `scripts/download-sysroot.js` downloading headers and compiling/unpacking static archives for offline execution.
 - Bundled example programs: `06_turtle_canvas.c` and `07_turtle_raylib.c`.
+
+### Milestone 14: Raylib Module Decoupling (`raylib-wasi`) & Architecture Unification
+- Modularize Raylib 5.5 host runtime into external package [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi).
+- Remove ad-hoc `src/toolchain/raylib-host.js` from `wasm-c-ide`.
+- Delegate WebGL ES 2.0 state machine, handle tables, and Wasm runtime imports (`gl`, `raylib`) directly to `raylib-wasi`.
+- Mount Raylib standard C headers (`raylib.h`, `raymath.h`, `rlgl.h`) into VFS and sysroot via `scripts/download-sysroot.js` / module dist.
+- Enforce strict zero-binary and zero-upstream-header Git repository policies: `libraylib.a` is fetched on demand via GitHub Releases.
+- Align `InputCoordinator` between `canvas-wasi` and `raylib-wasi` over the shared 512-byte `SharedArrayBuffer` layout.
 
 ---
 

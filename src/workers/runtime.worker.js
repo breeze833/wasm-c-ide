@@ -1,7 +1,7 @@
 // Web Worker: Sandboxed Execution Runtime for compiled a.out
 // Implements WASI syscalls and synchronous stdin using SharedArrayBuffer & Atomics.wait()
 
-import { createRaylibHost } from '../toolchain/raylib-host.js';
+import { createRaylibHost } from 'raylib-wasi';
 import { createGraphicsImports } from 'canvas-wasi/worker';
 
 const STATE_IDLE = 0;

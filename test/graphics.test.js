@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { VFS } from '../src/vfs/vfs.js';
 import { mountSysroot, STANDARD_C_HEADERS } from '../src/vfs/sysroot.js';
-import { InputCoordinator } from '../src/toolchain/raylib-host.js';
+import { InputCoordinator } from 'canvas-wasi';
 import { WasmToolchain } from '../src/toolchain/wasm-clang.js';
 import { executeGccCommand } from '../src/toolchain/driver.js';
 

@@ -5,7 +5,8 @@ import path from 'node:path';
 import { VFS } from '../src/vfs/vfs.js';
 import { mountRaylibSysroot, unmountRaylibSysroot } from '../src/vfs/sysroot.js';
 import { SettingsModal } from '../src/components/settings.js';
-import { InputCoordinator, createRaylibHost } from '../src/toolchain/raylib-host.js';
+import { createRaylibHost } from 'raylib-wasi';
+import { InputCoordinator } from 'canvas-wasi';
 import { WasmToolchain } from '../src/toolchain/wasm-clang.js';
 
 console.log('--- Running Raylib 5.5 Graphics Unit Tests ---');
