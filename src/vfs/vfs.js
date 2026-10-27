@@ -1,5 +1,5 @@
-// Virtual File System (MEMFS)
-// Manages hierarchical in-memory storage for /workspace and /usr
+// Virtual File System (VFS)
+// Manages hierarchical in-memory storage for /workspace, /usr, /include, and /lib
 
 export function normalizePath(path) {
   if (!path) return '/';
