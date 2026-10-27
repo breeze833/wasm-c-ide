@@ -1,5 +1,6 @@
-// Unified WASI Preview 1 Host backed directly by Virtual File System (VFS)
-// Supports both toolchain (clang.wasm, lld.wasm) and user binary runtime (a.out)
+// Standalone, zero-dependency WASI Preview 1 Host implementation
+// Directly backed by an in-memory Virtual File System (Map, Object, or VFS)
+// Compatible with both Node.js and browser environments (ESM and CommonJS)
 
 export const ESUCCESS = 0;
 export const EBADF = 8;
@@ -13,7 +14,7 @@ export const EPERM = 63;
 
 export class ProcExit extends Error {
   constructor(code, changedFiles = null, deletedFiles = null) {
-    super(`Process exited with code ${code}`);
+    super(`Exited with code ${code}`);
     this.code = code;
     this.changedFiles = changedFiles;
     this.deletedFiles = deletedFiles;
@@ -40,7 +41,7 @@ export function normalizePath(path) {
 
 export class WasiHost {
   constructor(options = {}) {
-    this.vfs = options.vfs;
+    this.vfs = options.vfs || new Map();
     this.cwd = options.cwd || '/workspace';
     this.argv = options.argv || ['./a.out'];
     this.environ = options.environ || { USER: 'student', PWD: this.cwd };
@@ -63,6 +64,7 @@ export class WasiHost {
     this.stdinPos = 0;
     this.inodes = new Map();
     this.nextInode = 100n;
+    this.createdDirs = new Set(['/', '/workspace', '/usr', '/bin', '/usr/include', '/usr/lib', '/include', '/lib']);
   }
 
   _getInode(p) {
@@ -142,29 +144,37 @@ export class WasiHost {
     return candidate;
   }
 
-  // File access helpers over VFS or Map adapter
+  // File access helpers over VFS, Map, or Object
   _vfsExists(p) {
     if (!this.vfs) return false;
     if (typeof this.vfs.exists === 'function') return this.vfs.exists(p);
     if (this.vfs instanceof Map) return this.vfs.has(p);
+    if (typeof this.vfs === 'object') return Object.prototype.hasOwnProperty.call(this.vfs, p);
     return false;
   }
 
   _vfsIsDir(p) {
     if (!this.vfs) return false;
     if (p === '/' || p === '/workspace') return true;
+    if (this.createdDirs && this.createdDirs.has(p)) return true;
     if (typeof this.vfs.stat === 'function') {
       const s = this.vfs.stat(p);
-      return s ? (s.isDir || s.isDirectory) : false;
+      return s ? Boolean(s.isDir || s.isDirectory) : false;
     }
     if (typeof this.vfs.isDir === 'function') return this.vfs.isDir(p);
     if (this.vfs instanceof Map && this.vfs.has(p)) {
       const item = this.vfs.get(p);
       if (item && typeof item === 'object' && item.isDir !== undefined) return Boolean(item.isDir);
     }
+    const prefix = p === '/' ? '/' : `${p}/`;
     if (this.vfs instanceof Map) {
-      const prefix = p === '/' ? '/' : `${p}/`;
       for (const k of this.vfs.keys()) {
+        if (k.startsWith(prefix)) return true;
+      }
+      return false;
+    }
+    if (typeof this.vfs === 'object') {
+      for (const k of Object.keys(this.vfs)) {
         if (k.startsWith(prefix)) return true;
       }
       return false;
@@ -194,6 +204,12 @@ export class WasiHost {
 
   _vfsWriteFile(p, data) {
     const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+    let dirP = p;
+    while (dirP.lastIndexOf('/') > 0) {
+      dirP = dirP.substring(0, dirP.lastIndexOf('/'));
+      this.createdDirs.add(dirP);
+    }
+
     if (this.vfs) {
       if (typeof this.vfs.writeFile === 'function') {
         const lastSlash = p.lastIndexOf('/');
@@ -206,6 +222,8 @@ export class WasiHost {
         this.vfs.writeFile(p, bytes, Date.now(), true);
       } else if (this.vfs instanceof Map) {
         this.vfs.set(p, bytes);
+      } else if (typeof this.vfs === 'object') {
+        this.vfs[p] = bytes;
       }
     }
     this.changedFiles.set(p, bytes);
@@ -221,6 +239,8 @@ export class WasiHost {
         try { this.vfs.remove(p, true, true); } catch {}
       } else if (this.vfs instanceof Map) {
         this.vfs.delete(p);
+      } else if (typeof this.vfs === 'object') {
+        delete this.vfs[p];
       }
     }
     this.changedFiles.delete(p);
@@ -239,23 +259,21 @@ export class WasiHost {
         isDir: typeof i === 'string' ? this._vfsIsDir(`${p}/${i}`) : Boolean(i.isDir || i.isDirectory),
       }));
     }
-    if (this.vfs instanceof Map) {
-      const prefix = p === '/' ? '/' : `${p}/`;
-      const seen = new Set();
-      const entries = [];
-      for (const k of this.vfs.keys()) {
-        if (k.startsWith(prefix)) {
-          const rest = k.substring(prefix.length);
-          const name = rest.split('/')[0];
-          if (name && !seen.has(name)) {
-            seen.add(name);
-            entries.push({ name, isDir: rest.includes('/') });
-          }
+    const prefix = p === '/' ? '/' : `${p}/`;
+    const seen = new Set();
+    const entries = [];
+    const keys = (this.vfs instanceof Map) ? Array.from(this.vfs.keys()) : Object.keys(this.vfs || {});
+    for (const k of keys) {
+      if (k.startsWith(prefix)) {
+        const rest = k.substring(prefix.length);
+        const name = rest.split('/')[0];
+        if (name && !seen.has(name)) {
+          seen.add(name);
+          entries.push({ name, isDir: rest.includes('/') });
         }
       }
-      return entries;
     }
-    return [];
+    return entries;
   }
 
   getImports() {
@@ -734,7 +752,7 @@ export class WasiHost {
           const base = buf + written;
           this.memU8().fill(0, base, base + 24);
           this.memI64()[base >> 3] = BigInt(i + 1); // d_next
-          this.memI64()[(base + 8) >> 3] = BigInt(i + 1); // d_ino
+          this.memI64()[(base + 8) >> 3] = this._getInode(`${dirPath}/${entry.name}`); // d_ino
           this.memU32()[(base + 16) >> 2] = nameBytes.length; // d_namlen
           this.memU8()[base + 20] = entry.isDir ? 3 : 4; // d_type
 
@@ -756,7 +774,12 @@ export class WasiHost {
       path_remove_directory: (dirfd, path_ptr, path_len) => {
         const pathStr = this.readStr(path_ptr, path_len);
         const fullPath = this.resolvePath(dirfd, pathStr);
-        this._vfsRemove(fullPath);
+        if (this.vfs && typeof this.vfs.rmdir === 'function') {
+          try { this.vfs.rmdir(fullPath, true); } catch {}
+        }
+        if (this.createdDirs) {
+          this.createdDirs.delete(fullPath);
+        }
         return ESUCCESS;
       },
 
@@ -765,6 +788,9 @@ export class WasiHost {
         const fullPath = this.resolvePath(dirfd, pathStr);
         if (this.vfs && typeof this.vfs.mkdir === 'function') {
           try { this.vfs.mkdir(fullPath, true, true); } catch {}
+        }
+        if (this.createdDirs) {
+          this.createdDirs.add(fullPath);
         }
         return ESUCCESS;
       },
@@ -781,16 +807,13 @@ export class WasiHost {
           } catch (e) {
             return EEXIST;
           }
-        } else if (this.vfs instanceof Map) {
-          const d = this.vfs.get(oldFull);
+        } else {
+          const d = this._vfsReadFile(oldFull);
           if (d) {
-            this.vfs.set(newFull, d);
-            this.vfs.delete(oldFull);
+            this._vfsWriteFile(newFull, d);
+            this._vfsRemove(oldFull);
           }
         }
-        this.changedFiles.delete(oldFull);
-        this.changedFiles.set(newFull, this._vfsReadFile(newFull));
-        this.deletedFiles.add(oldFull);
         return ESUCCESS;
       },
 
@@ -890,4 +913,21 @@ export class WasiHost {
       }),
     };
   }
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    WasiHost,
+    ProcExit,
+    normalizePath,
+    ESUCCESS,
+    EBADF,
+    EEXIST,
+    EINVAL,
+    EISDIR,
+    ENOENT,
+    ENOSYS,
+    ENOTDIR,
+    EPERM,
+  };
 }
