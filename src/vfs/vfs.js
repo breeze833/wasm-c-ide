@@ -36,6 +36,8 @@ export class VFS {
     this.mkdir('/usr/lib', true, true);
     this.mkdir('/usr/bin', true, true);
     this.mkdir('/bin', true, true);
+    this.mkdir('/include', true, true);
+    this.mkdir('/lib', true, true);
   }
 
   subscribe(listener) {
@@ -55,7 +57,12 @@ export class VFS {
 
   _isReadOnly(path) {
     const norm = normalizePath(path);
-    return norm.startsWith('/usr') || norm.startsWith('/bin');
+    return (
+      norm.startsWith('/usr') ||
+      norm.startsWith('/bin') ||
+      norm.startsWith('/include') ||
+      norm.startsWith('/lib')
+    );
   }
 
   _resolve(path, createIntermediate = false) {

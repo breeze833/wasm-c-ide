@@ -24,7 +24,6 @@ const TURTLE_INC_DIR = path.join(projectRoot, 'public', 'sysroot', 'include', 't
 const REQUIRED_FILES = [
   path.join(WASM_DIR, 'clang.wasm'),
   path.join(WASM_DIR, 'lld.wasm'),
-  path.join(WASM_DIR, 'memfs.wasm'),
   path.join(WASM_DIR, 'sysroot.tar.gz'),
   path.join(WASM_DIR, 'libraylib.a'),
   path.join(WASM_DIR, 'libturtle.a'),
@@ -64,7 +63,7 @@ async function downloadToFile(url, destPath) {
 }
 
 async function downloadClangWasiAssets() {
-  const binaries = ['clang.wasm', 'lld.wasm', 'memfs.wasm', 'sysroot.tar.gz'];
+  const binaries = ['clang.wasm', 'lld.wasm', 'sysroot.tar.gz'];
   for (const name of binaries) {
     const dest = path.join(WASM_DIR, name);
     if (!force && fs.existsSync(dest) && fs.statSync(dest).size > 0) {

@@ -22,6 +22,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 ├── SPECv2.md                  # Extended technical specification with Raylib 5.5 graphics
 ├── SPECv3.md                  # Extended technical specification with LLVM 19 WASI toolchain
 ├── SPECv4.md                  # Extended technical specification with decoupled raylib-wasi & in-code file I/O
+├── SPECv5.md                  # Extended technical specification with Zero-MemFS Unified VFS WASI Host
 ├── AGENTS.md                  # Agent operating protocols (this file)
 ├── KNOWN_ISSUES.md            # Documented toolchain version gaps, limits, and MemFS invariants
 ├── README.md                  # User-facing project documentation & deployment guides
@@ -63,7 +64,8 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   ├── archive.js         # JSZip project export and import routines
 │   │   ├── storage.js         # IndexedDB synchronization and default project seed
 │   │   ├── sysroot.js         # Standard C/C++ sysroot header and binary mount definitions
-│   │   └── vfs.js             # In-memory virtual filesystem with path normalization
+│   │   ├── vfs.js             # In-memory virtual filesystem with path normalization
+│   │   └── wasi-host.js       # Unified zero-dependency WASI Preview 1 host directly backed by VFS
 │   └── workers/
 │       ├── runtime.worker.js  # WASI host executing user binaries with Atomics stdin & OffscreenCanvas
 │       └── shell.worker.js    # Interactive POSIX shell worker (pushd/popd, globs, mv/cp, direct scripts)
@@ -72,7 +74,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── manifest.webmanifest   # Web App Manifest for PWA installation
 │   ├── icons/                 # PWA application icons (192, 512, svg)
 │   └── sysroot/               # Downloaded on-demand via scripts/download-sysroot.js (git-ignored)
-│       ├── wasm/              # Prebuilt clang.wasm, lld.wasm, memfs.wasm, libraylib.a, libturtle.a, libturtle_raylib.a, sysroot.tar.gz
+│       ├── wasm/              # Prebuilt clang.wasm, lld.wasm, libraylib.a, libturtle.a, libturtle_raylib.a, sysroot.tar.gz
 │       └── include/           # Minimal fallback libc headers, raylib headers & turtle headers
 └── test/
     ├── ar.test.js             # Static archiver creation, extraction, table, and wasm-ld linkage tests
@@ -233,6 +235,23 @@ Agents executing this project should proceed milestone-by-milestone:
   - Update `stddef.h` to use compiler builtin `__builtin_offsetof` and guard `wchar_t` typedef with `#ifndef __cplusplus` for strict C++ standard conformance.
 - Implement TAR symlink unpacking in `src/toolchain/tar.js` and `src/toolchain/wasm-clang.js` to preserve and resolve symlink alias headers (`type 2`) from `sysroot.tar.gz`.
 - Implement comprehensive automated test suite in `test/fileio.test.js` validating all standard access modes (`"r"`, `"w"`, `"a"`, `"rb"`, `"wb"`, `"r+"`), `fseek`/`ftell`, `remove()`, `rename()`, subdirectory access, and C++ `<fstream>`.
+
+
+### Milestone 16: Zero-MemFS Unified VFS WASI Host Architecture
+- Author and enforce `SPECv5.md` as the ground truth architectural specification.
+- Eliminate `memfs.wasm` dependency entirely from both compiler toolchain and runtime worker:
+  - Remove `memfs.wasm` download, loading, instantiation, and MemFS memory bridging.
+  - Implement `src/vfs/wasi-host.js` as the single, canonical, zero-dependency WASI Preview 1 host.
+  - Directly connect WASI system calls (`path_open`, `fd_read`, `fd_write`, `fd_pread`, `fd_pwrite`, `fd_seek`, `fd_filestat_get`, `path_filestat_get`, `fd_readdir`, etc.) to `VFS`.
+- Dynamic inode allocation & non-zero device id:
+  - Generate unique `ino` per path and set `st_dev = 1n` to prevent Clang from mistaking distinct include directories as identical duplicates or looping indefinitely.
+- Preopen isolation:
+  - Toolchain (`clang`, `lld`): preopens `.` (/workspace, fd 3) and `/` (root sysroot, fd 4).
+  - Runtime worker (user binaries): preopens single `.` (/workspace, fd 3) to guarantee relative file accesses resolve cleanly inside `/workspace`.
+- Direct sysroot extraction:
+  - Unpack `sysroot.tar.gz` directly into host `VFS` using `Tar` reader, preserving directory symlinks and header hierarchies.
+- Standalone backport to `clang-wasi`:
+  - Upstream `WasiHost` into `breeze833/clang-wasi` (`src/wasi-host.js`), providing in-memory VFS runners and automated C/C++ verification tests without external WASI runtime dependencies.
 
 ---
 

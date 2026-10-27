@@ -1,4 +1,4 @@
-// Toolchain CLI Driver for gcc / clang / wasm-ld
+// Toolchain CLI Driver for gcc / clang / wasm-ld backed directly by VFS
 
 export function parseCompilerArgs(args, cwd = '/workspace') {
   let stage = null; // 'preprocess' (-E), 'assembly' (-S), 'compile' (-c), or null (link)
@@ -110,14 +110,12 @@ export async function executeGccCommand({
 }) {
   const { stage, outputFile, sources, objects, compilerFlags, linkerFlags } = parseCompilerArgs(args, cwd);
 
-  // Helper to resolve relative path to cwd
   const resolve = (p) => {
     if (!p) return '';
     if (p.startsWith('/')) return p;
     return `${cwd}/${p}`.replace(/\/+/g, '/');
   };
 
-  // Ensure toolchain is initialized before accessing its MemFS
   if (toolchain && typeof toolchain.init === 'function') {
     await toolchain.init();
   }
@@ -140,130 +138,18 @@ export async function executeGccCommand({
       if (lastSlash > 0) {
         const dirPath = norm.substring(0, lastSlash);
         if (!vfs.exists(dirPath)) {
-          try { vfs.mkdir(dirPath, true); } catch {}
-        }
-        if (typeof toolchain.ensureDirectoryInMemfs === 'function') {
-          toolchain.ensureDirectoryInMemfs(dirPath);
+          try { vfs.mkdir(dirPath, true, true); } catch {}
         }
       }
     };
 
-    // Sync VFS workspace files and directories into Toolchain MemFS
-    const allWorkspaceFiles = vfs.getAllFiles('/workspace');
-    const currentWorkspaceFiles = new Set();
-    for (const f of allWorkspaceFiles) {
-      if (f.isDir) {
-        if (typeof toolchain.ensureDirectoryInMemfs === 'function') {
-          toolchain.ensureDirectoryInMemfs(f.path);
-        }
-      } else {
-        await toolchain.syncFileToMemfs(f.path, f.content);
-        currentWorkspaceFiles.add(f.path.replace(/^\/+/, ''));
-      }
-    }
-
-    // Purge any files deleted from VFS /workspace from MemFS
-    if (toolchain.memfs && toolchain.memfs.files && typeof toolchain.removeFileFromMemfs === 'function') {
-      for (const memfsPath of Array.from(toolchain.memfs.files)) {
-        if (memfsPath.startsWith('workspace/') && !currentWorkspaceFiles.has(memfsPath)) {
-          toolchain.removeFileFromMemfs(memfsPath);
-        }
-      }
-    }
-
-    const hasInMemfs = (path) => {
-      if (typeof toolchain.hasFileInMemfs === 'function') {
-        return toolchain.hasFileInMemfs(path);
-      }
-      if (toolchain.memfs && toolchain.memfs.files) {
-        return toolchain.memfs.files.has(path.replace(/^\/+/, ''));
-      }
-      return false;
-    };
-
-    // Sync system headers from VFS /usr/include (e.g. graphics.h, graphics_canvas.h, raylib.h) into MemFS
-    if (vfs.exists('/usr/include')) {
-      const includeFiles = vfs.getAllFiles('/usr/include');
-      for (const f of includeFiles) {
+    // Backward-compatibility hook for mock toolchains that require syncFileToMemfs
+    if (toolchain && typeof toolchain.syncFileToMemfs === 'function' && typeof vfs.listFilesRecursive === 'function') {
+      const workspaceFiles = vfs.listFilesRecursive('/workspace');
+      for (const f of workspaceFiles) {
         if (!f.isDir) {
-          const relPath = f.path.substring('/usr/include/'.length);
-          const memfsHeaderPath = `include/${relPath}`;
-          if (!hasInMemfs(memfsHeaderPath)) {
-            await toolchain.syncFileToMemfs(memfsHeaderPath, f.content);
-          }
+          await toolchain.syncFileToMemfs(f.path, f.content);
         }
-      }
-    }
-
-    // Purge Raylib and Raylib-turtle headers from MemFS if unmounted from VFS
-    const raylibHeaders = [
-      { vfs: '/usr/include/raylib.h', memfs: 'include/raylib.h' },
-      { vfs: '/usr/include/raymath.h', memfs: 'include/raymath.h' },
-      { vfs: '/usr/include/rlgl.h', memfs: 'include/rlgl.h' },
-      { vfs: '/usr/include/turtle_backend_raylib.h', memfs: 'include/turtle_backend_raylib.h' },
-    ];
-    for (const h of raylibHeaders) {
-      if (!vfs.exists(h.vfs) && typeof toolchain.removeFileFromMemfs === 'function' && hasInMemfs(h.memfs)) {
-        toolchain.removeFileFromMemfs(h.memfs);
-      }
-    }
-
-    if (vfs.exists('/usr/lib/libraylib.a')) {
-      if (!hasInMemfs('usr/lib/libraylib.a')) {
-        const libraylib = vfs.readFile('/usr/lib/libraylib.a', false);
-        await toolchain.syncFileToMemfs('usr/lib/libraylib.a', libraylib);
-        await toolchain.syncFileToMemfs('lib/wasm32-wasi/libraylib.a', libraylib);
-        await toolchain.syncFileToMemfs('lib/wasm32-wasip1/libraylib.a', libraylib);
-      }
-    } else {
-      if (typeof toolchain.removeFileFromMemfs === 'function') {
-        if (hasInMemfs('usr/lib/libraylib.a')) {
-          toolchain.removeFileFromMemfs('usr/lib/libraylib.a');
-        }
-        if (hasInMemfs('lib/wasm32-wasi/libraylib.a')) {
-          toolchain.removeFileFromMemfs('lib/wasm32-wasi/libraylib.a');
-        }
-        if (hasInMemfs('lib/wasm32-wasip1/libraylib.a')) {
-          toolchain.removeFileFromMemfs('lib/wasm32-wasip1/libraylib.a');
-        }
-      }
-    }
-
-    if (vfs.exists('/usr/lib/libturtle_raylib.a')) {
-      if (!hasInMemfs('usr/lib/libturtle_raylib.a')) {
-        const libturtleRaylib = vfs.readFile('/usr/lib/libturtle_raylib.a', false);
-        await toolchain.syncFileToMemfs('usr/lib/libturtle_raylib.a', libturtleRaylib);
-        await toolchain.syncFileToMemfs('lib/wasm32-wasi/libturtle_raylib.a', libturtleRaylib);
-        await toolchain.syncFileToMemfs('lib/wasm32-wasip1/libturtle_raylib.a', libturtleRaylib);
-      }
-    } else {
-      if (typeof toolchain.removeFileFromMemfs === 'function') {
-        if (hasInMemfs('usr/lib/libturtle_raylib.a')) {
-          toolchain.removeFileFromMemfs('usr/lib/libturtle_raylib.a');
-        }
-        if (hasInMemfs('lib/wasm32-wasi/libturtle_raylib.a')) {
-          toolchain.removeFileFromMemfs('lib/wasm32-wasi/libturtle_raylib.a');
-        }
-        if (hasInMemfs('lib/wasm32-wasip1/libturtle_raylib.a')) {
-          toolchain.removeFileFromMemfs('lib/wasm32-wasip1/libturtle_raylib.a');
-        }
-      }
-    }
-
-    if (vfs.exists('/usr/lib/libturtle.a')) {
-      if (!hasInMemfs('usr/lib/libturtle.a')) {
-        const libturtle = vfs.readFile('/usr/lib/libturtle.a', false);
-        await toolchain.syncFileToMemfs('usr/lib/libturtle.a', libturtle);
-        await toolchain.syncFileToMemfs('lib/wasm32-wasi/libturtle.a', libturtle);
-        await toolchain.syncFileToMemfs('lib/wasm32-wasip1/libturtle.a', libturtle);
-      }
-    }
-    if (vfs.exists('/usr/lib/libturtle_canvas-wasi.a')) {
-      if (!hasInMemfs('usr/lib/libturtle_canvas-wasi.a')) {
-        const libturtleCanvas = vfs.readFile('/usr/lib/libturtle_canvas-wasi.a', false);
-        await toolchain.syncFileToMemfs('usr/lib/libturtle_canvas-wasi.a', libturtleCanvas);
-        await toolchain.syncFileToMemfs('lib/wasm32-wasi/libturtle_canvas-wasi.a', libturtleCanvas);
-        await toolchain.syncFileToMemfs('lib/wasm32-wasip1/libturtle_canvas-wasi.a', libturtleCanvas);
       }
     }
 
@@ -306,16 +192,10 @@ export async function executeGccCommand({
             compilerFlags,
             { stage: 'preprocess' }
           );
-          if (exitCode === 0) {
-            const outData = toolchain.getFileFromMemfs(outResolved);
-            if (outData) {
-              vfs.writeFile(outResolved, outData);
-            }
-          } else {
+          if (exitCode !== 0) {
             return exitCode;
           }
         } else {
-          // Output to stdout via hostWrite
           const exitCode = await toolchain.compile(
             srcResolved,
             '-',
@@ -363,12 +243,7 @@ export async function executeGccCommand({
             compilerFlags,
             { stage: 'assembly' }
           );
-          if (exitCode === 0) {
-            const outData = toolchain.getFileFromMemfs(outResolved);
-            if (outData) {
-              vfs.writeFile(outResolved, outData);
-            }
-          } else {
+          if (exitCode !== 0) {
             return exitCode;
           }
         }
@@ -399,13 +274,15 @@ export async function executeGccCommand({
           { stage: 'compile' }
         );
 
-        if (exitCode === 0) {
+        if (exitCode !== 0) {
+          return exitCode;
+        }
+
+        if (typeof toolchain.getFileFromMemfs === 'function') {
           const objData = toolchain.getFileFromMemfs(objResolved);
-          if (objData) {
+          if (objData && !vfs.exists(objResolved)) {
             vfs.writeFile(objResolved, objData);
           }
-        } else {
-          return exitCode;
         }
       }
 
@@ -432,9 +309,14 @@ export async function executeGccCommand({
         return exitCode;
       }
 
-      const objData = toolchain.getFileFromMemfs(objResolved);
-      if (objData) {
-        vfs.writeFile(objResolved, objData);
+      if (typeof toolchain.getFileFromMemfs === 'function') {
+        const objData = toolchain.getFileFromMemfs(objResolved);
+        if (objData && !vfs.exists(objResolved)) {
+          vfs.writeFile(objResolved, objData);
+        }
+      }
+
+      if (vfs.exists(objResolved) || (toolchain.getFileFromMemfs && toolchain.getFileFromMemfs(objResolved))) {
         generatedObjects.push(objResolved);
       }
     }
@@ -449,9 +331,9 @@ export async function executeGccCommand({
     ensureParentDir(finalOutput);
     const linkExitCode = await toolchain.link(generatedObjects, finalOutput, linkerFlags);
 
-    if (linkExitCode === 0) {
+    if (linkExitCode === 0 && typeof toolchain.getFileFromMemfs === 'function') {
       const binData = toolchain.getFileFromMemfs(finalOutput);
-      if (binData) {
+      if (binData && !vfs.exists(finalOutput)) {
         vfs.writeFile(finalOutput, binData);
       }
     }

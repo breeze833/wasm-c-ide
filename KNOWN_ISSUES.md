@@ -146,15 +146,17 @@ In standard HTML5 Canvas 2D implementations, modifying individual pixels via `ct
 
 ---
 
-## 8. Toolchain MemFS Defensive Unlinking & Synchronization Invariants
+## 8. Unified VFS WASI Host Architecture (Elimination of memfs.wasm)
 
-### Context & Impact
-`memfs.wasm` acts as the in-memory virtual filesystem for `clang.wasm` and `lld.wasm`. Upstream `clang-wasi` v19.1.0 resolved historical inode capacity limits with dynamic allocation and explicit memory freeing on unlink.
+### Context & Historical Evolution
+Historically, `memfs.wasm` acted as an auxiliary in-memory virtual filesystem for `clang.wasm` and `lld.wasm`. This created a dual-filesystem model requiring synchronization loops before every compiler execution to mirror VFS headers, sources, and objects into `memfs.wasm`, followed by extraction loops copying `.o` and `a.out` binaries back into VFS.
 
-However, strict architectural invariants are maintained across compiler invocations:
-1. **Defensive Truncation Before Unlink**: In `src/toolchain/wasm-clang.js`, `MemFS.removeFile()` always explicitly truncates files to 0 bytes before calling WASI `path_unlink_file` (`AddFileNode(len, 0)` then `path_unlink_file`). This ensures that any recycled node structures begin with clean byte offsets and zeroed allocations.
-2. **Deleted File Purging**: Before each compilation, `executeGccCommand` in `driver.js` compares VFS `/workspace` against MemFS, purging any deleted source or object files so that the linker never encounters stale build artifacts.
-3. **Existence Validation**: `driver.js` validates all input source and object files against the VFS before delegating to Clang/LLD, preventing assertion traps on missing files.
-4. **Header Synchronization**: System headers (`graphics.h`, `graphics_canvas.h`, `turtle.h`, and conditionally `raylib.h`) are automatically synchronized from VFS `/usr/include` into MemFS before toolchain execution, and purged upon unmounting.
+### Architectural Resolution (SPECv5)
+In SPECv5, the dependency on `memfs.wasm` is completely eliminated:
+1. **Direct VFS WASI Host**: `WasiHost` (`src/vfs/wasi-host.js`) implements the standard WASI Preview 1 (`wasi_snapshot_preview1`) interface directly backed by the application `VFS` instance (or Map adapter).
+2. **Zero Inode Reallocation Bugs**: Because files and directories are managed directly as JavaScript `Uint8Array` objects in VFS, historical C pointer/inode offset corruption bugs from `memfs.wasm` are rendered impossible.
+3. **Unified Host Implementation**: Both the toolchain (`clang.wasm`, `lld.wasm`) and the user execution runtime (`runtime.worker.js`) share the identical `WasiHost` implementation, enforcing consistent POSIX semantics, scatter/gather I/O, error codes, and unique inode tracking across compilation and execution.
+4. **Zero-Copy File Operations**: Source files and build artifacts exist directly in VFS without redundant intermediate transfers.
+
 
 

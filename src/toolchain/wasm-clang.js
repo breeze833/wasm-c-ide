@@ -1,367 +1,111 @@
 // WebAssembly Clang and LLD Driver
-// Encapsulates Clang, LLD, MemFS, and Sysroot execution inside the browser
+// Encapsulates Clang, LLD, and Sysroot execution directly backed by VFS via WasiHost
 
 import { Tar } from './tar.js';
+import { WasiHost, ProcExit, ESUCCESS, normalizePath } from '../vfs/wasi-host.js';
 
-class ProcExit extends Error {
-  constructor(code) {
-    super(`process exited with code ${code}.`);
-    this.code = code;
-  }
-}
+export { ProcExit };
 
-class Memory {
-  constructor(memory) {
-    this.memory = memory;
-    this.buffer = this.memory.buffer;
-    this.u8 = new Uint8Array(this.buffer);
-    this.u32 = new Uint32Array(this.buffer);
-  }
-
-  check() {
-    if (this.buffer.byteLength === 0 || this.buffer !== this.memory.buffer) {
-      this.buffer = this.memory.buffer;
-      this.u8 = new Uint8Array(this.buffer);
-      this.u32 = new Uint32Array(this.buffer);
-    }
-  }
-
-  read8(o) { return this.u8[o]; }
-  read32(o) { return this.u32[o >> 2]; }
-  write8(o, v) { this.u8[o] = v; }
-  write32(o, v) { this.u32[o >> 2] = v; }
-  write64(o, vlo, vhi = 0) { this.write32(o, vlo); this.write32(o + 4, vhi); }
-
-  readStr(o, len = -1) {
-    let str = '';
-    const end = len !== -1 ? o + len : this.u8.length;
-    for (let i = o; i < end && this.u8[i] !== 0; ++i) {
-      str += String.fromCharCode(this.u8[i]);
-    }
-    return str;
-  }
-
-  writeStr(o, str) {
-    o += this.write(o, str);
-    this.write8(o, 0);
-    return str.length + 1;
-  }
-
-  write(o, buf) {
-    if (buf instanceof ArrayBuffer) {
-      return this.write(o, new Uint8Array(buf));
-    } else if (typeof buf === 'string') {
-      const encoded = new TextEncoder().encode(buf);
-      return this.write(o, encoded);
-    } else {
-      this.check();
-      const dst = new Uint8Array(this.buffer, o, buf.length);
-      dst.set(buf);
-      return buf.length;
-    }
-  }
-}
-
-const ESUCCESS = 0;
-
+// Backward-compatibility shim for MemFS backed directly by VFS
 export class MemFS {
-  constructor(memfsBuffer, hostWrite = () => {}, instance = null) {
-    this.hostWrite = hostWrite;
-    this.hostMem_ = null;
-    this.directories = new Set(['', '/', '.']);
+  constructor(vfs = null) {
+    this.vfs = vfs;
+    this.directories = new Set(['', '/', '.', 'workspace', 'usr', 'bin']);
     this.files = new Set();
-
-    if (instance) {
-      this.instance = instance;
-    } else {
-      const env = {
-        abort: () => { throw new Error('MemFS abort'); },
-        host_write: this.host_write.bind(this),
-        host_read: this.host_read.bind(this),
-        memfs_log: this.memfs_log.bind(this),
-        copy_in: this.copy_in.bind(this),
-        copy_out: this.copy_out.bind(this),
-      };
-      const module = new WebAssembly.Module(memfsBuffer);
-      this.instance = new WebAssembly.Instance(module, { env });
-    }
-    this.exports = this.instance.exports;
-    this.mem = new Memory(this.exports.memory);
-    this.exports.init();
+    this.hostMem = null;
   }
 
   static async create(memfsBuffer, hostWrite = () => {}) {
-    let memfsInstance;
-    const env = {
-      abort: () => { throw new Error('MemFS abort'); },
-      host_write: (...args) => memfsInstance.host_write(...args),
-      host_read: (...args) => memfsInstance.host_read(...args),
-      memfs_log: (...args) => memfsInstance.memfs_log(...args),
-      copy_in: (...args) => memfsInstance.copy_in(...args),
-      copy_out: (...args) => memfsInstance.copy_out(...args),
-    };
-
-    const res = await WebAssembly.instantiate(memfsBuffer, { env });
-    const instance = res instanceof WebAssembly.Instance ? res : (res.instance || res);
-    memfsInstance = new MemFS(memfsBuffer, hostWrite, instance);
-    return memfsInstance;
-  }
-
-  set hostMem(mem) {
-    this.hostMem_ = mem;
+    return new MemFS();
   }
 
   ensureDirectory(path) {
     const clean = (path || '').replace(/^\/+|\/+$/g, '');
     if (!clean) return;
-    const parts = clean.split('/').filter(Boolean);
-    let current = '';
-    for (const part of parts) {
-      current = current ? `${current}/${part}` : part;
-      if (!this.directories.has(current)) {
-        this.addDirectory(current);
-      }
+    this.directories.add(clean);
+    if (this.vfs && typeof this.vfs.mkdir === 'function') {
+      try { this.vfs.mkdir('/' + clean, true, true); } catch {}
     }
   }
 
   addDirectory(path) {
-    const cleanPath = (path || '').replace(/^\/+|\/+$/g, '');
-    if (!cleanPath || this.directories.has(cleanPath)) return;
-
-    // Ensure parent directory exists first to prevent MemFS lookup.parent abort
-    const lastSlash = cleanPath.lastIndexOf('/');
-    if (lastSlash !== -1) {
-      this.ensureDirectory(cleanPath.substring(0, lastSlash));
-    }
-
-    this.mem.check();
-    this.mem.write(this.exports.GetPathBuf(), cleanPath);
-    this.exports.AddDirectoryNode(cleanPath.length);
-    this.directories.add(cleanPath);
+    this.ensureDirectory(path);
   }
 
   addFile(path, contents) {
-    const cleanPath = (path || '').replace(/^\/+/, '');
-    const lastSlash = cleanPath.lastIndexOf('/');
+    const clean = (path || '').replace(/^\/+/, '');
+    this.files.add(clean);
+    const lastSlash = clean.lastIndexOf('/');
     if (lastSlash !== -1) {
-      this.ensureDirectory(cleanPath.substring(0, lastSlash));
+      this.ensureDirectory(clean.substring(0, lastSlash));
     }
-
-    let data = contents;
-    if (typeof contents === 'string') {
-      data = new TextEncoder().encode(contents);
+    if (this.vfs && typeof this.vfs.writeFile === 'function') {
+      this.vfs.writeFile('/' + clean, contents, Date.now(), true);
     }
-    const length = data instanceof ArrayBuffer
-      ? data.byteLength
-      : data.length;
-    this.mem.check();
-    this.mem.write(this.exports.GetPathBuf(), cleanPath);
-    const inode = this.exports.AddFileNode(cleanPath.length, length);
-    const addr = this.exports.GetFileNodeAddress(inode);
-    this.mem.check();
-    this.mem.write(addr, data);
-    this.files.add(cleanPath);
   }
 
   hasFile(path) {
-    const cleanPath = (path || '').replace(/^\/+/, '');
-    return this.files.has(cleanPath);
+    const clean = (path || '').replace(/^\/+/, '');
+    if (this.files.has(clean)) return true;
+    if (this.vfs && typeof this.vfs.exists === 'function') {
+      return this.vfs.exists('/' + clean);
+    }
+    return false;
   }
 
   getFileContents(path) {
-    try {
-      const cleanPath = (path || '').replace(/^\/+/, '');
-      this.mem.check();
-      this.mem.write(this.exports.GetPathBuf(), cleanPath);
-      const inode = this.exports.FindNode(cleanPath.length);
-      if (!inode) return null;
-      const addr = this.exports.GetFileNodeAddress(inode);
-      const size = this.exports.GetFileNodeSize(inode);
-      return new Uint8Array(this.mem.buffer.slice(addr, addr + size));
-    } catch {
-      // FindNode asserts lookup.node on missing files and traps with unreachable; catch cleanly
-      return null;
+    const clean = (path || '').replace(/^\/+/, '');
+    if (this.vfs && typeof this.vfs.exists === 'function') {
+      if (!this.vfs.exists('/' + clean)) return null;
+      return this.vfs.readFile('/' + clean, false);
     }
+    return null;
   }
 
   removeFile(path) {
-    try {
-      const cleanPath = (path || '').replace(/^\/+/, '');
-      if (!cleanPath) return false;
-
-      // Conceal memfs.wasm inode reallocation bug:
-      // Always truncate the node to 0 bytes before unlinking. This resets its buffer
-      // and internal write offset so that if the inode is reused by Clang/WASI path_open,
-      // it writes from byte 0 cleanly instead of corrupting binary headers.
-      try {
-        this.addFile(cleanPath, new Uint8Array(0));
-      } catch {
-        // Ignore if file could not be truncated
-      }
-
-      const prevHostMem = this.hostMem_;
-      this.hostMem_ = null;
-      try {
-        this.mem.check();
-        const pathBuf = this.exports.GetPathBuf();
-        this.mem.write(pathBuf, cleanPath);
-        const res = this.exports.path_unlink_file(3, pathBuf, cleanPath.length);
-        this.files.delete(cleanPath);
-        return res === ESUCCESS;
-      } finally {
-        this.hostMem_ = prevHostMem;
-      }
-    } catch {
-      const cleanPath = (path || '').replace(/^\/+/, '');
-      this.files.delete(cleanPath);
-      return false;
+    const clean = (path || '').replace(/^\/+/, '');
+    this.files.delete(clean);
+    if (this.vfs && typeof this.vfs.exists === 'function' && this.vfs.exists('/' + clean)) {
+      try { this.vfs.remove('/' + clean, false, true); } catch {}
+      return true;
     }
-  }
-
-  host_write(fd, iovs, iovs_len, nwritten_out) {
-    this.hostMem_.check();
-    let size = 0;
-    let str = '';
-    for (let i = 0; i < iovs_len; ++i) {
-      const buf = this.hostMem_.read32(iovs);
-      iovs += 4;
-      const len = this.hostMem_.read32(iovs);
-      iovs += 4;
-      str += this.hostMem_.readStr(buf, len);
-      size += len;
-    }
-    this.hostMem_.write32(nwritten_out, size);
-    this.hostWrite(str);
-    return ESUCCESS;
-  }
-
-  host_read(fd, iovs, iovs_len, nread) {
-    this.hostMem_.check();
-    this.hostMem_.write32(nread, 0);
-    return ESUCCESS;
-  }
-
-  memfs_log(buf, len) {
-    this.mem.check();
-    console.log('[memfs]', this.mem.readStr(buf, len));
-  }
-
-  copy_out(clang_dst, memfs_src, size) {
-    const targetMem = this.hostMem_ || this.mem;
-    targetMem.check();
-    const dst = new Uint8Array(targetMem.buffer, clang_dst, size);
-    this.mem.check();
-    const src = new Uint8Array(this.mem.buffer, memfs_src, size);
-    dst.set(src);
-  }
-
-  copy_in(memfs_dst, clang_src, size) {
-    this.mem.check();
-    const dst = new Uint8Array(this.mem.buffer, memfs_dst, size);
-    const sourceMem = this.hostMem_ || this.mem;
-    sourceMem.check();
-    const src = new Uint8Array(sourceMem.buffer, clang_src, size);
-    dst.set(src);
+    return false;
   }
 }
 
 export class AppInstance {
-  constructor(memfs, name, ...args) {
+  constructor(wasiHost, name, ...args) {
     this.argv = [name, ...args];
     this.environ = { USER: 'student', PWD: '/workspace' };
-    this.memfs = memfs;
+    this.wasiHost = wasiHost;
+    this.wasiHost.argv = this.argv;
+    this.wasiHost.environ = this.environ;
     this.instance = null;
     this.exports = null;
-    this.mem = null;
   }
 
   _buildImports() {
-    const wasi_unstable = {
-      proc_exit: (code) => { throw new ProcExit(code); },
-      environ_sizes_get: (count_out, size_out) => {
-        this.mem.check();
-        let size = 0;
-        const keys = Object.keys(this.environ);
-        for (const k of keys) {
-          size += k.length + this.environ[k].length + 2;
-        }
-        this.mem.write64(count_out, keys.length);
-        this.mem.write64(size_out, size);
-        return ESUCCESS;
-      },
-      environ_get: (ptrs, buf) => {
-        this.mem.check();
-        for (const k of Object.keys(this.environ)) {
-          this.mem.write32(ptrs, buf);
-          ptrs += 4;
-          buf += this.mem.writeStr(buf, `${k}=${this.environ[k]}`);
-        }
-        this.mem.write32(ptrs, 0);
-        return ESUCCESS;
-      },
-      args_sizes_get: (argc_out, size_out) => {
-        this.mem.check();
-        let size = 0;
-        for (const a of this.argv) {
-          size += a.length + 1;
-        }
-        this.mem.write64(argc_out, this.argv.length);
-        this.mem.write64(size_out, size);
-        return ESUCCESS;
-      },
-      args_get: (ptrs, buf) => {
-        this.mem.check();
-        for (const a of this.argv) {
-          this.mem.write32(ptrs, buf);
-          ptrs += 4;
-          buf += this.mem.writeStr(buf, a);
-        }
-        this.mem.write32(ptrs, 0);
-        return ESUCCESS;
-      },
-      random_get: (buf, len) => {
-        this.mem.check();
-        const data = new Uint8Array(this.mem.buffer, buf, len);
-        crypto.getRandomValues(data);
-        return ESUCCESS;
-      },
-      clock_time_get: (id, precision, time_out) => {
-        this.mem.check();
-        const now = BigInt(Date.now()) * 1000000n;
-        const low = Number(now & 0xFFFFFFFFn);
-        const high = Number((now >> 32n) & 0xFFFFFFFFn);
-        this.mem.write64(time_out, low, high);
-        return ESUCCESS;
-      },
-      poll_oneoff: () => ESUCCESS,
-      path_link: () => 52,
-    };
-
-    // Overlay memfs WASI filesystem operations
-    Object.assign(wasi_unstable, this.memfs.exports);
-
+    this.wasiHost.setMemory(() => (this.instance ? this.instance.exports.memory : null));
+    const wasi = this.wasiHost.getImports();
     return {
-      wasi_unstable,
-      wasi_snapshot_preview1: wasi_unstable,
-      env: {},
+      wasi_snapshot_preview1: wasi,
+      wasi_unstable: wasi,
+      env: new Proxy({}, {
+        get(t, p) {
+          if (p in t) return t[p];
+          return () => 0;
+        }
+      }),
     };
   }
 
-  _attachInstance(instance) {
-    this.instance = instance;
-    this.exports = this.instance.exports;
-    this.mem = this.exports.memory ? new Memory(this.exports.memory) : null;
-    if (this.mem) {
-      this.memfs.hostMem = this.mem;
-    }
-  }
-
-  static async create(module, memfs, name, ...args) {
-    const app = new AppInstance(memfs, name, ...args);
+  static async create(module, wasiHost, name, ...args) {
+    const app = new AppInstance(wasiHost, name, ...args);
     const imports = app._buildImports();
     const res = await WebAssembly.instantiate(module, imports);
     const instance = res instanceof WebAssembly.Instance ? res : (res.instance || res);
-    app._attachInstance(instance);
+    app.instance = instance;
+    app.exports = instance.exports;
     return app;
   }
 
@@ -393,6 +137,9 @@ export class WasmToolchain {
   }
 
   ensureDirectoryInMemfs(dirPath) {
+    if (this.vfs && typeof this.vfs.mkdir === 'function') {
+      try { this.vfs.mkdir(dirPath, true, true); } catch {}
+    }
     if (this.memfs) {
       this.memfs.ensureDirectory(dirPath);
     }
@@ -403,6 +150,7 @@ export class WasmToolchain {
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
+      this.memfs = new MemFS(this.vfs);
       const fetchSysroot = async () => {
         try {
           const res = await fetch(`${this.basePath}/sysroot.tar.gz`);
@@ -421,26 +169,22 @@ export class WasmToolchain {
         return await fetch(`${this.basePath}/sysroot.tar`).then(r => r.arrayBuffer());
       };
 
-      const [memfsBuf, sysrootTarBuf] = await Promise.all([
-        fetch(`${this.basePath}/memfs.wasm`).then(r => r.arrayBuffer()),
-        fetchSysroot(),
-      ]);
+      const sysrootTarBuf = await fetchSysroot();
 
-      this.memfs = await MemFS.create(memfsBuf, (str) => {
-        if (typeof this.hostWrite === 'function') {
-          this.hostWrite(str);
-        }
-      });
-
-      // Ensure root workspace and system directories exist in MemFS
-      this.memfs.ensureDirectory('workspace');
-      this.memfs.ensureDirectory('workspace/src');
-      this.memfs.ensureDirectory('workspace/include');
-      this.memfs.ensureDirectory('workspace/build');
-      this.memfs.ensureDirectory('usr');
-      this.memfs.ensureDirectory('usr/lib');
-      this.memfs.ensureDirectory('usr/bin');
-      this.memfs.ensureDirectory('bin');
+      // Ensure root workspace and system directories exist in VFS
+      if (this.vfs) {
+        this.vfs.mkdir('/workspace', true, true);
+        this.vfs.mkdir('/workspace/src', true, true);
+        this.vfs.mkdir('/workspace/include', true, true);
+        this.vfs.mkdir('/workspace/build', true, true);
+        this.vfs.mkdir('/usr', true, true);
+        this.vfs.mkdir('/usr/lib', true, true);
+        this.vfs.mkdir('/usr/include', true, true);
+        this.vfs.mkdir('/usr/bin', true, true);
+        this.vfs.mkdir('/bin', true, true);
+        this.vfs.mkdir('/include', true, true);
+        this.vfs.mkdir('/lib', true, true);
+      }
 
       onProgress('Unpacking standard library headers and runtime...');
       const tar = new Tar(sysrootTarBuf);
@@ -449,36 +193,36 @@ export class WasmToolchain {
         const cleanName = (entry.filename || '').replace(/^\.?\/+/, '');
         if (!cleanName) continue;
         if (entry.type === '5') {
-          this.memfs.addDirectory(cleanName);
+          if (this.vfs) this.vfs.mkdir('/' + cleanName, true, true);
+          if (this.memfs) this.memfs.addDirectory(cleanName);
         } else if (entry.contents) {
-          this.memfs.addFile(cleanName, entry.contents);
+          if (this.vfs) {
+            this.vfs.writeFile('/' + cleanName, entry.contents, Date.now(), true);
 
-          // Mirror standard libraries to /usr/lib in MemFS and VFS
-          if (cleanName.startsWith('lib/wasm32-wasip1/')) {
-            const libName = cleanName.substring('lib/wasm32-wasip1/'.length);
-            if (libName) {
-              this.memfs.addFile(`usr/lib/${libName}`, entry.contents);
-              this.memfs.addFile(`lib/wasm32-wasi/${libName}`, entry.contents);
-              if (this.vfs) {
+            // Mirror standard libraries to /usr/lib and /lib/wasm32-wasi in VFS
+            if (cleanName.startsWith('lib/wasm32-wasip1/')) {
+              const libName = cleanName.substring('lib/wasm32-wasip1/'.length);
+              if (libName) {
                 this.vfs.writeFile(`/usr/lib/${libName}`, entry.contents, Date.now(), true);
+                this.vfs.writeFile(`/lib/wasm32-wasi/${libName}`, entry.contents, Date.now(), true);
+              }
+            } else if (cleanName.startsWith('lib/wasm32-wasi/')) {
+              const libName = cleanName.substring('lib/wasm32-wasi/'.length);
+              if (libName) {
+                this.vfs.writeFile(`/usr/lib/${libName}`, entry.contents, Date.now(), true);
+                this.vfs.writeFile(`/lib/wasm32-wasip1/${libName}`, entry.contents, Date.now(), true);
               }
             }
-          } else if (cleanName.startsWith('lib/wasm32-wasi/')) {
-            const libName = cleanName.substring('lib/wasm32-wasi/'.length);
-            if (libName) {
-              this.memfs.addFile(`usr/lib/${libName}`, entry.contents);
-              this.memfs.addFile(`lib/wasm32-wasip1/${libName}`, entry.contents);
-              if (this.vfs) {
-                this.vfs.writeFile(`/usr/lib/${libName}`, entry.contents, Date.now(), true);
-              }
-            }
+          }
+          if (this.memfs) {
+            this.memfs.addFile(cleanName, entry.contents);
           }
         }
       }
 
       // Resolve and unpack symlinks (entry.type === '2')
       for (const entry of entries) {
-        if (entry.type === '2' && entry.linkname) {
+        if (entry.type === '2' && entry.linkname && this.vfs) {
           const cleanName = (entry.filename || '').replace(/^\.?\/+/, '');
           if (!cleanName) continue;
           const lastSlash = cleanName.lastIndexOf('/');
@@ -487,45 +231,40 @@ export class WasmToolchain {
           if (parentDir && !entry.linkname.startsWith('/')) {
             targetPath = `${parentDir}/${targetPath}`;
           }
-          const cleanTarget = targetPath.replace(/^\/+/, '');
-          if (this.memfs.hasFile(cleanTarget)) {
-            const contents = this.memfs.getFileContents(cleanTarget);
-            if (contents) {
-              this.memfs.addFile(cleanName, contents);
+          const cleanTarget = '/' + targetPath.replace(/^\/+/, '');
+          if (this.vfs.exists(cleanTarget)) {
+            const stat = this.vfs.stat(cleanTarget);
+            if (stat && stat.isDir) {
+              this.vfs.mkdir('/' + cleanName, true, true);
+              if (this.memfs) this.memfs.addDirectory(cleanName);
+            } else {
+              const contents = this.vfs.readFile(cleanTarget, false);
+              if (contents) {
+                this.vfs.writeFile('/' + cleanName, contents, Date.now(), true);
+                if (this.memfs) this.memfs.addFile(cleanName, contents);
+              }
             }
           }
         }
       }
 
-      // Mirror system headers from VFS /usr/include (e.g. graphics.h, graphics_canvas.h, turtle.h) into MemFS include/
-      if (this.vfs && typeof this.vfs.exists === 'function' && this.vfs.exists('/usr/include')) {
-        const includeFiles = this.vfs.getAllFiles('/usr/include');
-        for (const f of includeFiles) {
-          if (!f.isDir) {
-            const relPath = f.path.substring('/usr/include/'.length);
-            const memfsHeaderPath = `include/${relPath}`;
-            if (!this.memfs.hasFile(memfsHeaderPath)) {
-              this.memfs.addFile(memfsHeaderPath, f.content);
-            }
-          }
-        }
-      }
-
-      // Preload default libturtle.a into MemFS and VFS
+      // Preload default libturtle.a into VFS
       try {
         const turtleRes = await fetch(`${this.basePath}/libturtle.a`);
         if (turtleRes && turtleRes.ok) {
           const turtleBuf = await turtleRes.arrayBuffer();
           const turtleU8 = new Uint8Array(turtleBuf);
-          this.memfs.addFile('usr/lib/libturtle.a', turtleU8);
-          this.memfs.addFile('usr/lib/libturtle_canvas-wasi.a', turtleU8);
-          this.memfs.addFile('lib/wasm32-wasi/libturtle.a', turtleU8);
-          this.memfs.addFile('lib/wasm32-wasi/libturtle_canvas-wasi.a', turtleU8);
-          this.memfs.addFile('lib/wasm32-wasip1/libturtle.a', turtleU8);
-          this.memfs.addFile('lib/wasm32-wasip1/libturtle_canvas-wasi.a', turtleU8);
           if (this.vfs) {
             this.vfs.writeFile('/usr/lib/libturtle.a', turtleU8, Date.now(), true);
             this.vfs.writeFile('/usr/lib/libturtle_canvas-wasi.a', turtleU8, Date.now(), true);
+            this.vfs.writeFile('/lib/wasm32-wasip1/libturtle.a', turtleU8, Date.now(), true);
+            this.vfs.writeFile('/lib/wasm32-wasip1/libturtle_canvas-wasi.a', turtleU8, Date.now(), true);
+            this.vfs.writeFile('/lib/wasm32-wasi/libturtle.a', turtleU8, Date.now(), true);
+            this.vfs.writeFile('/lib/wasm32-wasi/libturtle_canvas-wasi.a', turtleU8, Date.now(), true);
+          }
+          if (this.memfs) {
+            this.memfs.addFile('usr/lib/libturtle.a', turtleU8);
+            this.memfs.addFile('usr/lib/libturtle_canvas-wasi.a', turtleU8);
           }
         }
       } catch {}
@@ -559,40 +298,66 @@ export class WasmToolchain {
     if (!this.initialized) {
       await this.init();
     }
-    const cleanPath = path.replace(/^\/+/, '');
-    this.memfs.addFile(cleanPath, content);
+    const cleanPath = (path || '').replace(/^\/+/, '');
+    if (this.vfs && typeof this.vfs.writeFile === 'function') {
+      this.vfs.writeFile('/' + cleanPath, content, Date.now(), true);
+    }
+    if (this.memfs) {
+      this.memfs.addFile(cleanPath, content);
+      this.memfs.addFile(path, content);
+    }
   }
 
   getFileFromMemfs(path) {
-    if (!this.memfs) return null;
-    const cleanPath = path.replace(/^\/+/, '');
-    return this.memfs.getFileContents(cleanPath);
+    const cleanPath = (path || '').replace(/^\/+/, '');
+    if (this.vfs && typeof this.vfs.exists === 'function') {
+      if (this.vfs.exists('/' + cleanPath)) return this.vfs.readFile('/' + cleanPath, false);
+      if (this.vfs.exists(path)) return this.vfs.readFile(path, false);
+    }
+    if (this.memfs && typeof this.memfs.getFileContents === 'function') {
+      const res = this.memfs.getFileContents(cleanPath);
+      if (res !== undefined && res !== null) return res;
+      return this.memfs.getFileContents(path);
+    }
+    return null;
   }
 
   hasFileInMemfs(path) {
-    if (!this.memfs) return false;
-    const cleanPath = path.replace(/^\/+/, '');
-    return this.memfs.hasFile(cleanPath);
+    const cleanPath = (path || '').replace(/^\/+/, '');
+    if (this.vfs && typeof this.vfs.exists === 'function') {
+      if (this.vfs.exists('/' + cleanPath) || this.vfs.exists(path)) return true;
+    }
+    if (this.memfs && typeof this.memfs.hasFile === 'function') {
+      return this.memfs.hasFile(cleanPath) || this.memfs.hasFile(path);
+    }
+    return false;
   }
 
   removeFileFromMemfs(path) {
-    if (!this.memfs) return false;
-    const cleanPath = path.replace(/^\/+/, '');
-    return this.memfs.removeFile(cleanPath);
+    const cleanPath = normalizePath(path);
+    if (this.vfs && typeof this.vfs.exists === 'function' && this.vfs.exists(cleanPath)) {
+      try { this.vfs.remove(cleanPath, false, true); } catch {}
+    }
+    if (this.memfs) {
+      this.memfs.removeFile(cleanPath);
+    }
+    return true;
   }
 
   async compile(sourcePath, objPath, mode = 'c', customFlags = [], options = {}) {
     await this.init();
     const clang = await this._getClang();
 
-    const cleanSrc = sourcePath.replace(/^\/+/, '');
-    const cleanObj = objPath === '-' ? '-' : objPath.replace(/^\/+/, '');
+    const cleanSrc = sourcePath.startsWith('/') ? sourcePath : `/${sourcePath}`;
+    const cleanObj = objPath === '-' ? '-' : (objPath.startsWith('/') ? objPath : `/${objPath}`);
 
-    // Ensure output directory exists in MemFS before compilation (if not writing to stdout '-')
-    if (cleanObj !== '-') {
+    if (cleanObj !== '-' && this.vfs) {
       const lastSlash = cleanObj.lastIndexOf('/');
-      if (lastSlash !== -1) {
-        this.memfs.ensureDirectory(cleanObj.substring(0, lastSlash));
+      if (lastSlash > 0) {
+        const dir = cleanObj.substring(0, lastSlash);
+        if (!this.vfs.exists(dir)) {
+          try { this.vfs.mkdir(dir, true, true); } catch {}
+        }
       }
     }
 
@@ -607,11 +372,12 @@ export class WasmToolchain {
       '-isysroot', '/',
       '-internal-isystem', '/include',
       '-internal-isystem', '/include/wasm32-wasip1',
+      '-internal-isystem', '/usr/include',
       '-internal-isystem', '/lib/clang/19/include',
       '-internal-isystem', '/lib/clang/19.1.0/include',
       '-internal-isystem', '/lib/clang/8.0.1/include',
-      '-I/workspace/include',
-      '-I/workspace',
+      '-I', '/workspace/include',
+      '-I', '/workspace',
       '-ferror-limit', '19',
       '-fmessage-length=80',
       '-fcolor-diagnostics',
@@ -623,6 +389,8 @@ export class WasmToolchain {
     for (const flag of customFlags) {
       if (flag === '-fPIC' || flag === '-fpic' || flag === '-fPIE' || flag === '-fpie') {
         isPic = true;
+      } else if (flag.startsWith('-I') && flag.length > 2) {
+        processedFlags.push('-I', flag.substring(2));
       } else {
         processedFlags.push(flag);
       }
@@ -631,32 +399,37 @@ export class WasmToolchain {
       args.push('-mrelocation-model', 'pic', '-pic-level', '2');
     }
 
-    // Check if customFlags has an optimization flag like -O0, -O1, -O2, -O3, -Os, -Oz
     const hasOptFlag = processedFlags.some(f => /^-O[0-3sz]?$/.test(f));
     if (!hasOptFlag) {
       args.push('-O2');
     }
 
     if (mode === 'c') {
-      // Pure C mode: Force C11 and strict pedantic errors
       args.push('-x', 'c', '-std=c11', '-pedantic-errors', '-Wall', '-Wextra');
     } else {
-      // C++ mode: C++17
       args.push('-x', 'c++', '-std=c++17', '-Wall', '-Wextra');
     }
 
     args.push(...processedFlags);
     args.push('-o', cleanObj, cleanSrc);
 
+    const wasiHost = new WasiHost({
+      vfs: this.vfs,
+      cwd: '/workspace',
+      stdout: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+      stderr: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+    });
+
     try {
-      const app = await AppInstance.create(clang, this.memfs, 'clang', ...args);
+      const app = await AppInstance.create(clang, wasiHost, 'clang', ...args);
       const exitCode = app.run();
-      if (exitCode === 0 && this.memfs && cleanObj !== '-') {
-        this.memfs.files.add(cleanObj);
-      }
       return exitCode;
     } finally {
-      this.memfs.hostMem = null;
+      wasiHost.setMemory(null);
     }
   }
 
@@ -664,21 +437,25 @@ export class WasmToolchain {
     await this.init();
     const lld = await this._getLld();
 
-    const cleanObjs = objPaths.map(p => p.replace(/^\/+/, ''));
-    const cleanOut = outputPath.replace(/^\/+/, '');
+    const cleanObjs = objPaths.map(p => (p.startsWith('/') ? p : `/${p}`));
+    const cleanOut = outputPath.startsWith('/') ? outputPath : `/${outputPath}`;
 
-    // Ensure output directory exists in MemFS before linking
-    const lastSlash = cleanOut.lastIndexOf('/');
-    if (lastSlash !== -1) {
-      this.memfs.ensureDirectory(cleanOut.substring(0, lastSlash));
+    if (this.vfs) {
+      const lastSlash = cleanOut.lastIndexOf('/');
+      if (lastSlash > 0) {
+        const dir = cleanOut.substring(0, lastSlash);
+        if (!this.vfs.exists(dir)) {
+          try { this.vfs.mkdir(dir, true, true); } catch {}
+        }
+      }
     }
 
     const isShared = customFlags.includes('-shared') || customFlags.includes('--shared') || cleanOut.endsWith('.so');
 
     const stackSize = 1024 * 1024;
-    const libdir = (this.memfs && this.memfs.hasFile('lib/wasm32-wasip1/crt1.o'))
-      ? 'lib/wasm32-wasip1'
-      : 'lib/wasm32-wasi';
+    const libdir = (this.vfs && this.vfs.exists('/lib/wasm32-wasip1/crt1.o'))
+      ? '/lib/wasm32-wasip1'
+      : '/lib/wasm32-wasi';
     const crt1 = `${libdir}/crt1.o`;
 
     const args = [
@@ -690,11 +467,11 @@ export class WasmToolchain {
       args.push(
         '--shared',
         `-L${libdir}`,
-        `-Llib/wasm32-wasip1`,
-        `-Llib/wasm32-wasi`,
-        `-Llib/clang/19/lib/wasm32-unknown-wasip1`,
-        `-Llib/clang/19/lib/wasm32-unknown-wasi`,
-        `-Lusr/lib`,
+        `-L/lib/wasm32-wasip1`,
+        `-L/lib/wasm32-wasi`,
+        `-L/lib/clang/19/lib/wasm32-unknown-wasip1`,
+        `-L/lib/clang/19/lib/wasm32-unknown-wasi`,
+        `-L/usr/lib`,
         ...cleanObjs,
         '-lc',
         '-lclang_rt.builtins',
@@ -705,11 +482,11 @@ export class WasmToolchain {
       args.push(
         '-z', `stack-size=${stackSize}`,
         `-L${libdir}`,
-        `-Llib/wasm32-wasip1`,
-        `-Llib/wasm32-wasi`,
-        `-Llib/clang/19/lib/wasm32-unknown-wasip1`,
-        `-Llib/clang/19/lib/wasm32-unknown-wasi`,
-        `-Lusr/lib`,
+        `-L/lib/wasm32-wasip1`,
+        `-L/lib/wasm32-wasi`,
+        `-L/lib/clang/19/lib/wasm32-unknown-wasip1`,
+        `-L/lib/clang/19/lib/wasm32-unknown-wasi`,
+        `-L/usr/lib`,
         crt1,
         ...cleanObjs,
         '-lc',
@@ -721,15 +498,23 @@ export class WasmToolchain {
       );
     }
 
+    const wasiHost = new WasiHost({
+      vfs: this.vfs,
+      cwd: '/workspace',
+      stdout: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+      stderr: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+    });
+
     try {
-      const app = await AppInstance.create(lld, this.memfs, 'wasm-ld', ...args);
+      const app = await AppInstance.create(lld, wasiHost, 'wasm-ld', ...args);
       const exitCode = app.run();
-      if (exitCode === 0 && this.memfs) {
-        this.memfs.files.add(cleanOut);
-      }
       return exitCode;
     } finally {
-      this.memfs.hostMem = null;
+      wasiHost.setMemory(null);
     }
   }
 }
