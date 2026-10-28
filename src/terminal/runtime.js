@@ -118,6 +118,8 @@ export class RuntimeManager {
           } else if (!options.captureStdout) {
             this.terminal.write(msg.data.replace(/\r?\n/g, '\r\n'));
           }
+        } else if (msg.type === 'stdin_request') {
+          this.isWaitingForStdin = true;
         } else if (msg.type === 'graphics_init') {
           if (this.graphicsWindow) {
             this.graphicsWindow.open(msg.width, msg.height, msg.title);

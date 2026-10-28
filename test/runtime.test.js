@@ -188,4 +188,42 @@ console.log('✓ Process EOF termination state verified');
   console.log('✓ Preloaded stdinBytes buffer and EOF verified');
 }
 
-console.log('--- ALL RUNTIME TESTS PASSED ---');
+// Test 8: RuntimeManager stdin_request event and handleTerminalInput routing
+{
+  import('../src/terminal/runtime.js').then(({ RuntimeManager }) => {
+    let termWrites = '';
+    const mockTerminal = {
+      write(s) { termWrites += s; },
+      writeln(s) { termWrites += s + '\n'; },
+    };
+
+    const rm = new RuntimeManager(mockTerminal);
+    rm.isRunning = true;
+    rm.isWaitingForStdin = false;
+
+    // Before stdin_request, handleTerminalInput must return false
+    assert.strictEqual(rm.handleTerminalInput('a'), false);
+
+    // Simulate worker sending stdin_request
+    rm.isWaitingForStdin = true;
+
+    // Typing printable characters echoes to terminal and buffers
+    assert.strictEqual(rm.handleTerminalInput('h'), true);
+    assert.strictEqual(rm.handleTerminalInput('i'), true);
+    assert.strictEqual(rm.stdinLineBuffer, 'hi');
+    assert.strictEqual(termWrites, 'hi');
+
+    // Backspace deletes char and echoes \b \b
+    assert.strictEqual(rm.handleTerminalInput('\x7f'), true);
+    assert.strictEqual(rm.stdinLineBuffer, 'h');
+    assert.strictEqual(termWrites, 'hi\b \b');
+
+    // Enter commits line and resets isWaitingForStdin
+    assert.strictEqual(rm.handleTerminalInput('\r'), true);
+    assert.strictEqual(rm.stdinLineBuffer, '');
+    assert.strictEqual(rm.isWaitingForStdin, false);
+
+    console.log('✓ RuntimeManager stdin_request and handleTerminalInput verified');
+    console.log('--- ALL RUNTIME TESTS PASSED ---');
+  });
+}
