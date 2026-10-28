@@ -13,7 +13,7 @@ RangeError: WebAssembly.compile is disallowed on the main thread, if the buffer 
 ```
 Or synchronously via `new WebAssembly.Module(buffer)`.
 
-Because the IDE's toolchain components are substantial (`clang.wasm` ~50 MB, `lld.wasm` ~25 MB, `memfs.wasm` ~1.5 MB), any attempt to compile or instantiate them synchronously on the UI thread causes an immediate fatal `RangeError`.
+Because the IDE's toolchain module is substantial (`llvm-box.wasm` ~60 MB), any attempt to compile or instantiate it synchronously on the UI thread causes an immediate fatal `RangeError`.
 
 ### Architectural Invariant & Resolution
 All toolchain modules must always be compiled and instantiated using asynchronous methods:
@@ -21,7 +21,7 @@ All toolchain modules must always be compiled and instantiated using asynchronou
 const module = await WebAssembly.compile(buffer);
 const instance = await WebAssembly.instantiate(module, imports);
 ```
-Or offloaded entirely to Web Workers. In `src/toolchain/wasm-clang.js`, `MemFS.create()` and `AppInstance.create()` strictly use asynchronous `WebAssembly.instantiate` / `WebAssembly.compile`.
+Or offloaded entirely to Web Workers. In `src/toolchain/wasm-clang.js`, `AppInstance.create()` strictly uses asynchronous `WebAssembly.instantiate` / `WebAssembly.compile`.
 
 ---
 
@@ -155,7 +155,7 @@ Historically, `memfs.wasm` acted as an auxiliary in-memory virtual filesystem fo
 In SPECv5, the dependency on `memfs.wasm` is completely eliminated:
 1. **Direct VFS WASI Host**: `WasiHost` (`src/vfs/wasi-host.js`) implements the standard WASI Preview 1 (`wasi_snapshot_preview1`) interface directly backed by the application `VFS` instance (or Map adapter).
 2. **Zero Inode Reallocation Bugs**: Because files and directories are managed directly as JavaScript `Uint8Array` objects in VFS, historical C pointer/inode offset corruption bugs from `memfs.wasm` are rendered impossible.
-3. **Unified Host Implementation**: Both the toolchain (`clang.wasm`, `lld.wasm`) and the user execution runtime (`runtime.worker.js`) share the identical `WasiHost` implementation, enforcing consistent POSIX semantics, scatter/gather I/O, error codes, and unique inode tracking across compilation and execution.
+3. **Unified Host Implementation**: Both the toolchain (`llvm-box.wasm`) and the user execution runtime (`runtime.worker.js`) share the identical `WasiHost` implementation, enforcing consistent POSIX semantics, scatter/gather I/O, error codes, and unique inode tracking across compilation and execution.
 4. **Zero-Copy File Operations**: Source files and build artifacts exist directly in VFS without redundant intermediate transfers.
 
 

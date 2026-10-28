@@ -104,8 +104,7 @@ This IDE is specifically engineered for **students and systems programming educa
 - **WebAssembly Shared Objects (`.so`)**:
   - Position-Independent Code: `-fPIC` and `-fpic` flags compile code with position-independent relocation records.
   - Shared library creation: `gcc -shared -fPIC src/math.c -o build/libmath.so` (and `g++ -shared -fPIC ...` for C++) generates standard WebAssembly dynamic libraries with `dylink.0` custom sections.
-  - Dynamic linking: Link executables against `.so` shared libraries directly (`gcc src/main.c build/libmath.so -o a.out`) or via dynamic library search paths (`-Bdynamic -Lbuild -lmath`).
-- **Native WASI Preview 1 MemFS Layer**: Built upstream in `clang-wasi` with dynamic node allocation supporting 4,300+ standard library files, explicit deallocation on unlink, standard WASI Preview 1 struct alignment, and safe non-trapping lookups.
+- **Zero-MemFS Direct VFS Architecture**: `memfs.wasm` is completely eliminated. The unified `WasiHost` (`src/vfs/wasi-host.js`) directly bridges `llvm-box.wasm` (`clang`, `wasm-ld`, `llvm-ar`) and runtime binaries (`a.out`) to the application `VFS`, eliminating double-buffering, memory limits, and intermediate file copying.
 
 ### 4. Dual Build Systems (Shell Script & Makefile)
 - **Track 1: Shell Script (`build.sh`)**:
@@ -213,7 +212,7 @@ The repository includes a ready-to-run suite of single-file C programs in the `e
 - **Installable Desktop/Mobile App**: Certified PWA with Web App Manifest (`manifest.webmanifest`), dark theme colors, and icons.
 - **In-App Install Prompt**: Automatically reveals an **Install** button in the header toolbar when the browser detects installability.
 - **100% Offline Capability**:
-  - Unified Service Worker caches App Shell, fonts, editor modules, WebAssembly compiler binaries (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar.gz`), Raylib assets, and Turtle static archives.
+  - Unified Service Worker caches App Shell, fonts, editor modules, WebAssembly compiler binaries (`llvm-box.wasm`, `sysroot.tar.gz`), Raylib assets, and Turtle static archives.
   - Seamless offline execution with retained `COOP: same-origin` and `COEP: require-corp` isolation headers so `SharedArrayBuffer` remains operational without an internet connection.
   - Automatic connection status notifications when transitioning between online and offline modes.
 

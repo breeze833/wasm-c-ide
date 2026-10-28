@@ -253,6 +253,15 @@ Agents executing this project should proceed milestone-by-milestone:
 - Standalone backport to `clang-wasi`:
   - Upstream `WasiHost` into `breeze833/clang-wasi` (`src/wasi-host.js`), providing in-memory VFS runners and automated C/C++ verification tests without external WASI runtime dependencies.
 
+### Milestone 17: Single-Binary Toolchain Consolidation (`llvm-box.wasm`) & Direct CLI Multicall Delegation
+- Consolidate upstream `clang-wasi` release assets into a single multicall binary `llvm-box.wasm` (~60MB), eliminating duplicate downloads of `clang.wasm` and `lld.wasm` and saving ~110MB network payload.
+- Update `scripts/download-sysroot.js` to download only `llvm-box.wasm` and `sysroot.tar.gz`.
+- Mount `/usr/bin/` aliases (`gcc`, `g++`, `clang`, `clang++`, `ld`, `lld`, `wasm-ld`, `ar`, `ranlib`, `nm`, `objdump`, `size`, `cxxfilt`, `readelf`, `strip`) backed by `llvm-box.wasm`.
+- Implement transparent multicall delegation in `src/toolchain/driver.js` and `src/toolchain/wasm-clang.js`:
+  - Direct passthrough for toolchain introspection (`gcc --help`, `gcc -v`, `gcc --version`, `g++ --help`, `clang --help`, `ld --help`, `wasm-ld --help`).
+  - Map `gcc`/`g++` to `clang`/`clang++` and `ld`/`lld`/`ld.lld` to `wasm-ld`.
+- Resolve interactive stdin capturing: handle `stdin_request` event in `RuntimeManager` to seamlessly echo and buffer interactive terminal keystrokes for `scanf` / `cin`.
+
 ---
 
 ## 4. Verification & Testing Checklist

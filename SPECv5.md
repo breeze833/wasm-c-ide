@@ -131,8 +131,8 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 
 | Test Case | Expected Behavior |
 |---|---|
-| **Direct VFS Clang Compilation** | `clang.wasm` compiles C source files reading directly from VFS `/workspace` without MemFS. |
-| **Direct VFS LLD Linkage** | `lld.wasm` links object files and static archives directly from VFS `/lib/wasm32-wasip1` without MemFS. |
+| **Direct VFS Clang Compilation** | `llvm-box.wasm` (`clang`) compiles C source files reading directly from VFS `/workspace` without MemFS. |
+| **Direct VFS LLD Linkage** | `llvm-box.wasm` (`wasm-ld`) links object files and static archives directly from VFS `/lib/wasm32-wasip1` without MemFS. |
 | **Zero-MemFS Asset Download** | `scripts/download-sysroot.js` runs without downloading or referencing `memfs.wasm`. |
 | **Direct Binary Generation** | Compiling `main.c` generates `build/main.o` and `a.out` directly in VFS without copy-out delay. |
 | **Header Probing Performance** | Clang `#include` resolution against 4,300+ sysroot headers executes swiftly via VFS path lookup. |
