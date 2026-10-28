@@ -234,7 +234,7 @@ cd wasm-c-ide
 npm install
 ```
 
-> **Note**: `npm install` triggers a `postinstall` hook that automatically runs `scripts/download-sysroot.js`, downloading the required LLVM 19 WASI binaries (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar.gz`), Raylib 5.5 assets, and prebuilding `libturtle` static libraries (`libturtle.a`, `libturtle_canvas-wasi.a`, `libturtle_raylib.a`) from upstream GitHub releases into `public/sysroot/`. You can also manually trigger this download anytime with `npm run download:sysroot`.
+> **Note**: `npm install` triggers a `postinstall` hook that automatically runs `scripts/download-sysroot.js`, downloading the required LLVM 19 WASI single multicall binary (`llvm-box.wasm`, `sysroot.tar.gz`), Raylib 5.5 assets, and prebuilding `libturtle` static libraries (`libturtle.a`, `libturtle_canvas-wasi.a`, `libturtle_raylib.a`) from upstream GitHub releases into `public/sysroot/`. You can also manually trigger this download anytime with `npm run download:sysroot`.
 
 ### Development Server
 Start the local Vite development server:

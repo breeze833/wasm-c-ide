@@ -357,6 +357,17 @@ export async function executeArCommand({
   toolchain = null,
   write = console.log,
 }) {
+  if (toolchain && typeof toolchain.runTool === 'function') {
+    if (typeof toolchain.init === 'function') await toolchain.init();
+    const prevHostWrite = toolchain.hostWrite;
+    if (typeof write === 'function') toolchain.hostWrite = write;
+    try {
+      return await toolchain.runTool('ar', args, { cwd });
+    } finally {
+      if (toolchain && prevHostWrite !== undefined) toolchain.hostWrite = prevHostWrite;
+    }
+  }
+
   if (args.length === 0) {
     write('ar: no operation specified\r\n');
     write('usage: ar [rcstxdqv] <archive> [member...]\r\n');
@@ -443,9 +454,6 @@ export async function executeArCommand({
       if (filterNames.size > 0 && !filterNames.has(m.name)) continue;
       const targetPath = resolve(m.name);
       vfs.writeFile(targetPath, m.data);
-      if (toolchain && typeof toolchain.syncFileToMemfs === 'function') {
-        await toolchain.syncFileToMemfs(targetPath, m.data);
-      }
       if (hasV) {
         write(`x - ${m.name}\r\n`);
       }
@@ -472,9 +480,6 @@ export async function executeArCommand({
     const remaining = members.filter(m => !deleteSet.has(m.name));
     const newArchiveBytes = buildArchive(remaining);
     vfs.writeFile(archivePath, newArchiveBytes);
-    if (toolchain && typeof toolchain.syncFileToMemfs === 'function') {
-      await toolchain.syncFileToMemfs(archivePath, newArchiveBytes);
-    }
     return 0;
   }
 
@@ -494,9 +499,6 @@ export async function executeArCommand({
     }
     const newArchiveBytes = buildArchive(members);
     vfs.writeFile(archivePath, newArchiveBytes);
-    if (toolchain && typeof toolchain.syncFileToMemfs === 'function') {
-      await toolchain.syncFileToMemfs(archivePath, newArchiveBytes);
-    }
     return 0;
   }
 
@@ -565,11 +567,6 @@ export async function executeArCommand({
 
     const newArchive = buildArchive(existingMembers);
     vfs.writeFile(archivePath, newArchive);
-
-    if (toolchain && typeof toolchain.syncFileToMemfs === 'function') {
-      await toolchain.syncFileToMemfs(archivePath, newArchive);
-    }
-
     return 0;
   }
 

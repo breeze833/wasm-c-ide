@@ -733,7 +733,7 @@ const builtins = {
     for (const name of args) {
       if (['sh', 'ls', 'cat', 'rm', 'mkdir', 'cp', 'mv', 'pwd', 'clear', 'echo', 'pushd', 'popd', 'dirs', 'push', 'pop'].includes(name)) {
         writeln(`/bin/${name}`);
-      } else if (['gcc', 'g++', 'clang', 'clang++', 'make', 'wasm-ld', 'ar'].includes(name)) {
+      } else if (['gcc', 'g++', 'clang', 'clang++', 'clang-cpp', 'ld', 'lld', 'wasm-ld', 'ld.lld', 'make', 'ar', 'ranlib', 'nm', 'objdump', 'size', 'c++filt', 'cxxfilt', 'strings', 'readelf', 'strip'].includes(name)) {
         writeln(`/usr/bin/${name}`);
       } else {
         const full = resolvePath(name);

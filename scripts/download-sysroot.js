@@ -22,8 +22,7 @@ const RAYLIB_INC_DIR = path.join(projectRoot, 'public', 'sysroot', 'include', 'r
 const TURTLE_INC_DIR = path.join(projectRoot, 'public', 'sysroot', 'include', 'turtle');
 
 const REQUIRED_FILES = [
-  path.join(WASM_DIR, 'clang.wasm'),
-  path.join(WASM_DIR, 'lld.wasm'),
+  path.join(WASM_DIR, 'llvm-box.wasm'),
   path.join(WASM_DIR, 'sysroot.tar.gz'),
   path.join(WASM_DIR, 'libraylib.a'),
   path.join(WASM_DIR, 'libturtle.a'),
@@ -63,7 +62,7 @@ async function downloadToFile(url, destPath) {
 }
 
 async function downloadClangWasiAssets() {
-  const binaries = ['clang.wasm', 'lld.wasm', 'sysroot.tar.gz'];
+  const binaries = ['llvm-box.wasm', 'sysroot.tar.gz'];
   for (const name of binaries) {
     const dest = path.join(WASM_DIR, name);
     if (!force && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
@@ -273,55 +272,61 @@ void hal_turtle_draw_line(double x1, double y1,
 
     // Mount raylib headers & library for compilation
     if (fs.existsSync(path.join(RAYLIB_INC_DIR, 'raylib.h'))) {
-      tc.memfs.addFile('include/raylib.h', fs.readFileSync(path.join(RAYLIB_INC_DIR, 'raylib.h')));
-      tc.memfs.addFile('include/raymath.h', fs.readFileSync(path.join(RAYLIB_INC_DIR, 'raymath.h')));
-      tc.memfs.addFile('include/rlgl.h', fs.readFileSync(path.join(RAYLIB_INC_DIR, 'rlgl.h')));
+      vfs.writeFile('/include/raylib.h', fs.readFileSync(path.join(RAYLIB_INC_DIR, 'raylib.h')), Date.now(), true);
+      vfs.writeFile('/include/raymath.h', fs.readFileSync(path.join(RAYLIB_INC_DIR, 'raymath.h')), Date.now(), true);
+      vfs.writeFile('/include/rlgl.h', fs.readFileSync(path.join(RAYLIB_INC_DIR, 'rlgl.h')), Date.now(), true);
     }
 
-    // Add turtle headers to toolchain MemFS
+    // Add turtle headers to VFS
     for (const [name, targetPath] of Object.entries(headerMap)) {
       if (fs.existsSync(targetPath)) {
-        tc.memfs.addFile(`include/${name}`, fs.readFileSync(targetPath, 'utf-8'));
+        vfs.writeFile(`/include/${name}`, fs.readFileSync(targetPath, 'utf-8'), Date.now(), true);
       }
     }
 
-    // Add internal HAL header to MemFS for compiling the library (not published to sysroot)
-    tc.memfs.addFile('include/turtle_hal.h', turtleHalSrc);
-    tc.memfs.addFile('libturtle/src/turtle_hal.h', turtleHalSrc);
+    // Add internal HAL header to VFS for compiling the library (not published to sysroot)
+    vfs.writeFile('/include/turtle_hal.h', turtleHalSrc, Date.now(), true);
+    vfs.mkdir('/workspace/libturtle/src', true, true);
+    vfs.mkdir('/workspace/libturtle/backend/canvas-wasi', true, true);
+    vfs.mkdir('/workspace/libturtle/backend/raylib', true, true);
+    vfs.writeFile('/workspace/libturtle/src/turtle_hal.h', turtleHalSrc, Date.now(), true);
 
-    tc.memfs.addFile('libturtle/src/turtle.c', turtleSrc);
-    tc.memfs.addFile('libturtle/backend/canvas-wasi/hal_canvas_wasi.c', halCanvasSrc);
-    tc.memfs.addFile('libturtle/backend/raylib/hal_raylib.c', halRaylibSrc);
+    vfs.writeFile('/workspace/libturtle/src/turtle.c', turtleSrc, Date.now(), true);
+    vfs.writeFile('/workspace/libturtle/backend/canvas-wasi/hal_canvas_wasi.c', halCanvasSrc, Date.now(), true);
+    vfs.writeFile('/workspace/libturtle/backend/raylib/hal_raylib.c', halRaylibSrc, Date.now(), true);
 
     // Compile core turtle.c
     let code = await tc.compile(
-      'libturtle/src/turtle.c',
-      'libturtle/turtle.o',
+      '/workspace/libturtle/src/turtle.c',
+      '/workspace/libturtle/turtle.o',
       'c',
-      ['-I/include', '-I/libturtle/src', '-O2']
+      ['-I/include', '-I/workspace/libturtle/src', '-O2']
     );
     if (code !== 0) throw new Error('Compilation of turtle.c failed');
-    const turtleObj = tc.getFileFromMemfs('libturtle/turtle.o');
+    const turtleObj = vfs.readFile('/workspace/libturtle/turtle.o', false);
+    if (!turtleObj || turtleObj.length === 0) throw new Error('Compilation of turtle.c produced empty object');
 
     // Compile canvas-wasi hal_canvas_wasi.c
     code = await tc.compile(
-      'libturtle/backend/canvas-wasi/hal_canvas_wasi.c',
-      'libturtle/hal_canvas_wasi.o',
+      '/workspace/libturtle/backend/canvas-wasi/hal_canvas_wasi.c',
+      '/workspace/libturtle/hal_canvas_wasi.o',
       'c',
-      ['-I/include', '-I/libturtle/backend/canvas-wasi/include', '-O2', '-std=gnu11']
+      ['-I/include', '-I/workspace/libturtle/backend/canvas-wasi/include', '-O2', '-std=gnu11']
     );
     if (code !== 0) throw new Error('Compilation of hal_canvas_wasi.c failed');
-    const canvasHalObj = tc.getFileFromMemfs('libturtle/hal_canvas_wasi.o');
+    const canvasHalObj = vfs.readFile('/workspace/libturtle/hal_canvas_wasi.o', false);
+    if (!canvasHalObj || canvasHalObj.length === 0) throw new Error('Compilation of hal_canvas_wasi.c produced empty object');
 
     // Compile raylib hal_raylib.c
     code = await tc.compile(
-      'libturtle/backend/raylib/hal_raylib.c',
-      'libturtle/hal_raylib.o',
+      '/workspace/libturtle/backend/raylib/hal_raylib.c',
+      '/workspace/libturtle/hal_raylib.o',
       'c',
-      ['-I/include', '-I/libturtle/backend/raylib/include', '-O2']
+      ['-I/include', '-I/workspace/libturtle/backend/raylib/include', '-O2']
     );
     if (code !== 0) throw new Error('Compilation of hal_raylib.c failed');
-    const raylibHalObj = tc.getFileFromMemfs('libturtle/hal_raylib.o');
+    const raylibHalObj = vfs.readFile('/workspace/libturtle/hal_raylib.o', false);
+    if (!raylibHalObj || raylibHalObj.length === 0) throw new Error('Compilation of hal_raylib.c produced empty object');
 
     // Build static archives
     const canvasArchive = buildArchive([

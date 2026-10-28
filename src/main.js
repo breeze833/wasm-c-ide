@@ -10,7 +10,7 @@ import { showToast } from './components/toast.js';
 import { TerminalManager } from './terminal/terminal.js';
 import { RuntimeManager } from './terminal/runtime.js';
 import { WasmToolchain } from './toolchain/wasm-clang.js';
-import { executeGccCommand } from './toolchain/driver.js';
+import { executeGccCommand, executeToolCommand, executeLdCommand } from './toolchain/driver.js';
 import { executeArCommand } from './toolchain/ar.js';
 import { GraphicsWindowUI } from 'canvas-wasi';
 import 'canvas-wasi/style.css';
@@ -157,7 +157,7 @@ export class App {
       },
     });
 
-    // Warm up compiler in background so memfs is ready
+    // Warm up compiler in background so sysroot is ready
     this.toolchain.init().catch(err => {
       console.warn('Toolchain background pre-initialization notice:', err);
     });
@@ -332,7 +332,7 @@ export class App {
       }
     };
 
-    if (cmd === 'gcc' || cmd === 'clang' || cmd === 'g++' || cmd === 'clang++') {
+    if (cmd === 'gcc' || cmd === 'clang' || cmd === 'g++' || cmd === 'clang++' || cmd === 'clang-cpp') {
       const effectiveMode = (cmd === 'g++' || cmd === 'clang++') ? 'cpp' : this.mode;
       const exitCode = await executeGccCommand({
         cmd,
@@ -356,8 +356,36 @@ export class App {
       return true;
     }
 
-    if (cmd === 'ar') {
-      const exitCode = await executeArCommand({
+    if (cmd === 'ld' || cmd === 'lld' || cmd === 'wasm-ld' || cmd === 'ld.lld') {
+      const exitCode = await executeLdCommand({
+        cmd,
+        args,
+        cwd: cwd || '/workspace',
+        vfs: this.vfs,
+        toolchain: this.toolchain,
+        write: writeFn,
+      });
+
+      if (this.fileTreeUI) this.fileTreeUI.render();
+      await flushStdoutRedirect();
+
+      if (captureStdout) {
+        return { exitCode, stdout: capturedStdout };
+      }
+      if (exitCode !== 0) {
+        throw new Error(`Process terminated with exit code ${exitCode}`);
+      }
+      return true;
+    }
+
+    if (['ar', 'ranlib', 'nm', 'objdump', 'size', 'c++filt', 'cxxfilt', 'strings', 'readelf', 'strip'].includes(cmd)) {
+      const toolMap = {
+        'c++filt': 'cxxfilt',
+        'readelf': 'readobj',
+      };
+      const activeTool = toolMap[cmd] || cmd;
+      const exitCode = await executeToolCommand({
+        cmd: activeTool,
         args,
         cwd: cwd || '/workspace',
         vfs: this.vfs,

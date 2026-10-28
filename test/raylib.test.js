@@ -131,12 +131,12 @@ const compileVfs = new VFS();
 const tc = new WasmToolchain({ basePath: '/sysroot/wasm', vfs: compileVfs });
 await tc.init();
 
-// Sync raylib headers and library to toolchain MemFS
-tc.memfs.addFile('include/raylib.h', fs.readFileSync('public/sysroot/include/raylib/raylib.h'));
-tc.memfs.addFile('include/raymath.h', fs.readFileSync('public/sysroot/include/raylib/raymath.h'));
-tc.memfs.addFile('include/rlgl.h', fs.readFileSync('public/sysroot/include/raylib/rlgl.h'));
-tc.memfs.addFile('lib/wasm32-wasi/libraylib.a', fs.readFileSync('public/sysroot/wasm/libraylib.a'));
-tc.memfs.addFile('usr/lib/libraylib.a', fs.readFileSync('public/sysroot/wasm/libraylib.a'));
+// Sync raylib headers and library to VFS
+compileVfs.writeFile('/usr/include/raylib.h', fs.readFileSync('public/sysroot/include/raylib/raylib.h'), Date.now(), true);
+compileVfs.writeFile('/usr/include/raymath.h', fs.readFileSync('public/sysroot/include/raylib/raymath.h'), Date.now(), true);
+compileVfs.writeFile('/usr/include/rlgl.h', fs.readFileSync('public/sysroot/include/raylib/rlgl.h'), Date.now(), true);
+compileVfs.writeFile('/lib/wasm32-wasi/libraylib.a', fs.readFileSync('public/sysroot/wasm/libraylib.a'), Date.now(), true);
+compileVfs.writeFile('/usr/lib/libraylib.a', fs.readFileSync('public/sysroot/wasm/libraylib.a'), Date.now(), true);
 
 const gameSource = `
 #include "raylib.h"
@@ -160,14 +160,14 @@ int main(void) {
 }
 `;
 
-tc.memfs.addFile('workspace/main.c', gameSource);
+compileVfs.writeFile('/workspace/main.c', gameSource);
 const compCode = await tc.compile('workspace/main.c', 'workspace/main.o', 'c', ['-I/include', '-I/workspace']);
 assert.strictEqual(compCode, 0, 'Compilation of Raylib source file must succeed');
 
 const linkCode = await tc.link(['workspace/main.o'], 'workspace/game.wasm', ['-lraylib']);
 assert.strictEqual(linkCode, 0, 'Linking with -lraylib must succeed');
 
-const gameWasmBytes = tc.getFileFromMemfs('workspace/game.wasm');
+const gameWasmBytes = compileVfs.readFile('/workspace/game.wasm', false);
 assert.notStrictEqual(gameWasmBytes, null);
 assert.strictEqual(gameWasmBytes[0], 0x00);
 assert.strictEqual(gameWasmBytes[1], 0x61);
@@ -183,20 +183,15 @@ assert.strictEqual(moduleNames.has('gl'), true, 'Must import gl namespace');
 assert.strictEqual(moduleNames.has('raylib'), true, 'Must import raylib namespace');
 console.log('✓ End-to-end WasmToolchain compilation & linking with -lraylib verified');
 
-// Test 5b: Unmounting Raylib sysroot purges files from toolchain MemFS
+// Test 5b: Unmounting Raylib sysroot purges files from VFS
 unmountRaylibSysroot(compileVfs, tc);
 assert.strictEqual(compileVfs.exists('/usr/include/raylib.h'), false);
 assert.strictEqual(compileVfs.exists('/usr/lib/libraylib.a'), false);
-assert.strictEqual(tc.getFileFromMemfs('include/raylib.h'), null, 'Raylib header must be removed from toolchain MemFS');
-assert.strictEqual(tc.getFileFromMemfs('include/raymath.h'), null);
-assert.strictEqual(tc.getFileFromMemfs('include/rlgl.h'), null);
-assert.strictEqual(tc.getFileFromMemfs('usr/lib/libraylib.a'), null, 'Raylib library must be removed from toolchain MemFS');
-assert.strictEqual(tc.getFileFromMemfs('lib/wasm32-wasi/libraylib.a'), null);
 
 // Verify subsequent compilation of raylib code now fails because raylib.h is gone
 const failCompCode = await tc.compile('workspace/main.c', 'workspace/main2.o', 'c', ['-I/include', '-I/workspace']);
 assert.notStrictEqual(failCompCode, 0, 'Compilation must fail when raylib is unmounted');
-console.log('✓ unmountRaylibSysroot MemFS clearance and compilation failure verified');
+console.log('✓ unmountRaylibSysroot VFS clearance and compilation failure verified');
 
 // Test 6: Verification of WASI runtime imports including path_open and env.getcwd
 let stdoutOutput = '';

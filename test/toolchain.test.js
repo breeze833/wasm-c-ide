@@ -56,8 +56,8 @@ assert.deepStrictEqual(res3.sources, ['src/main.c']);
 assert.deepStrictEqual(res3.flags, ['-Iinclude']);
 console.log('✓ Direct compile & link argument parsing passed');
 
-// Test 4: Regression test for "can't access property 'addFile', this.memfs is null"
-// executeGccCommand must initialize toolchain before copying files to memfs
+// Test 4: Regression test for uninitialized toolchain in executeGccCommand
+// executeGccCommand must initialize toolchain before compiling
 {
   const vfs = new VFS();
   vfs.writeFile('/workspace/main.c', 'int main() { return 0; }');
@@ -65,39 +65,16 @@ console.log('✓ Direct compile & link argument parsing passed');
   let initCalled = false;
   const mockToolchain = {
     initialized: false,
-    memfs: null,
     async init() {
       initCalled = true;
       this.initialized = true;
-      this.memfs = {
-        files: new Map(),
-        addFile(path, content) {
-          this.files.set(path, content);
-        },
-        getFileContents(path) {
-          return this.files.get(path) || null;
-        }
-      };
-    },
-    async syncFileToMemfs(path, content) {
-      if (!this.initialized) {
-        await this.init();
-      }
-      if (!this.memfs) {
-        throw new TypeError("can't access property 'addFile', this.memfs is null");
-      }
-      this.memfs.addFile(path.replace(/^\/+/, ''), content);
-    },
-    getFileFromMemfs(path) {
-      if (!this.memfs) return null;
-      return this.memfs.getFileContents(path.replace(/^\/+/, ''));
     },
     async compile(src, obj) {
-      this.memfs.addFile(obj.replace(/^\/+/, ''), new Uint8Array([0, 97, 115, 109]));
+      vfs.writeFile(obj, new Uint8Array([0, 97, 115, 109]));
       return 0;
     },
     async link(objs, out) {
-      this.memfs.addFile(out.replace(/^\/+/, ''), new Uint8Array([0, 97, 115, 109]));
+      vfs.writeFile(out, new Uint8Array([0, 97, 115, 109]));
       return 0;
     }
   };
@@ -113,7 +90,7 @@ console.log('✓ Direct compile & link argument parsing passed');
     write: (msg) => { writeOutput += msg; }
   });
 
-  assert.strictEqual(initCalled, true, 'toolchain.init must be called before syncing files');
+  assert.strictEqual(initCalled, true, 'toolchain.init must be called before compiling');
   assert.strictEqual(mockToolchain.initialized, true, 'toolchain must be initialized');
   assert.strictEqual(exitCode, 0, 'executeGccCommand should complete without throwing');
   console.log('✓ executeGccCommand initializes uninitialized toolchain (regression fix verified)');
@@ -128,8 +105,6 @@ console.log('✓ Direct compile & link argument parsing passed');
   const mockToolchain = {
     initialized: true,
     async init() {},
-    async syncFileToMemfs() {},
-    getFileFromMemfs() { return new Uint8Array([0]); },
     async compile(src, obj, mode) {
       passedMode = mode;
       return 0;
@@ -179,36 +154,29 @@ console.log('✓ Direct compile & link argument parsing passed');
   console.log('✓ executeGccCommand supports g++ and clang++ with automatic C++ mode');
 }
 
-// Test 5: WasmToolchain syncFileToMemfs initializes when uninitialized
+// Test 5: WasmToolchain syncFile initializes when uninitialized
 {
-  const toolchain = new WasmToolchain();
+  const vfs = new VFS();
+  const toolchain = new WasmToolchain({ vfs });
   assert.strictEqual(toolchain.initialized, false);
-  assert.strictEqual(toolchain.memfs, null);
 
   let customInitCalled = false;
   toolchain.init = async function() {
     customInitCalled = true;
     this.initialized = true;
-    this.memfs = {
-      files: new Map(),
-      addFile(path, content) { this.files.set(path, content); },
-      getFileContents(path) { return this.files.get(path); }
-    };
   };
 
-  // Calling syncFileToMemfs on uninitialized toolchain should not throw
-  await toolchain.syncFileToMemfs('/workspace/foo.c', 'int foo = 1;');
+  // Calling syncFile on uninitialized toolchain should not throw
+  await toolchain.syncFile('/workspace/foo.c', 'int foo = 1;');
   assert.strictEqual(customInitCalled, true);
   assert.strictEqual(toolchain.initialized, true);
-  assert.strictEqual(toolchain.getFileFromMemfs('workspace/foo.c'), 'int foo = 1;');
-  console.log('✓ WasmToolchain.syncFileToMemfs initializes if not yet initialized');
+  assert.strictEqual(new TextDecoder().decode(toolchain.getFile('workspace/foo.c')), 'int foo = 1;');
+  console.log('✓ WasmToolchain.syncFile initializes if not yet initialized');
 }
 
-// Test 6: Real MemFS safe getFileContents and multi-level directory creation
+// Test 6: VFS safe getFile and multi-level directory creation
 {
   import('node:fs').then(async (fs) => {
-    const memfsBuf = fs.readFileSync('public/sysroot/wasm/memfs.wasm');
-
     globalThis.fetch = async (url) => {
       const filePath = url.replace(/^\/?sysroot\//, 'public/sysroot/');
       const data = fs.readFileSync(filePath);
@@ -222,14 +190,14 @@ console.log('✓ Direct compile & link argument parsing passed');
     await tc.init();
 
     // Verify non-existent file query returns null without throwing unreachable
-    const nonExistent = tc.getFileFromMemfs('workspace/nonexistent.o');
+    const nonExistent = tc.getFile('workspace/nonexistent.o');
     assert.strictEqual(nonExistent, null, 'Querying non-existent file must return null cleanly');
-    console.log('✓ MemFS.getFileContents returns null on missing file without trapping');
+    console.log('✓ WasmToolchain.getFile returns null on missing file without trapping');
 
     // Verify deeply nested file add creates directories without trapping
-    await tc.syncFileToMemfs('/workspace/deep/nested/dir/test.c', 'int x = 42;\n');
-    assert.strictEqual(tc.memfs.directories.has('workspace/deep/nested/dir'), true);
-    console.log('✓ MemFS automatically creates nested directories on file add');
+    await tc.syncFile('/workspace/deep/nested/dir/test.c', 'int x = 42;\n');
+    assert.strictEqual(vfs.exists('/workspace/deep/nested/dir/test.c'), true);
+    console.log('✓ VFS automatically creates nested directories on file add');
 
     // Verify /usr/lib files are mirrored into VFS
     assert.strictEqual(vfs.exists('/usr/lib/libc.a'), true);
@@ -245,9 +213,9 @@ console.log('✓ Direct compile & link argument parsing passed');
         throw new Error('WebAssembly.Instance is disallowed on the main thread, if the buffer size is larger than 8MB.');
       };
 
-      // Mock clang module with minimal valid wasm module
+      // Mock llvm-box module with minimal valid wasm module
       const dummyWasmBytes = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
-      tc.clangModule = await WebAssembly.compile(dummyWasmBytes);
+      tc.llvmBoxModule = await WebAssembly.compile(dummyWasmBytes);
       tc.vfs.writeFile('/workspace/src/test.c', 'int main() { return 0; }');
 
       // Compiling should instantiate via WebAssembly.instantiate, NOT new WebAssembly.Instance
@@ -256,9 +224,9 @@ console.log('✓ Direct compile & link argument parsing passed');
       console.log('✓ Clang compilation uses async WebAssembly.instantiate without hitting 8MB sync limit');
     } finally {
       WebAssembly.Instance = origInstance;
-      // Restore real clang module
-      const realClangBuf = fs.readFileSync('public/sysroot/wasm/clang.wasm');
-      tc.clangModule = await WebAssembly.compile(realClangBuf);
+      // Restore real llvm-box module
+      const realLlvmBoxBuf = fs.readFileSync('public/sysroot/wasm/llvm-box.wasm');
+      tc.llvmBoxModule = await WebAssembly.compile(realLlvmBoxBuf);
     }
 
     // Test 8: Regression test - Delete build/calc.o in VFS and recompile + relink without object file corruption
@@ -340,12 +308,12 @@ console.log('✓ Direct compile & link argument parsing passed');
     assert.strictEqual(code, 0, 'Relinking with recompiled calc.o must succeed without "unknown file type" error');
     console.log('✓ Recompile and relink after deleting object file in VFS verified');
 
-    // Test 9: Deleting source files purges them from MemFS and triggers compiler error
+    // Test 9: Deleting source files purges them from VFS and triggers compiler error
     vfs.writeFile('/workspace/include/calc.h', '#pragma once\nint add(int a, int b);\n');
     vfs.writeFile('/workspace/src/calc.c', '#include "calc.h"\nint add(int a, int b) { return a + b; }\n');
     vfs.writeFile('/workspace/src/main.c', '#include "calc.h"\nint main(void) { return add(2, 3); }\n');
 
-    // Build them once so they exist in MemFS
+    // Build them once so they exist in VFS
     let buildMsg = '';
     const wrBuild = (m) => { buildMsg += m; };
     await executeGccCommand({
@@ -357,9 +325,9 @@ console.log('✓ Direct compile & link argument parsing passed');
       mode: 'c',
       write: wrBuild
     });
-    assert.strictEqual(tc.hasFileInMemfs('workspace/include/calc.h'), true, 'calc.h must initially exist in MemFS');
-    assert.strictEqual(tc.hasFileInMemfs('workspace/src/calc.c'), true, 'calc.c must initially exist in MemFS');
-    assert.strictEqual(tc.hasFileInMemfs('workspace/build/calc.o'), true, 'calc.o must initially exist in MemFS');
+    assert.strictEqual(vfs.exists('/workspace/include/calc.h'), true, 'calc.h must initially exist in VFS');
+    assert.strictEqual(vfs.exists('/workspace/src/calc.c'), true, 'calc.c must initially exist in VFS');
+    assert.strictEqual(vfs.exists('/workspace/build/calc.o'), true, 'calc.o must initially exist in VFS');
 
     // Now delete calc.h, calc.c, and calc.o from VFS
     vfs.remove('/workspace/include/calc.h');
@@ -381,10 +349,10 @@ console.log('✓ Direct compile & link argument parsing passed');
     assert.strictEqual(code, 1, 'Compiling non-existent source file must return exit code 1');
     assert.match(errOutput, /No such file or directory/i, 'Must report missing source file');
 
-    // Verify MemFS purged workspace/include/calc.h, workspace/src/calc.c, and workspace/build/calc.o
-    assert.strictEqual(tc.hasFileInMemfs('workspace/include/calc.h'), false, 'calc.h must be purged from MemFS');
-    assert.strictEqual(tc.hasFileInMemfs('workspace/src/calc.c'), false, 'calc.c must be purged from MemFS');
-    assert.strictEqual(tc.hasFileInMemfs('workspace/build/calc.o'), false, 'calc.o must be purged from MemFS');
+    // Verify VFS purged workspace/include/calc.h, workspace/src/calc.c, and workspace/build/calc.o
+    assert.strictEqual(vfs.exists('/workspace/include/calc.h'), false, 'calc.h must be purged from VFS');
+    assert.strictEqual(vfs.exists('/workspace/src/calc.c'), false, 'calc.c must be purged from VFS');
+    assert.strictEqual(vfs.exists('/workspace/build/calc.o'), false, 'calc.o must be purged from VFS');
 
     // Also verify compiling src/main.c (which includes calc.h) fails because calc.h is gone
     let diagOutput = '';
@@ -528,8 +496,64 @@ console.log('✓ Direct compile & link argument parsing passed');
     assert.doesNotMatch(cleanOutput, /typetype/i, 'Words must not be duplicated');
     console.log('✓ Compiler diagnostic single-printing and deduplication verified');
 
+    // Test 17: Official toolchain delegation for --help and --version
+    for (const testCmd of ['gcc', 'clang', 'g++', 'clang++']) {
+      let helpOut = '';
+      code = await executeGccCommand({
+        cmd: testCmd,
+        args: ['--help'],
+        cwd: '/workspace',
+        vfs,
+        toolchain: tc,
+        write: (m) => { helpOut += m; }
+      });
+      assert.strictEqual(code, 0, `${testCmd} --help must exit 0`);
+      assert.match(helpOut, /OVERVIEW:\s+clang\s+LLVM\s+compiler/i, `${testCmd} --help must show clang help`);
+
+      let verOut = '';
+      code = await executeGccCommand({
+        cmd: testCmd,
+        args: ['--version'],
+        cwd: '/workspace',
+        vfs,
+        toolchain: tc,
+        write: (m) => { verOut += m; }
+      });
+      assert.strictEqual(code, 0, `${testCmd} --version must exit 0`);
+      assert.match(verOut, /clang\s+version\s+19/i, `${testCmd} --version must show clang version`);
+    }
+
+    const { executeLdCommand } = await import('../src/toolchain/driver.js');
+    for (const testCmd of ['ld', 'lld', 'wasm-ld']) {
+      let helpOut = '';
+      code = await executeLdCommand({
+        cmd: testCmd,
+        args: ['--help'],
+        cwd: '/workspace',
+        vfs,
+        toolchain: tc,
+        write: (m) => { helpOut += m; }
+      });
+      assert.strictEqual(code, 0, `${testCmd} --help must exit 0`);
+      assert.match(helpOut, /OVERVIEW:\s+LLVM\s+Linker/i, `${testCmd} --help must show wasm-ld help`);
+
+      let verOut = '';
+      code = await executeLdCommand({
+        cmd: testCmd,
+        args: ['--version'],
+        cwd: '/workspace',
+        vfs,
+        toolchain: tc,
+        write: (m) => { verOut += m; }
+      });
+      assert.strictEqual(code, 0, `${testCmd} --version must exit 0`);
+      assert.match(verOut, /LLD\s+19/i, `${testCmd} --version must show LLD version`);
+    }
+    console.log('✓ gcc/g++/clang/clang++ and ld/lld/wasm-ld delegation for --help and --version verified');
+
     console.log('--- ALL TOOLCHAIN DRIVER TESTS PASSED ---');
   });
 }
+
 
 

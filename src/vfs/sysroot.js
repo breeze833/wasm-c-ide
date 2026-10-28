@@ -812,9 +812,22 @@ export const USR_BIN_COMMANDS = [
   'g++',
   'clang',
   'clang++',
-  'make',
+  'clang-cpp',
+  'ld',
+  'lld',
   'wasm-ld',
+  'ld.lld',
+  'make',
   'ar',
+  'ranlib',
+  'nm',
+  'objdump',
+  'size',
+  'c++filt',
+  'cxxfilt',
+  'strings',
+  'readelf',
+  'strip',
 ];
 
 export function mountSysroot(vfs) {
@@ -881,18 +894,18 @@ export function unmountRaylibSysroot(vfs, toolchain = null) {
   if (vfs.exists('/usr/include/turtle_backend_raylib.h')) vfs.remove('/usr/include/turtle_backend_raylib.h', false, true);
   if (vfs.exists('/usr/lib/libturtle_raylib.a')) vfs.remove('/usr/lib/libturtle_raylib.a', false, true);
 
-  if (toolchain && typeof toolchain.removeFileFromMemfs === 'function') {
-    toolchain.removeFileFromMemfs('include/raylib.h');
-    toolchain.removeFileFromMemfs('include/raymath.h');
-    toolchain.removeFileFromMemfs('include/rlgl.h');
-    toolchain.removeFileFromMemfs('usr/lib/libraylib.a');
-    toolchain.removeFileFromMemfs('lib/wasm32-wasi/libraylib.a');
-    toolchain.removeFileFromMemfs('lib/wasm32-wasip1/libraylib.a');
+  if (toolchain && typeof toolchain.removeFile === 'function') {
+    toolchain.removeFile('include/raylib.h');
+    toolchain.removeFile('include/raymath.h');
+    toolchain.removeFile('include/rlgl.h');
+    toolchain.removeFile('usr/lib/libraylib.a');
+    toolchain.removeFile('lib/wasm32-wasi/libraylib.a');
+    toolchain.removeFile('lib/wasm32-wasip1/libraylib.a');
 
-    toolchain.removeFileFromMemfs('include/turtle_backend_raylib.h');
-    toolchain.removeFileFromMemfs('usr/lib/libturtle_raylib.a');
-    toolchain.removeFileFromMemfs('lib/wasm32-wasi/libturtle_raylib.a');
-    toolchain.removeFileFromMemfs('lib/wasm32-wasip1/libturtle_raylib.a');
+    toolchain.removeFile('include/turtle_backend_raylib.h');
+    toolchain.removeFile('usr/lib/libturtle_raylib.a');
+    toolchain.removeFile('lib/wasm32-wasi/libturtle_raylib.a');
+    toolchain.removeFile('lib/wasm32-wasip1/libturtle_raylib.a');
   }
 }
 

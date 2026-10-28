@@ -132,6 +132,16 @@ export async function executeGccCommand({
   }
 
   try {
+    // If no input files (sources or objects) were provided, delegate directly to the
+    // official toolchain (e.g. gcc --help, gcc -v, gcc --version, clang --help)
+    if (sources.length === 0 && objects.length === 0) {
+      if (toolchain && typeof toolchain.runClang === 'function') {
+        return await toolchain.runClang(cmd, args, { cwd });
+      }
+      write(`${cmd || 'gcc'}: fatal error: no input files\r\n`);
+      return 1;
+    }
+
     const ensureParentDir = (filePath) => {
       const norm = resolve(filePath);
       const lastSlash = norm.lastIndexOf('/');
@@ -142,16 +152,6 @@ export async function executeGccCommand({
         }
       }
     };
-
-    // Backward-compatibility hook for mock toolchains that require syncFileToMemfs
-    if (toolchain && typeof toolchain.syncFileToMemfs === 'function' && typeof vfs.listFilesRecursive === 'function') {
-      const workspaceFiles = vfs.listFilesRecursive('/workspace');
-      for (const f of workspaceFiles) {
-        if (!f.isDir) {
-          await toolchain.syncFileToMemfs(f.path, f.content);
-        }
-      }
-    }
 
     // Validate that all input source files exist in VFS
     for (const src of sources) {
@@ -278,8 +278,8 @@ export async function executeGccCommand({
           return exitCode;
         }
 
-        if (typeof toolchain.getFileFromMemfs === 'function') {
-          const objData = toolchain.getFileFromMemfs(objResolved);
+        if (typeof toolchain.getFile === 'function') {
+          const objData = toolchain.getFile(objResolved);
           if (objData && !vfs.exists(objResolved)) {
             vfs.writeFile(objResolved, objData);
           }
@@ -309,14 +309,14 @@ export async function executeGccCommand({
         return exitCode;
       }
 
-      if (typeof toolchain.getFileFromMemfs === 'function') {
-        const objData = toolchain.getFileFromMemfs(objResolved);
+      if (typeof toolchain.getFile === 'function') {
+        const objData = toolchain.getFile(objResolved);
         if (objData && !vfs.exists(objResolved)) {
           vfs.writeFile(objResolved, objData);
         }
       }
 
-      if (vfs.exists(objResolved) || (toolchain.getFileFromMemfs && toolchain.getFileFromMemfs(objResolved))) {
+      if (vfs.exists(objResolved) || (toolchain.getFile && toolchain.getFile(objResolved))) {
         generatedObjects.push(objResolved);
       }
     }
@@ -331,14 +331,68 @@ export async function executeGccCommand({
     ensureParentDir(finalOutput);
     const linkExitCode = await toolchain.link(generatedObjects, finalOutput, linkerFlags);
 
-    if (linkExitCode === 0 && typeof toolchain.getFileFromMemfs === 'function') {
-      const binData = toolchain.getFileFromMemfs(finalOutput);
+    if (linkExitCode === 0 && typeof toolchain.getFile === 'function') {
+      const binData = toolchain.getFile(finalOutput);
       if (binData && !vfs.exists(finalOutput)) {
         vfs.writeFile(finalOutput, binData);
       }
     }
 
     return linkExitCode;
+  } finally {
+    if (toolchain && prevHostWrite !== undefined) {
+      toolchain.hostWrite = prevHostWrite;
+    }
+  }
+}
+
+export async function executeToolCommand({
+  cmd,
+  args = [],
+  cwd = '/workspace',
+  vfs,
+  toolchain,
+  write,
+}) {
+  if (toolchain && typeof toolchain.init === 'function') {
+    await toolchain.init();
+  }
+  const prevHostWrite = toolchain ? toolchain.hostWrite : null;
+  if (toolchain && typeof write === 'function') {
+    toolchain.hostWrite = write;
+  }
+  try {
+    if (toolchain && typeof toolchain.runTool === 'function') {
+      return await toolchain.runTool(cmd, args, { cwd });
+    }
+    return 0;
+  } finally {
+    if (toolchain && prevHostWrite !== undefined) {
+      toolchain.hostWrite = prevHostWrite;
+    }
+  }
+}
+
+export async function executeLdCommand({
+  cmd = 'wasm-ld',
+  args = [],
+  cwd = '/workspace',
+  vfs,
+  toolchain,
+  write,
+}) {
+  if (toolchain && typeof toolchain.init === 'function') {
+    await toolchain.init();
+  }
+  const prevHostWrite = toolchain ? toolchain.hostWrite : null;
+  if (toolchain && typeof write === 'function') {
+    toolchain.hostWrite = write;
+  }
+  try {
+    if (toolchain && typeof toolchain.runLld === 'function') {
+      return await toolchain.runLld(cmd, args, { cwd });
+    }
+    return 0;
   } finally {
     if (toolchain && prevHostWrite !== undefined) {
       toolchain.hostWrite = prevHostWrite;

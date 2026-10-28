@@ -6,72 +6,6 @@ import { WasiHost, ProcExit, ESUCCESS, normalizePath } from '../vfs/wasi-host.js
 
 export { ProcExit };
 
-// Backward-compatibility shim for MemFS backed directly by VFS
-export class MemFS {
-  constructor(vfs = null) {
-    this.vfs = vfs;
-    this.directories = new Set(['', '/', '.', 'workspace', 'usr', 'bin']);
-    this.files = new Set();
-    this.hostMem = null;
-  }
-
-  static async create(memfsBuffer, hostWrite = () => {}) {
-    return new MemFS();
-  }
-
-  ensureDirectory(path) {
-    const clean = (path || '').replace(/^\/+|\/+$/g, '');
-    if (!clean) return;
-    this.directories.add(clean);
-    if (this.vfs && typeof this.vfs.mkdir === 'function') {
-      try { this.vfs.mkdir('/' + clean, true, true); } catch {}
-    }
-  }
-
-  addDirectory(path) {
-    this.ensureDirectory(path);
-  }
-
-  addFile(path, contents) {
-    const clean = (path || '').replace(/^\/+/, '');
-    this.files.add(clean);
-    const lastSlash = clean.lastIndexOf('/');
-    if (lastSlash !== -1) {
-      this.ensureDirectory(clean.substring(0, lastSlash));
-    }
-    if (this.vfs && typeof this.vfs.writeFile === 'function') {
-      this.vfs.writeFile('/' + clean, contents, Date.now(), true);
-    }
-  }
-
-  hasFile(path) {
-    const clean = (path || '').replace(/^\/+/, '');
-    if (this.files.has(clean)) return true;
-    if (this.vfs && typeof this.vfs.exists === 'function') {
-      return this.vfs.exists('/' + clean);
-    }
-    return false;
-  }
-
-  getFileContents(path) {
-    const clean = (path || '').replace(/^\/+/, '');
-    if (this.vfs && typeof this.vfs.exists === 'function') {
-      if (!this.vfs.exists('/' + clean)) return null;
-      return this.vfs.readFile('/' + clean, false);
-    }
-    return null;
-  }
-
-  removeFile(path) {
-    const clean = (path || '').replace(/^\/+/, '');
-    this.files.delete(clean);
-    if (this.vfs && typeof this.vfs.exists === 'function' && this.vfs.exists('/' + clean)) {
-      try { this.vfs.remove('/' + clean, false, true); } catch {}
-      return true;
-    }
-    return false;
-  }
-}
 
 export class AppInstance {
   constructor(wasiHost, name, ...args) {
@@ -129,20 +63,9 @@ export class WasmToolchain {
     this.basePath = (options.basePath || '/sysroot/wasm').replace(/\/+$/, '');
     this.hostWrite = options.hostWrite || console.log;
     this.vfs = options.vfs || null;
-    this.memfs = null;
-    this.clangModule = null;
-    this.lldModule = null;
+    this.llvmBoxModule = null;
     this.initialized = false;
     this.initPromise = null;
-  }
-
-  ensureDirectoryInMemfs(dirPath) {
-    if (this.vfs && typeof this.vfs.mkdir === 'function') {
-      try { this.vfs.mkdir(dirPath, true, true); } catch {}
-    }
-    if (this.memfs) {
-      this.memfs.ensureDirectory(dirPath);
-    }
   }
 
   async init(onProgress = () => {}) {
@@ -150,7 +73,6 @@ export class WasmToolchain {
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
-      this.memfs = new MemFS(this.vfs);
       const fetchSysroot = async () => {
         try {
           const res = await fetch(`${this.basePath}/sysroot.tar.gz`);
@@ -194,7 +116,6 @@ export class WasmToolchain {
         if (!cleanName) continue;
         if (entry.type === '5') {
           if (this.vfs) this.vfs.mkdir('/' + cleanName, true, true);
-          if (this.memfs) this.memfs.addDirectory(cleanName);
         } else if (entry.contents) {
           if (this.vfs) {
             this.vfs.writeFile('/' + cleanName, entry.contents, Date.now(), true);
@@ -213,9 +134,6 @@ export class WasmToolchain {
                 this.vfs.writeFile(`/lib/wasm32-wasip1/${libName}`, entry.contents, Date.now(), true);
               }
             }
-          }
-          if (this.memfs) {
-            this.memfs.addFile(cleanName, entry.contents);
           }
         }
       }
@@ -236,12 +154,10 @@ export class WasmToolchain {
             const stat = this.vfs.stat(cleanTarget);
             if (stat && stat.isDir) {
               this.vfs.mkdir('/' + cleanName, true, true);
-              if (this.memfs) this.memfs.addDirectory(cleanName);
             } else {
               const contents = this.vfs.readFile(cleanTarget, false);
               if (contents) {
                 this.vfs.writeFile('/' + cleanName, contents, Date.now(), true);
-                if (this.memfs) this.memfs.addFile(cleanName, contents);
               }
             }
           }
@@ -262,10 +178,6 @@ export class WasmToolchain {
             this.vfs.writeFile('/lib/wasm32-wasi/libturtle.a', turtleU8, Date.now(), true);
             this.vfs.writeFile('/lib/wasm32-wasi/libturtle_canvas-wasi.a', turtleU8, Date.now(), true);
           }
-          if (this.memfs) {
-            this.memfs.addFile('usr/lib/libturtle.a', turtleU8);
-            this.memfs.addFile('usr/lib/libturtle_canvas-wasi.a', turtleU8);
-          }
         }
       } catch {}
 
@@ -276,25 +188,93 @@ export class WasmToolchain {
     await this.initPromise;
   }
 
-  async _getClang() {
-    if (!this.clangModule) {
-      this.hostWrite('\x1b[33m[Loading Clang compiler module...]\x1b[0m\r\n');
-      const buf = await fetch(`${this.basePath}/clang.wasm`).then(r => r.arrayBuffer());
-      this.clangModule = await WebAssembly.compile(buf);
+  async _getLlvmBox() {
+    if (!this.llvmBoxModule) {
+      this.hostWrite('\x1b[33m[Loading LLVM toolchain module (llvm-box.wasm)...]\x1b[0m\r\n');
+      const buf = await fetch(`${this.basePath}/llvm-box.wasm`).then(r => r.arrayBuffer());
+      this.llvmBoxModule = await WebAssembly.compile(buf);
     }
-    return this.clangModule;
+    return this.llvmBoxModule;
+  }
+
+  async _getClang() {
+    return this._getLlvmBox();
   }
 
   async _getLld() {
-    if (!this.lldModule) {
-      this.hostWrite('\x1b[33m[Loading LLD linker module...]\x1b[0m\r\n');
-      const buf = await fetch(`${this.basePath}/lld.wasm`).then(r => r.arrayBuffer());
-      this.lldModule = await WebAssembly.compile(buf);
-    }
-    return this.lldModule;
+    return this._getLlvmBox();
   }
 
-  async syncFileToMemfs(path, content) {
+  async runTool(toolName, toolArgs = [], options = {}) {
+    await this.init();
+    const llvmBox = await this._getLlvmBox();
+    const cwd = options.cwd || '/workspace';
+
+    const wasiHost = new WasiHost({
+      vfs: this.vfs,
+      cwd,
+      argv: [toolName, ...toolArgs],
+      stdout: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+      stderr: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+    });
+
+    try {
+      const app = await AppInstance.create(llvmBox, wasiHost, toolName, ...toolArgs);
+      return app.run();
+    } finally {
+      wasiHost.setMemory(null);
+    }
+  }
+
+  async runClang(cmd, args = [], options = {}) {
+    await this.init();
+    const clang = await this._getClang();
+    const cwd = options.cwd || '/workspace';
+
+    // Map gcc/g++ to official Clang multicall subcommands
+    const binary = (cmd === 'g++' || cmd === 'clang++') ? 'clang++' : 'clang';
+
+    const finalArgs = [];
+    if (!args.some(a => a.startsWith('--target'))) {
+      finalArgs.push('--target=wasm32-wasip1');
+    }
+    if (!args.some(a => a.startsWith('--sysroot'))) {
+      finalArgs.push('--sysroot=/');
+    }
+    finalArgs.push(...args);
+
+    const wasiHost = new WasiHost({
+      vfs: this.vfs,
+      cwd,
+      argv: [binary, ...finalArgs],
+      stdout: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+      stderr: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+    });
+
+    try {
+      const app = await AppInstance.create(clang, wasiHost, binary, ...finalArgs);
+      return app.run();
+    } finally {
+      wasiHost.setMemory(null);
+    }
+  }
+
+  async runLld(cmd = 'wasm-ld', args = [], options = {}) {
+    await this.init();
+    // Default to wasm-ld for Wasm target environment
+    const binary = (cmd === 'wasm-ld' || cmd === 'ld' || cmd === 'lld' || cmd === 'ld.lld') ? 'wasm-ld' : cmd;
+    return this.runTool(binary, args, options);
+  }
+
+  async syncFile(path, content) {
     if (!this.initialized) {
       await this.init();
     }
@@ -302,46 +282,33 @@ export class WasmToolchain {
     if (this.vfs && typeof this.vfs.writeFile === 'function') {
       this.vfs.writeFile('/' + cleanPath, content, Date.now(), true);
     }
-    if (this.memfs) {
-      this.memfs.addFile(cleanPath, content);
-      this.memfs.addFile(path, content);
-    }
   }
 
-  getFileFromMemfs(path) {
+  getFile(path) {
     const cleanPath = (path || '').replace(/^\/+/, '');
     if (this.vfs && typeof this.vfs.exists === 'function') {
       if (this.vfs.exists('/' + cleanPath)) return this.vfs.readFile('/' + cleanPath, false);
+      if (this.vfs.exists('/workspace/' + cleanPath)) return this.vfs.readFile('/workspace/' + cleanPath, false);
       if (this.vfs.exists(path)) return this.vfs.readFile(path, false);
-    }
-    if (this.memfs && typeof this.memfs.getFileContents === 'function') {
-      const res = this.memfs.getFileContents(cleanPath);
-      if (res !== undefined && res !== null) return res;
-      return this.memfs.getFileContents(path);
     }
     return null;
   }
 
-  hasFileInMemfs(path) {
+  hasFile(path) {
     const cleanPath = (path || '').replace(/^\/+/, '');
     if (this.vfs && typeof this.vfs.exists === 'function') {
-      if (this.vfs.exists('/' + cleanPath) || this.vfs.exists(path)) return true;
-    }
-    if (this.memfs && typeof this.memfs.hasFile === 'function') {
-      return this.memfs.hasFile(cleanPath) || this.memfs.hasFile(path);
+      return this.vfs.exists('/' + cleanPath) || this.vfs.exists('/workspace/' + cleanPath) || this.vfs.exists(path);
     }
     return false;
   }
 
-  removeFileFromMemfs(path) {
+  removeFile(path) {
     const cleanPath = normalizePath(path);
     if (this.vfs && typeof this.vfs.exists === 'function' && this.vfs.exists(cleanPath)) {
       try { this.vfs.remove(cleanPath, false, true); } catch {}
+      return true;
     }
-    if (this.memfs) {
-      this.memfs.removeFile(cleanPath);
-    }
-    return true;
+    return false;
   }
 
   async compile(sourcePath, objPath, mode = 'c', customFlags = [], options = {}) {

@@ -131,12 +131,8 @@ compileVfs.writeFile('/usr/lib/libturtle_canvas-wasi.a', fs.readFileSync('public
 const tc = new WasmToolchain({ basePath: '/sysroot/wasm', vfs: compileVfs });
 await tc.init();
 
-// Sync libraries into toolchain MemFS
-tc.memfs.addFile('usr/lib/libturtle.a', fs.readFileSync('public/sysroot/wasm/libturtle.a'));
-tc.memfs.addFile('usr/lib/libturtle_canvas-wasi.a', fs.readFileSync('public/sysroot/wasm/libturtle_canvas-wasi.a'));
-
 const canvasCode = fs.readFileSync('examples/06_turtle_canvas.c', 'utf-8');
-tc.memfs.addFile('workspace/turtle_canvas.c', canvasCode);
+compileVfs.writeFile('/workspace/turtle_canvas.c', canvasCode);
 
 let compCode = await tc.compile('workspace/turtle_canvas.c', 'workspace/turtle_canvas.o', 'c', ['-I/include', '-I/workspace']);
 assert.strictEqual(compCode, 0, 'Compilation of 06_turtle_canvas.c must succeed');
@@ -144,7 +140,7 @@ assert.strictEqual(compCode, 0, 'Compilation of 06_turtle_canvas.c must succeed'
 let linkCode = await tc.link(['workspace/turtle_canvas.o'], 'workspace/turtle_canvas.wasm', ['-lturtle']);
 assert.strictEqual(linkCode, 0, 'Linking 06_turtle_canvas.o with -lturtle must succeed');
 
-const canvasWasmBytes = tc.getFileFromMemfs('workspace/turtle_canvas.wasm');
+const canvasWasmBytes = compileVfs.readFile('/workspace/turtle_canvas.wasm', false);
 assert.notStrictEqual(canvasWasmBytes, null);
 assert.strictEqual(canvasWasmBytes[0], 0x00);
 assert.strictEqual(canvasWasmBytes[1], 0x61);
@@ -163,15 +159,15 @@ assert.strictEqual(canvasImportNames.has('graphics_close'), true, 'Must import g
 console.log('✓ End-to-end WasmToolchain compilation & linking with -lturtle (canvas-wasi) verified');
 
 // Test 6: End-to-end WasmToolchain compilation & linking for Raylib turtle backend
-tc.memfs.addFile('include/raylib.h', fs.readFileSync('public/sysroot/include/raylib/raylib.h'));
-tc.memfs.addFile('include/raymath.h', fs.readFileSync('public/sysroot/include/raylib/raymath.h'));
-tc.memfs.addFile('include/rlgl.h', fs.readFileSync('public/sysroot/include/raylib/rlgl.h'));
-tc.memfs.addFile('include/turtle_backend_raylib.h', fs.readFileSync('public/sysroot/include/turtle/turtle_backend_raylib.h'));
-tc.memfs.addFile('usr/lib/libraylib.a', fs.readFileSync('public/sysroot/wasm/libraylib.a'));
-tc.memfs.addFile('usr/lib/libturtle_raylib.a', fs.readFileSync('public/sysroot/wasm/libturtle_raylib.a'));
+compileVfs.writeFile('/usr/include/raylib.h', fs.readFileSync('public/sysroot/include/raylib/raylib.h'), Date.now(), true);
+compileVfs.writeFile('/usr/include/raymath.h', fs.readFileSync('public/sysroot/include/raylib/raymath.h'), Date.now(), true);
+compileVfs.writeFile('/usr/include/rlgl.h', fs.readFileSync('public/sysroot/include/raylib/rlgl.h'), Date.now(), true);
+compileVfs.writeFile('/usr/include/turtle_backend_raylib.h', fs.readFileSync('public/sysroot/include/turtle/turtle_backend_raylib.h'), Date.now(), true);
+compileVfs.writeFile('/usr/lib/libraylib.a', fs.readFileSync('public/sysroot/wasm/libraylib.a'), Date.now(), true);
+compileVfs.writeFile('/usr/lib/libturtle_raylib.a', fs.readFileSync('public/sysroot/wasm/libturtle_raylib.a'), Date.now(), true);
 
 const raylibCode = fs.readFileSync('examples/07_turtle_raylib.c', 'utf-8');
-tc.memfs.addFile('workspace/turtle_raylib.c', raylibCode);
+compileVfs.writeFile('/workspace/turtle_raylib.c', raylibCode);
 
 compCode = await tc.compile('workspace/turtle_raylib.c', 'workspace/turtle_raylib.o', 'c', ['-I/include', '-I/workspace']);
 assert.strictEqual(compCode, 0, 'Compilation of 07_turtle_raylib.c must succeed');
@@ -179,7 +175,7 @@ assert.strictEqual(compCode, 0, 'Compilation of 07_turtle_raylib.c must succeed'
 linkCode = await tc.link(['workspace/turtle_raylib.o'], 'workspace/turtle_raylib.wasm', ['-lturtle_raylib', '-lraylib']);
 assert.strictEqual(linkCode, 0, 'Linking 07_turtle_raylib.o with -lturtle_raylib -lraylib must succeed');
 
-const raylibWasmBytes = tc.getFileFromMemfs('workspace/turtle_raylib.wasm');
+const raylibWasmBytes = compileVfs.readFile('/workspace/turtle_raylib.wasm', false);
 assert.notStrictEqual(raylibWasmBytes, null);
 assert.strictEqual(raylibWasmBytes[0], 0x00);
 assert.strictEqual(raylibWasmBytes[1], 0x61);
@@ -194,10 +190,10 @@ assert.strictEqual(raylibImportModules.has('gl'), true, 'Must import gl namespac
 assert.strictEqual(raylibImportModules.has('raylib'), true, 'Must import raylib namespace');
 console.log('✓ End-to-end WasmToolchain compilation & linking with -lturtle_raylib -lraylib verified');
 
-// Test 7: Unmounting Raylib purges turtle_backend_raylib.h and libturtle_raylib.a from MemFS
+// Test 7: Unmounting Raylib purges turtle_backend_raylib.h and libturtle_raylib.a from VFS
 unmountRaylibSysroot(compileVfs, tc);
-assert.strictEqual(tc.getFileFromMemfs('include/turtle_backend_raylib.h'), null);
-assert.strictEqual(tc.getFileFromMemfs('usr/lib/libturtle_raylib.a'), null);
+assert.strictEqual(compileVfs.exists('/usr/include/turtle_backend_raylib.h'), false);
+assert.strictEqual(compileVfs.exists('/usr/lib/libturtle_raylib.a'), false);
 
 const failRaylibComp = await tc.compile('workspace/turtle_raylib.c', 'workspace/fail.o', 'c', ['-I/include', '-I/workspace']);
 assert.notStrictEqual(failRaylibComp, 0, 'Compilation must fail after unmounting Raylib turtle backend');

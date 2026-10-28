@@ -90,8 +90,14 @@ import { mountSysroot } from '../src/vfs/sysroot.js';
   mountSysroot(vfs);
   assert.strictEqual(vfs.exists('/usr/bin/gcc'), true);
   assert.strictEqual(vfs.exists('/usr/bin/g++'), true);
+  assert.strictEqual(vfs.exists('/usr/bin/clang'), true);
   assert.strictEqual(vfs.exists('/usr/bin/clang++'), true);
-  console.log('✓ sysroot mounts g++ and clang++ under /usr/bin');
+  assert.strictEqual(vfs.exists('/usr/bin/clang-cpp'), true);
+  assert.strictEqual(vfs.exists('/usr/bin/ld'), true);
+  assert.strictEqual(vfs.exists('/usr/bin/lld'), true);
+  assert.strictEqual(vfs.exists('/usr/bin/wasm-ld'), true);
+  assert.strictEqual(vfs.exists('/usr/bin/strip'), true);
+  console.log('✓ sysroot mounts gcc, g++, clang, lld, wasm-ld, and utilities under /usr/bin');
 }
 
 // Test 6: parseTokens distinguishing quoted vs unquoted tokens

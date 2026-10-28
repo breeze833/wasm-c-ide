@@ -232,15 +232,14 @@ int main(void) {
 }
 `;
 
-tc.memfs.addFile('include/graphics.h', compileVfs.readFile('/usr/include/graphics.h'));
-tc.memfs.addFile('workspace/main.c', cCode);
+compileVfs.writeFile('/workspace/main.c', cCode);
 const compCode = await tc.compile('workspace/main.c', 'workspace/main.o', 'c', ['-I/include', '-I/workspace']);
 assert.strictEqual(compCode, 0, 'Pure C compilation of graphics.h program must succeed');
 
 const linkCode = await tc.link(['workspace/main.o'], 'workspace/a.out');
 assert.strictEqual(linkCode, 0, 'Linkage of graphics.h program must succeed');
 
-const wasmBytes = tc.getFileFromMemfs('workspace/a.out');
+const wasmBytes = compileVfs.readFile('/workspace/a.out', false);
 assert.notStrictEqual(wasmBytes, null);
 assert.strictEqual(wasmBytes[0], 0x00);
 assert.strictEqual(wasmBytes[1], 0x61);
@@ -335,8 +334,6 @@ assert.strictEqual(canvasHeaderContent.includes('canvas_restore'), true);
 console.log('✓ graphics_canvas.h presence and 2D vector API signatures verified');
 
 // Test 7: End-to-end Pure C compilation with <graphics_canvas.h>
-tc.memfs.addFile('include/graphics_canvas.h', vfs.readFile('/usr/include/graphics_canvas.h'));
-
 const canvasCode = `
 #include <graphics_canvas.h>
 
@@ -365,14 +362,14 @@ int main(void) {
 }
 `;
 
-tc.memfs.addFile('workspace/canvas_demo.c', canvasCode);
+compileVfs.writeFile('/workspace/canvas_demo.c', canvasCode);
 const compCanvasCode = await tc.compile('workspace/canvas_demo.c', 'workspace/canvas_demo.o', 'c', ['-I/include', '-I/workspace']);
 assert.strictEqual(compCanvasCode, 0, 'Pure C compilation of graphics_canvas.h program must succeed');
 
 const linkCanvasCode = await tc.link(['workspace/canvas_demo.o'], 'workspace/canvas_demo.out');
 assert.strictEqual(linkCanvasCode, 0, 'Linkage of graphics_canvas.h program must succeed');
 
-const canvasWasmBytes = tc.getFileFromMemfs('workspace/canvas_demo.out');
+const canvasWasmBytes = compileVfs.readFile('/workspace/canvas_demo.out', false);
 assert.notStrictEqual(canvasWasmBytes, null);
 
 const canvasModule = new WebAssembly.Module(canvasWasmBytes);
@@ -452,7 +449,7 @@ assert.strictEqual(canvasFramesPresented, 1, 'canvas_present should be called 1 
 
 console.log('✓ Runtime execution of 2D vector canvas operations verified');
 
-// Test 9: Verify executeGccCommand automatically syncs VFS /usr/include/graphics.h into MemFS
+// Test 9: Verify executeGccCommand compiles VFS /usr/include/graphics.h via direct VFS
 const driverVfs = new VFS();
 mountSysroot(driverVfs);
 driverVfs.writeFile('/workspace/test_gfx.c', `
@@ -501,7 +498,7 @@ console.log('✓ runtime.worker.js env binding for genericGraphics verified');
 
 // Test 11: Verify examples/03_framebuffer_graphics.c compiles and links cleanly with persistent canvas layer
 const example03Code = fs.readFileSync(path.resolve('examples/03_framebuffer_graphics.c'), 'utf-8');
-tc.memfs.addFile('workspace/03_framebuffer_graphics.c', example03Code);
+compileVfs.writeFile('/workspace/03_framebuffer_graphics.c', example03Code);
 const comp03 = await tc.compile('workspace/03_framebuffer_graphics.c', 'workspace/03_framebuffer_graphics.o', 'c', ['-I/include', '-I/workspace']);
 assert.strictEqual(comp03, 0, 'examples/03_framebuffer_graphics.c must compile without errors');
 const link03 = await tc.link(['workspace/03_framebuffer_graphics.o'], 'workspace/03_framebuffer_graphics.out');
@@ -548,13 +545,13 @@ int main(void) {
 }
 `;
 
-tc.memfs.addFile('workspace/pixel_test.c', pixelTestCode);
+compileVfs.writeFile('/workspace/pixel_test.c', pixelTestCode);
 const compPixel = await tc.compile('workspace/pixel_test.c', 'workspace/pixel_test.o', 'c', ['-I/include', '-I/workspace']);
 assert.strictEqual(compPixel, 0, 'Compilation of pixel_test.c must succeed');
 const linkPixel = await tc.link(['workspace/pixel_test.o'], 'workspace/pixel_test.out');
 assert.strictEqual(linkPixel, 0, 'Linkage of pixel_test.c must succeed');
 
-const pixelWasmBytes = tc.getFileFromMemfs('workspace/pixel_test.out');
+const pixelWasmBytes = compileVfs.readFile('/workspace/pixel_test.out', false);
 const pixelModule = new WebAssembly.Module(pixelWasmBytes);
 const pixelImportNames = new Set(WebAssembly.Module.imports(pixelModule).map(i => i.name));
 assert.strictEqual(pixelImportNames.has('canvas_set_pixel'), true);
@@ -618,7 +615,7 @@ console.log('✓ Canvas pixel manipulation runtime execution and host bridging v
 
 // Test 14: Verify examples/05_canvas_pixels.c compiles and links cleanly
 const example05Code = fs.readFileSync(path.resolve('examples/05_canvas_pixels.c'), 'utf-8');
-tc.memfs.addFile('workspace/05_canvas_pixels.c', example05Code);
+compileVfs.writeFile('/workspace/05_canvas_pixels.c', example05Code);
 const comp05 = await tc.compile('workspace/05_canvas_pixels.c', 'workspace/05_canvas_pixels.o', 'c', ['-I/include', '-I/workspace']);
 assert.strictEqual(comp05, 0, 'examples/05_canvas_pixels.c must compile without errors');
 const link05 = await tc.link(['workspace/05_canvas_pixels.o'], 'workspace/05_canvas_pixels.out');

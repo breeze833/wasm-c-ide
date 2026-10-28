@@ -53,9 +53,8 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 |                | (executes commands)   +------------------+-------------------+  |
 |                v                                          |                      |
 |  +--------------------------------------------------------+                      |
-|  |  LLVM 19 Clang / LLD / Make Toolchain (Direct VFS Host)                        |
-|  |  - clang.wasm 19.1.0 (-cc1 wasm32-unknown-wasi)                               |
-|  |  - lld.wasm 19.1.0 (-flavor wasm, Section 12 DataCount)                       |
+|  |  LLVM 19 Single-Binary Toolchain (Direct VFS Host)                               |
+|  |  - llvm-box.wasm 19.1.0 (clang, clang++, wasm-ld, ar, nm, size, objdump, etc.)    |
 |  |  - Unified WasiHost (Direct VFS I/O, Zero MemFS)                               |
 |  +------------------------------------+------------------------------------------+
 |                                       |
@@ -97,11 +96,12 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
   - `random_get`: Fills cryptographic random values via `crypto.getRandomValues`.
   - `proc_exit`: Terminate execution with exit status code.
 
-### 3.2 Toolchain & Sysroot Integration (Zero-MemFS)
-- **Compiler Frontend (`clang.wasm`) & Linker (`lld.wasm`)**:
-  - Upstream LLVM 19.1.0 binaries from `breeze833/clang-wasi`.
+### 3.2 Toolchain & Sysroot Integration (Zero-MemFS Single Binary)
+- **Unified Toolchain Module (`llvm-box.wasm`)**:
+  - Upstream LLVM 19.1.0 multicall binary from `breeze833/clang-wasi`.
+  - Executes Clang compiler (`clang`, `clang++`, `clang-cpp`), LLD linker (`wasm-ld`, `lld`, `ld.lld`, `ld`), and LLVM utilities (`ar`, `ranlib`, `nm`, `objdump`, `size`, `cxxfilt`, `strings`, `readelf`, `strip`) through a single WebAssembly module instance.
   - Executed directly against `WasiHost` backed by `VFS`.
-  - No `memfs.wasm` dependency. Zero copy-in / copy-out overhead.
+  - No `memfs.wasm` dependency and zero duplicate binary downloads (~110MB saved). Zero copy-in / copy-out overhead.
 - **Sysroot Mount (`sysroot.tar.gz`)**:
   - Downloaded on demand and unpacked directly into `VFS`.
   - Headers mounted under `/usr/include`, `/include/wasm32-wasip1`, `/lib/clang/19/include`, and `/usr/include/c++/v1`.

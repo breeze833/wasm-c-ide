@@ -74,7 +74,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── manifest.webmanifest   # Web App Manifest for PWA installation
 │   ├── icons/                 # PWA application icons (192, 512, svg)
 │   └── sysroot/               # Downloaded on-demand via scripts/download-sysroot.js (git-ignored)
-│       ├── wasm/              # Prebuilt clang.wasm, lld.wasm, libraylib.a, libturtle.a, libturtle_raylib.a, sysroot.tar.gz
+│       ├── wasm/              # Prebuilt llvm-box.wasm, libraylib.a, libturtle.a, libturtle_raylib.a, sysroot.tar.gz
 │       └── include/           # Minimal fallback libc headers, raylib headers & turtle headers
 └── test/
     ├── ar.test.js             # Static archiver creation, extraction, table, and wasm-ld linkage tests

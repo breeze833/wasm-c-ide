@@ -2,7 +2,7 @@
 import assert from 'node:assert';
 import fs from 'node:fs';
 import { executeGccCommand, parseCompilerArgs } from '../src/toolchain/driver.js';
-import { WasmToolchain, MemFS, AppInstance } from '../src/toolchain/wasm-clang.js';
+import { WasmToolchain, AppInstance } from '../src/toolchain/wasm-clang.js';
 import { VFS } from '../src/vfs/vfs.js';
 
 console.log('--- Running WebAssembly Shared Object (.so) Unit & Integration Tests ---');

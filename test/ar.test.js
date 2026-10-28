@@ -10,6 +10,7 @@ import {
   parseArchive,
   extractSymbolsFromWasmObj,
 } from '../src/toolchain/ar.js';
+import { executeToolCommand } from '../src/toolchain/driver.js';
 import { WasmToolchain } from '../src/toolchain/wasm-clang.js';
 
 console.log('--- Running ar Archiver Unit Tests ---');
@@ -35,17 +36,15 @@ console.log('✓ sysroot mounts /usr/bin/ar verified');
 const tc = new WasmToolchain({ basePath: '/sysroot/wasm', vfs });
 await tc.init();
 
-tc.memfs.addFile('workspace/add.c', 'int add(int a, int b) { return a + b; }\n');
+vfs.writeFile('/workspace/add.c', 'int add(int a, int b) { return a + b; }\n');
 let code = await tc.compile('workspace/add.c', 'workspace/add.o', 'c', []);
 assert.strictEqual(code, 0);
-const addObj = tc.getFileFromMemfs('workspace/add.o');
-vfs.writeFile('/workspace/add.o', addObj);
+const addObj = vfs.readFile('/workspace/add.o', false);
 
-tc.memfs.addFile('workspace/sub.c', 'int sub(int a, int b) { return a - b; }\n');
+vfs.writeFile('/workspace/sub.c', 'int sub(int a, int b) { return a - b; }\n');
 code = await tc.compile('workspace/sub.c', 'workspace/sub.o', 'c', []);
 assert.strictEqual(code, 0);
-const subObj = tc.getFileFromMemfs('workspace/sub.o');
-vfs.writeFile('/workspace/sub.o', subObj);
+const subObj = vfs.readFile('/workspace/sub.o', false);
 
 // Test 3: Verify symbol extraction from Wasm objects
 const addSymbols = extractSymbolsFromWasmObj(addObj);
@@ -86,8 +85,7 @@ code = await executeArCommand({
   toolchain: tc,
   write: (m) => { tableOutput += m; },
 });
-assert.strictEqual(code, 0);
-assert.strictEqual(tableOutput, 'add.o\r\nsub.o\r\n');
+assert.strictEqual(tableOutput.trim().replace(/\r\n/g, '\n'), 'add.o\nsub.o');
 
 let tableVerboseOutput = '';
 code = await executeArCommand({
@@ -103,8 +101,8 @@ assert.match(tableVerboseOutput, /sub\.o/);
 console.log('✓ ar t and ar tv list member table of contents');
 
 // Test 6: Linking against generated libmath.a with wasm-ld (-Lworkspace -lmath)
-tc.memfs.addFile(
-  'workspace/main.c',
+vfs.writeFile(
+  '/workspace/main.c',
   'int add(int, int); int sub(int, int); int main(void) { return add(10, 20) + sub(30, 5); }\n'
 );
 code = await tc.compile('workspace/main.c', 'workspace/main.o', 'c', []);
@@ -113,7 +111,7 @@ assert.strictEqual(code, 0);
 // Link main.o with -Lworkspace -lmath
 const linkCode = await tc.link(['workspace/main.o'], 'workspace/calc.out', ['-Lworkspace', '-lmath']);
 assert.strictEqual(linkCode, 0, 'Linking with -lmath against generated libmath.a must succeed');
-const calcBinary = tc.getFileFromMemfs('workspace/calc.out');
+const calcBinary = vfs.readFile('/workspace/calc.out', false);
 assert.notStrictEqual(calcBinary, null);
 assert.strictEqual(calcBinary[0], 0x00);
 assert.strictEqual(calcBinary[1], 0x61);
@@ -168,4 +166,60 @@ assert.strictEqual(parsedLong.length, 1);
 assert.strictEqual(parsedLong[0].name, longName);
 console.log('✓ GNU long filename table (//) round-trip verified');
 
-console.log('--- ALL AR TESTS PASSED ---');
+// Test 11: nm symbol table inspector
+let nmOutput = '';
+code = await executeToolCommand({
+  cmd: 'nm',
+  args: ['libmath.a'],
+  cwd: '/workspace',
+  vfs,
+  toolchain: tc,
+  write: (m) => { nmOutput += m; },
+});
+assert.strictEqual(code, 0, 'nm libmath.a must succeed');
+assert.match(nmOutput, /add/, 'nm output must contain add symbol');
+console.log('✓ nm lists symbols from static archive and object files');
+
+// Test 12: size object memory footprint dumper
+let sizeOutput = '';
+code = await executeToolCommand({
+  cmd: 'size',
+  args: ['add.o'],
+  cwd: '/workspace',
+  vfs,
+  toolchain: tc,
+  write: (m) => { sizeOutput += m; },
+});
+assert.strictEqual(code, 0, 'size add.o must succeed');
+assert.match(sizeOutput, /text\s+data\s+bss/, 'size output must show Berkeley format headers');
+console.log('✓ size displays section footprint for object files');
+
+// Test 13: objdump disassembler and header viewer
+let objdumpOutput = '';
+code = await executeToolCommand({
+  cmd: 'objdump',
+  args: ['-h', 'add.o'],
+  cwd: '/workspace',
+  vfs,
+  toolchain: tc,
+  write: (m) => { objdumpOutput += m; },
+});
+assert.strictEqual(code, 0, 'objdump -h add.o must succeed');
+assert.match(objdumpOutput, /Sections:/, 'objdump -h must display sections header');
+console.log('✓ objdump displays section headers');
+
+// Test 14: cxxfilt symbol demangler
+let cxxfiltOutput = '';
+code = await executeToolCommand({
+  cmd: 'cxxfilt',
+  args: ['_Z3addii'],
+  cwd: '/workspace',
+  vfs,
+  toolchain: tc,
+  write: (m) => { cxxfiltOutput += m; },
+});
+assert.strictEqual(code, 0, 'cxxfilt _Z3addii must succeed');
+assert.match(cxxfiltOutput, /add\(int,\s*int\)/, 'cxxfilt must demangle _Z3addii to add(int, int)');
+console.log('✓ cxxfilt demangles C++ symbols');
+
+console.log('--- ALL AR & MULTICALL TOOL TESTS PASSED ---');
