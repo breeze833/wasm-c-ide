@@ -18,10 +18,10 @@
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
-    "canvas-wasi": "github:breeze833/canvas-wasi#v0.1.1",
+    "canvas-wasi": "https://github.com/breeze833/canvas-wasi/releases/download/v0.1.1/canvas-wasi-0.1.1.tgz",
     "jszip": "^3.10.1",
     "monaco-editor": "^0.52.2",
-    "raylib-wasi": "github:breeze833/raylib-wasi"
+    "raylib-wasi": "https://github.com/breeze833/raylib-wasi/releases/download/latest/raylib-wasi-5.5.0.tgz"
   },
   "devDependencies": {
     "vite": "^6.2.0"
