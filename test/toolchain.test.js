@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import { executeGccCommand, parseCompilerArgs } from '../src/toolchain/driver.js';
 import { WasmToolchain } from '../src/toolchain/wasm-clang.js';
 import { VFS } from '../src/vfs/vfs.js';
+import { getWasmModule, saveWasmModule, deleteWasmModule, clearWasmCache } from '../src/toolchain/wasm-cache.js';
 
 console.log('--- Running Toolchain Driver Unit Tests ---');
 
@@ -600,6 +601,91 @@ console.log('✓ Direct compile & link argument parsing passed');
       assert.strictEqual(hostCode, 0, 'Whitelisted host imports must link cleanly');
       assert.strictEqual(vfs.exists('/workspace/host.out'), true);
       console.log('✓ Linker reports error on undefined symbols and permits whitelisted host imports');
+    }
+
+    // Test 9: WebAssembly module cache and streaming compilation fallback unit tests
+    {
+      // Test 9.1: Graceful fallback when indexedDB is undefined
+      const mod = await getWasmModule('nonexistent');
+      assert.strictEqual(mod, null, 'getWasmModule should return null when indexedDB is unavailable');
+      const saved = await saveWasmModule('dummy', {});
+      assert.strictEqual(saved, false, 'saveWasmModule should return false when indexedDB is unavailable');
+      console.log('✓ wasm-cache graceful fallback when indexedDB is unavailable verified');
+
+      // Test 9.2: IndexedDB caching with mocked IDB environment
+      const testWasmBytes = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]);
+      const dummyModule = new WebAssembly.Module(testWasmBytes);
+      const storeMap = new Map();
+
+      globalThis.indexedDB = {
+        open: (dbName, version) => {
+          const req = {
+            result: {
+              objectStoreNames: { contains: () => true },
+              createObjectStore: () => {},
+              transaction: () => ({
+                objectStore: () => ({
+                  get: (k) => {
+                    const r = { result: storeMap.get(k) };
+                    setTimeout(() => r.onsuccess && r.onsuccess(), 0);
+                    return r;
+                  },
+                  put: (v, k) => {
+                    storeMap.set(k, v);
+                    const r = {};
+                    setTimeout(() => r.onsuccess && r.onsuccess(), 0);
+                    return r;
+                  },
+                  delete: (k) => {
+                    storeMap.delete(k);
+                    const r = {};
+                    setTimeout(() => r.onsuccess && r.onsuccess(), 0);
+                    return r;
+                  },
+                  clear: () => {
+                    storeMap.clear();
+                    const r = {};
+                    setTimeout(() => r.onsuccess && r.onsuccess(), 0);
+                    return r;
+                  }
+                })
+              })
+            },
+            set onsuccess(cb) { setTimeout(() => cb({ target: this }), 0); },
+            set onupgradeneeded(cb) { /* no-op */ },
+            set onerror(cb) { /* no-op */ }
+          };
+          return req;
+        }
+      };
+
+      const saveRes = await saveWasmModule('llvm-box-19.1.0', dummyModule);
+      assert.strictEqual(saveRes, true, 'saveWasmModule should succeed in IDB environment');
+
+      const retrieved = await getWasmModule('llvm-box-19.1.0');
+      assert.strictEqual(retrieved instanceof WebAssembly.Module, true, 'getWasmModule should return WebAssembly.Module');
+
+      // Test saving raw ArrayBuffer (which works universally across Firefox & Chrome without DataCloneError)
+      const saveBufRes = await saveWasmModule('llvm-box-19.1.0', testWasmBytes.buffer);
+      assert.strictEqual(saveBufRes, true, 'saveWasmModule with ArrayBuffer should succeed');
+
+      const retrievedFromBuf = await getWasmModule('llvm-box-19.1.0');
+      assert.strictEqual(retrievedFromBuf instanceof WebAssembly.Module, true, 'getWasmModule should compile ArrayBuffer to WebAssembly.Module');
+
+      // Test 9.3: WasmToolchain._getLlvmBox instant cache hit without terminal prompt
+      let hostOutput = '';
+      const cachedTc = new WasmToolchain({
+        basePath: '/sysroot/wasm',
+        hostWrite: (msg) => { hostOutput += msg; }
+      });
+
+      const loadedBox = await cachedTc._getLlvmBox();
+      assert.strictEqual(loadedBox instanceof WebAssembly.Module, true);
+      assert.strictEqual(hostOutput.includes('[Loading LLVM toolchain module'), false, 'Cached module load must not print loading banner');
+      console.log('✓ WasmToolchain._getLlvmBox instant IndexedDB cache hit without banner verified');
+
+      // Clean up global mock
+      delete globalThis.indexedDB;
     }
 
     console.log('--- ALL TOOLCHAIN DRIVER TESTS PASSED ---');

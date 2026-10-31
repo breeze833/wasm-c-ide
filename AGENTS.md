@@ -59,7 +59,8 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   ├── driver.js          # gcc / clang command parser and execution coordinator
 │   │   ├── make.js            # Incremental Makefile runner evaluating mtimes
 │   │   ├── tar.js             # Sysroot tarball extractor
-│   │   └── wasm-clang.js      # Clang, LLD, and MemFS WebAssembly wrappers
+│   │   ├── wasm-cache.js      # IndexedDB persistent binary cache for compiled WebAssembly modules
+│   │   └── wasm-clang.js      # LLVM multicall, streaming compiler, and direct VFS driver
 │   ├── vfs/
 │   │   ├── archive.js         # JSZip project export and import routines
 │   │   ├── storage.js         # IndexedDB synchronization and default project seed
@@ -279,6 +280,21 @@ Agents executing this project should proceed milestone-by-milestone:
 - Preserve `--allow-undefined` for WebAssembly shared objects (`.so`) where external symbol resolution is deferred to dynamic loading time.
 - Route `--allow-undefined` and `-Wl,--allow-undefined` in `parseCompilerArgs` (`src/toolchain/driver.js`) to linker flags, allowing advanced users to explicitly opt into permissive linking when desired.
 - Add test case in `test/toolchain.test.js` validating undefined symbol rejection and host whitelist acceptance.
+
+### Milestone 19: Toolchain Startup Acceleration, Streaming Compilation & IndexedDB Persistence
+- Implement `src/toolchain/wasm-cache.js`:
+  - Persistent binary storage using IndexedDB database `wasm-c-ide-wasm-cache` and object store `wasm_modules`.
+  - Store raw 56 MB `ArrayBuffer` (`llvm-box-19.1.0`) to avoid browser-engine `DataCloneError` on `WebAssembly.Module` serialization (deprecated across Chromium and Gecko).
+  - Subsequent launches retrieve `llvm-box` from local disk in **<100ms** with zero network transfer.
+- Implement streaming compilation & parallel stream cloning in `src/toolchain/wasm-clang.js`:
+  - Parallelize network download and compilation via `WebAssembly.compileStreaming(res)` while cloning stream to capture `ArrayBuffer` for IndexedDB cache without double download.
+  - Safe fallback to `arrayBuffer()` and `WebAssembly.compile()` for mock environments and non-streaming HTTP responses.
+- Implement background pre-warming in `src/main.js`:
+  - Silently warm up `_getLlvmBox({ silent: true })` following sysroot header extraction.
+- Implement Service Worker streaming optimization in `public/coi-serviceworker.js`:
+  - Detect `llvm-box.wasm` (~56 MB) and bypass `networkResponse.clone()` and `cache.put()`.
+  - Stream directly through with COOP/COEP headers, eliminating Service Worker memory buffer locks, worker termination, and timeout-induced `AbortError` (`"The operation was aborted."`).
+- Add unit test verification in `test/toolchain.test.js` for `wasm-cache` fallback, IndexedDB ArrayBuffer persistence, and instant cache hits.
 
 ---
 

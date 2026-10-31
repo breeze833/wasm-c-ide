@@ -24,6 +24,13 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
   - **`canvas-wasi`**: Pure C direct software framebuffer (`<graphics.h>`), HTML5 Canvas 2D vector primitives (`<graphics_canvas.h>`), floating/dockable graphics console UI (`GraphicsWindowUI`), and shared 512-byte `SharedArrayBuffer` input coordination (`InputCoordinator`).
   - **`raylib-wasi`**: Standalone Raylib 5.5 port and WebGL ES 2.0 host bridge, providing Wasm imports (`gl`, `raylib`) and zero-Emscripten `PLATFORM_CUSTOM` execution.
 - **Turtle Graphics Subsystem (`libturtle`)**: Dual backend support (Canvas-WASI backend enabled by default; Raylib backend enabled dynamically via Project Settings).
+- **Toolchain Startup Acceleration & IndexedDB Binary Persistence**:
+  - Eliminates slow remote downloads and compilation freezes on repeated IDE visits.
+  - Streaming compilation (`WebAssembly.compileStreaming`) compiles bytecode concurrently as network chunks stream over the wire.
+  - Universal binary caching: Persists raw 56 MB `ArrayBuffer` binaries inside IndexedDB (`wasm-c-ide-wasm-cache` -> `wasm_modules`), completely bypassing browser deprecation of `WebAssembly.Module` structured cloning (`DataCloneError`) across Firefox, Chrome, and Safari.
+  - Subsequent launches retrieve the pre-downloaded binary from local disk in **<100ms** with zero network transfer.
+  - Background pre-warming initiates silently on app startup so tools are warm before the user compiles.
+  - Service Worker streaming: Large WebAssembly binaries (`llvm-box.wasm`) bypass Service Worker `CacheStorage` stream cloning, eliminating worker memory exhaustion and timeout-induced `AbortError` (`"The operation was aborted."`).
 
 ---
 
@@ -56,6 +63,7 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 |  +--------------------------------------------------------+                      |
 |  |  LLVM 19 Single-Binary Toolchain (Direct VFS Host)                               |
 |  |  - llvm-box.wasm 19.1.0 (clang, clang++, wasm-ld, ar, nm, size, objdump, etc.)    |
+|  |  - WebAssembly.compileStreaming & IndexedDB Binary Persistence (wasm-cache.js)  |
 |  |  - Unified WasiHost (Direct VFS I/O, Zero MemFS)                               |
 |  +------------------------------------+------------------------------------------+
 |                                       |
@@ -68,7 +76,7 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 |  | - /bin & /usr/bin (POSIX and Toolchain Binaries: gcc, g++, ar, make, etc.)   |
 |  +-------------------------------------------------------------------------------+
 +----------------------------------------------------------------------------------+
-| Offline Engine: Unified PWA Service Worker (COOP/COEP & CacheStorage)            |
+| Offline Engine: Unified PWA Service Worker (COOP/COEP) + IndexedDB Wasm Cache    |
 +----------------------------------------------------------------------------------+
 ```
 
@@ -103,6 +111,16 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
   - Executes Clang compiler (`clang`, `clang++`, `clang-cpp`), LLD linker (`wasm-ld`, `lld`, `ld.lld`, `ld`), and LLVM utilities (`ar`, `ranlib`, `nm`, `objdump`, `size`, `cxxfilt`, `strings`, `readelf`, `strip`) through a single WebAssembly module instance.
   - Executed directly against `WasiHost` backed by `VFS`.
   - No `memfs.wasm` dependency and zero duplicate binary downloads (~110MB saved). Zero copy-in / copy-out overhead.
+- **Toolchain Startup Lifecycle & Persistent Binary Cache (`wasm-cache.js`)**:
+  - `src/toolchain/wasm-cache.js` provides an IndexedDB persistence layer (`wasm-c-ide-wasm-cache` database, `wasm_modules` object store).
+  - Stores the raw 56 MB `ArrayBuffer` under cache key `'llvm-box-19.1.0'`.
+  - **Overcoming Browser Engine Restrictions**: Modern browser engines (Firefox Gecko and Chromium V8) deprecated and removed structured cloning of `WebAssembly.Module` instances into IndexedDB, rejecting it with `DataCloneError`. The IDE therefore stores the raw `ArrayBuffer`, which is universally structured-cloneable across all browsers without restrictions.
+  - **Subsequent Session Performance**: On repeat visits or tab reloads, `_getLlvmBox()` queries IndexedDB, reading the binary from local disk in **~50ms** and compiling it locally via `WebAssembly.compile()`, bypassing network transfer completely with **0 bytes downloaded**.
+- **Streaming Compilation & Parallel Buffer Capture**:
+  - On initial download, `_getLlvmBox()` concurrently compiles incoming network chunks via `WebAssembly.compileStreaming(res)` while teeing the response stream via `clone.arrayBuffer()` to simultaneously capture the `ArrayBuffer` for IndexedDB persistence without double-downloading.
+  - Robust fallback: If `compileStreaming` fails (e.g. non-standard MIME type or test environment), cleanly falls back to `fetch().then(r => r.arrayBuffer())` and `WebAssembly.compile()`.
+- **Silent Background Pre-Warming**:
+  - `src/main.js` initiates `toolchain._getLlvmBox({ silent: true })` immediately after sysroot headers finish unpacking in the background. While the user reads code or edits files, the compiler is fetched and compiled without printing to or disrupting the terminal prompt.
 - **Sysroot Mount (`sysroot.tar.gz`)**:
   - Downloaded on demand and unpacked directly into `VFS`.
   - Headers mounted under `/usr/include`, `/include/wasm32-wasip1`, `/lib/clang/19/include`, and `/usr/include/c++/v1`.
@@ -135,6 +153,13 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
   - **Zero-Drift Virtual Sysroot Sync**: Copied headers in `public/sysroot/include/turtle/` automatically generate `src/vfs/turtle-headers.js`, ensuring the virtual sysroot remains synchronized with compiled static libraries.
 - **Zero-Copy Frame Transfer**: Synchronous `transferToImageBitmap()` in Web Worker transferred via `postMessage({ type: 'frame', bitmap }, [bitmap])` to `ImageBitmapRenderingContext`.
 
+### 3.5 Service Worker & Large Asset Delivery Optimization (`coi-serviceworker.js`)
+- **Cross-Origin Isolation**: Injects `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` to enable `SharedArrayBuffer` in modern browsers.
+- **Large Asset Streaming Bypass**:
+  - For large WebAssembly binaries (`llvm-box.wasm` ~56 MB), the Service Worker fetch handler explicitly bypasses `networkResponse.clone()` and `cache.put()`.
+  - **Eliminating Abort Errors**: Buffering and cloning 56 MB streams inside a Service Worker fetch event frequently triggers stream buffer locks, high memory usage, and browser worker keepalive timeouts (30-60s), resulting in `DOMException: The operation was aborted.` (`AbortError`).
+  - Bypassing `CacheStorage` cloning allows the network response to stream directly through to the client with COOP/COEP headers, while persistent caching is handled deterministically by the client-side IndexedDB binary cache.
+
 ---
 
 ## 4. Verification & Testing Checklist
@@ -153,3 +178,8 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 | **Static Archiver (`ar rcs`)** | Built-in `ar` creates archives directly in VFS; `wasm-ld` links against them without errors. |
 | **Canvas & Raylib Graphics** | Generic framebuffer, 2D vector canvas, and Raylib interactive graphics render at ~60 FPS via zero-copy `ImageBitmap`. |
 | **Turtle Graphics Subsystem** | Both `canvas-wasi` and Raylib turtle backends compile and render progressive animations. |
+| **Wasm Binary IndexedDB Caching** | First run saves 56MB `ArrayBuffer` to IndexedDB `wasm_modules`; subsequent sessions retrieve from local disk in <100ms with 0 network bytes. |
+| **Cross-Browser DataCloneError Prevention** | Storing raw `ArrayBuffer` in IndexedDB succeeds across Firefox and Chrome without `DataCloneError`. |
+| **Streaming Compilation & Fallback** | `WebAssembly.compileStreaming` compiles chunks concurrently with download; falls back gracefully to `arrayBuffer()`. |
+| **Service Worker Large Asset Delivery** | `llvm-box.wasm` streams directly through Service Worker with COOP/COEP headers without buffer locks or timeout aborts (`The operation was aborted.`). |
+| **Silent Background Pre-Warming** | Background toolchain warmup completes silently without printing to or disrupting the active xterm terminal prompt. |

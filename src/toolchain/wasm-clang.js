@@ -4,6 +4,7 @@
 import { Tar } from './tar.js';
 import { WasiHost, ProcExit, ESUCCESS, normalizePath } from '../vfs/wasi-host.js';
 import { WASM_HOST_IMPORTS } from '../vfs/sysroot.js';
+import { getWasmModule, saveWasmModule } from './wasm-cache.js';
 
 export { ProcExit };
 
@@ -65,6 +66,7 @@ export class WasmToolchain {
     this.hostWrite = options.hostWrite || console.log;
     this.vfs = options.vfs || null;
     this.llvmBoxModule = null;
+    this.llvmBoxPromise = null;
     this.initialized = false;
     this.initPromise = null;
   }
@@ -189,13 +191,72 @@ export class WasmToolchain {
     await this.initPromise;
   }
 
-  async _getLlvmBox() {
-    if (!this.llvmBoxModule) {
-      this.hostWrite('\x1b[33m[Loading LLVM toolchain module (llvm-box.wasm)...]\x1b[0m\r\n');
-      const buf = await fetch(`${this.basePath}/llvm-box.wasm`).then(r => r.arrayBuffer());
-      this.llvmBoxModule = await WebAssembly.compile(buf);
+  async _getLlvmBox(options = {}) {
+    if (this.llvmBoxModule) return this.llvmBoxModule;
+    if (this.llvmBoxPromise) return this.llvmBoxPromise;
+
+    const silent = Boolean(options.silent);
+    const CACHE_KEY = 'llvm-box-19.1.0';
+
+    this.llvmBoxPromise = (async () => {
+      // 1. Check IndexedDB persistent cache
+      try {
+        const cached = await getWasmModule(CACHE_KEY);
+        if (cached) {
+          this.llvmBoxModule = cached;
+          return cached;
+        }
+      } catch {}
+
+      // 2. Fetch from network & compile
+      if (!silent && typeof this.hostWrite === 'function') {
+        this.hostWrite('\x1b[33m[Loading LLVM toolchain module (llvm-box.wasm)...]\x1b[0m\r\n');
+      }
+
+      const wasmUrl = `${this.basePath}/llvm-box.wasm`;
+      let compiled = null;
+      let rawBuf = null;
+
+      // Try streaming compilation while retrieving buffer for IndexedDB persistence
+      if (typeof WebAssembly.compileStreaming === 'function') {
+        try {
+          const res = await fetch(wasmUrl);
+          if (res && res.ok && typeof res.clone === 'function') {
+            const clone = res.clone();
+            const [mod, buf] = await Promise.all([
+              WebAssembly.compileStreaming(res),
+              clone.arrayBuffer(),
+            ]);
+            compiled = mod;
+            rawBuf = buf;
+          }
+        } catch {
+          // If streaming compilation fails (e.g. mock fetch in tests or incorrect Content-Type), fall back
+        }
+      }
+
+      // Fallback to arrayBuffer compilation
+      if (!compiled) {
+        const res = await fetch(wasmUrl);
+        rawBuf = await res.arrayBuffer();
+        compiled = await WebAssembly.compile(rawBuf);
+      }
+
+      this.llvmBoxModule = compiled;
+
+      // 3. Asynchronously persist ArrayBuffer to IndexedDB (universally supported across all browsers)
+      if (rawBuf) {
+        saveWasmModule(CACHE_KEY, rawBuf).catch(() => {});
+      }
+
+      return compiled;
+    })();
+
+    try {
+      return await this.llvmBoxPromise;
+    } finally {
+      this.llvmBoxPromise = null;
     }
-    return this.llvmBoxModule;
   }
 
   async _getClang() {

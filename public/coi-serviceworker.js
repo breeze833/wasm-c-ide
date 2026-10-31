@@ -76,8 +76,13 @@ if (typeof window === 'undefined') {
         try {
           const networkResponse = await fetch(request);
           if (networkResponse && (networkResponse.status === 200 || networkResponse.status === 0)) {
-            // Put cloned response into cache
-            cache.put(request, networkResponse.clone()).catch(() => {});
+            // For large WebAssembly modules (e.g. llvm-box.wasm ~56MB), bypass CacheStorage cloning
+            // to avoid Service Worker stream buffer exhaustion and timeout aborts.
+            // The compiled WebAssembly.Module is persisted directly in IndexedDB.
+            const isLargeBinary = url.pathname.endsWith('/llvm-box.wasm');
+            if (!isLargeBinary) {
+              cache.put(request, networkResponse.clone()).catch(() => {});
+            }
           }
           return withCoopCoepHeaders(networkResponse);
         } catch (err) {

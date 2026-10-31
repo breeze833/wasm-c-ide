@@ -157,8 +157,10 @@ export class App {
       },
     });
 
-    // Warm up compiler in background so sysroot is ready
-    this.toolchain.init().catch(err => {
+    // Warm up compiler in background so sysroot and llvm-box are ready
+    this.toolchain.init().then(() => {
+      return this.toolchain._getLlvmBox({ silent: true });
+    }).catch(err => {
       console.warn('Toolchain background pre-initialization notice:', err);
     });
 
