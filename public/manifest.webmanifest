@@ -1,6 +1,6 @@
 {
-  "name": "Wasm C/C++ Teaching IDE",
-  "short_name": "C/C++ IDE",
+  "name": "C/C++ Web IDE",
+  "short_name": "C/C++ Web IDE",
   "description": "Installation-free, multi-file C/C++ development environment running entirely client-side via WebAssembly",
   "start_url": "./",
   "scope": "./",

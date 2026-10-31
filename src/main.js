@@ -48,7 +48,7 @@ if (typeof window !== 'undefined') {
     if (btnInstall) {
       btnInstall.style.display = 'none';
     }
-    showToast('Wasm C/C++ IDE successfully installed!', 'success', 3500);
+    showToast('C/C++ Web IDE successfully installed!', 'success', 3500);
   });
 }
 
@@ -811,7 +811,7 @@ export function initApp() {
   appContainer.innerHTML = `
     <header class="app-header">
       <div class="app-title-group">
-        <span>C/C++ Wasm IDE</span>
+        <span>C/C++ Web IDE</span>
         <span class="isolation-badge ${isIsolated ? '' : 'unisolated'}">
           ${isIsolated ? 'Cross-Origin Isolated' : 'Not Isolated (SharedArrayBuffer Disabled)'}
         </span>

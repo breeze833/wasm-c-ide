@@ -72,44 +72,43 @@ assert.strictEqual(vfs.exists('/usr/include/turtle_backend_raylib.h'), false);
 assert.strictEqual(vfs.exists('/usr/lib/libturtle_raylib.a'), false);
 console.log('✓ Raylib turtle backend dynamic mount and unmount verified');
 
-// Test 4: Project Settings auto-detects turtle library usage in build.sh & Makefile
+// Test 4: Project Settings build.sh & Makefile generation with manual turtle linker flags
 const settingsVfs = new VFS();
-
-// Rule (1): raylib is not enabled && turtle_backend_canvas_wasi.h is included ==> -lturtle
 settingsVfs.writeFile('/workspace/main.c', '#include <turtle.h>\n#include <turtle_backend_canvas_wasi.h>\nint main(void) { return 0; }\n');
+
+// 1. Manually specified -lturtle flag is included
 const settings = new SettingsModal(settingsVfs, {
   mode: 'c',
   buildSystem: 'sh',
   enableRaylib: false,
-  targetName: 'turtle_app.out',
+  linkerFlags: '-o turtle_app.out -lturtle',
 });
 settings.regenerateBuildFiles();
 
 assert.strictEqual(settingsVfs.exists('/workspace/build.sh'), true);
 let buildSh = settingsVfs.readFile('/workspace/build.sh', true);
-assert.strictEqual(buildSh.includes('-lturtle'), true, 'Rule (1): build.sh must link -lturtle');
+assert.strictEqual(buildSh.includes('-lturtle'), true, 'build.sh must include manual -lturtle');
 let makefile = settingsVfs.readFile('/workspace/Makefile', true);
-assert.strictEqual(makefile.includes('LDFLAGS = -lturtle'), true, 'Rule (1): Makefile must include LDFLAGS = -lturtle');
+assert.strictEqual(makefile.includes('LDFLAGS = -o turtle_app.out -lturtle'), true, 'Makefile must include manual LDFLAGS = -o turtle_app.out -lturtle');
 
-// Rule (2): raylib is enabled && turtle_backend_canvas_wasi.h is included ==> -lturtle
-settings.config.enableRaylib = true;
+// 2. If student does not specify -lturtle, flags are NOT automatically added
+settings.config.linkerFlags = '-o turtle_app.out';
 settings.regenerateBuildFiles();
 buildSh = settingsVfs.readFile('/workspace/build.sh', true);
-assert.strictEqual(buildSh.includes('-lturtle'), true, 'Rule (2): build.sh must link -lturtle');
-assert.strictEqual(buildSh.includes('-lraylib'), false, 'Rule (2): build.sh must NOT link -lraylib when canvas_wasi is used');
+assert.strictEqual(buildSh.includes('-lturtle'), false, 'build.sh must NOT automatically add -lturtle');
 makefile = settingsVfs.readFile('/workspace/Makefile', true);
-assert.strictEqual(makefile.includes('LDFLAGS = -lturtle'), true, 'Rule (2): Makefile must include LDFLAGS = -lturtle');
+assert.strictEqual(makefile.includes('-lturtle'), false, 'Makefile must NOT automatically add -lturtle');
 
-// Rule (3): raylib is enabled && turtle_backend_raylib.h is included ==> -lturtle_raylib -lraylib
-settingsVfs.writeFile('/workspace/main.c', '#include <turtle.h>\n#include <turtle_backend_raylib.h>\nint main(void) { return 0; }\n');
+// 3. Manually specified Raylib turtle backend flags
+settings.config.linkerFlags = '-o turtle_app.out -lturtle_raylib -lraylib';
 settings.config.enableRaylib = true;
 settings.regenerateBuildFiles();
 
 const raylibBuildSh = settingsVfs.readFile('/workspace/build.sh', true);
-assert.strictEqual(raylibBuildSh.includes('-lturtle_raylib -lraylib'), true, 'Rule (3): build.sh must link -lturtle_raylib -lraylib');
+assert.strictEqual(raylibBuildSh.includes('-lturtle_raylib -lraylib'), true, 'build.sh must include manual -lturtle_raylib -lraylib');
 const raylibMakefile = settingsVfs.readFile('/workspace/Makefile', true);
-assert.strictEqual(raylibMakefile.includes('LDFLAGS = -lturtle_raylib -lraylib'), true, 'Rule (3): Makefile must include LDFLAGS = -lturtle_raylib -lraylib');
-console.log('✓ Settings build.sh & Makefile generation with rules (1), (2), (3) verified');
+assert.strictEqual(raylibMakefile.includes('LDFLAGS = -o turtle_app.out -lturtle_raylib -lraylib'), true, 'Makefile must include manual LDFLAGS');
+console.log('✓ Settings build.sh & Makefile generation with manual linkerFlags verified');
 
 // Test 5: End-to-end WasmToolchain compilation & linking for canvas-wasi turtle backend
 globalThis.fetch = async (url) => {

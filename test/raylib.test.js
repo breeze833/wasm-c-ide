@@ -45,24 +45,35 @@ assert.strictEqual(vfs.exists('/usr/include/rlgl.h'), false);
 assert.strictEqual(vfs.exists('/usr/lib/libraylib.a'), false);
 console.log('✓ VFS mountRaylibSysroot and unmountRaylibSysroot verified');
 
-// Test 3: Project Settings modal generates build.sh & Makefile with -lraylib when enableRaylib: true
+// Test 3: Project Settings modal generates build.sh & Makefile with manual linkerFlags and does not auto-add flags
 const settingsVfs = new VFS();
 const settings = new SettingsModal(settingsVfs, {
   mode: 'c',
   buildSystem: 'sh',
   enableRaylib: true,
-  targetName: 'game.out',
+  linkerFlags: '-o game.out -lraylib',
 });
 settings.regenerateBuildFiles();
 
 assert.strictEqual(settingsVfs.exists('/workspace/build.sh'), true);
 const buildSh = settingsVfs.readFile('/workspace/build.sh', true);
-assert.strictEqual(buildSh.includes('-lraylib'), true, 'build.sh must include -lraylib when enableRaylib is true');
+assert.strictEqual(buildSh.includes('-lraylib'), true, 'build.sh must include -lraylib when specified in linkerFlags');
 
 assert.strictEqual(settingsVfs.exists('/workspace/Makefile'), true);
 const makefile = settingsVfs.readFile('/workspace/Makefile', true);
-assert.strictEqual(makefile.includes('LDFLAGS = -lraylib'), true, 'Makefile must include LDFLAGS = -lraylib when enableRaylib is true');
-console.log('✓ Project Settings build.sh & Makefile generation with -lraylib verified');
+assert.strictEqual(makefile.includes('LDFLAGS = -o game.out -lraylib'), true, 'Makefile must include specified LDFLAGS');
+
+// Verify that flags are NOT automatically added if omitted from linkerFlags
+const settingsNoAuto = new SettingsModal(settingsVfs, {
+  mode: 'c',
+  buildSystem: 'sh',
+  enableRaylib: true,
+  linkerFlags: '-o game.out',
+});
+settingsNoAuto.regenerateBuildFiles();
+const buildShNoAuto = settingsVfs.readFile('/workspace/build.sh', true);
+assert.strictEqual(buildShNoAuto.includes('-lraylib'), false, 'build.sh must NOT automatically add -lraylib when omitted from linkerFlags');
+console.log('✓ Project Settings build.sh & Makefile generation with manual linkerFlags verified');
 
 // Test 4: InputCoordinator state synchronization across SharedArrayBuffer
 const sharedBuffer = new SharedArrayBuffer(512);

@@ -140,7 +140,7 @@ getElement('setting-build-sys').value = 'make';
 getElement('setting-raylib').checked = true;
 getElement('setting-includes').value = 'include, src';
 getElement('setting-flags').value = '-Wall -O2';
-getElement('setting-target').value = 'mygame.out';
+getElement('setting-linker-flags').value = '-o mygame.out -lraylib';
 
 // 1. Click Save button: saves config, does NOT generate build files
 saveBtn.click();
@@ -150,6 +150,7 @@ assert.strictEqual(savedConfig.buildSystem, 'make');
 assert.strictEqual(savedConfig.enableRaylib, true);
 assert.deepStrictEqual(savedConfig.includePaths, ['include', 'src']);
 assert.deepStrictEqual(savedConfig.compilerFlags, ['-Wall', '-O2']);
+assert.strictEqual(savedConfig.linkerFlags, '-o mygame.out -lraylib');
 assert.strictEqual(savedConfig.targetName, 'mygame.out');
 assert.strictEqual(vfs.exists('/workspace/build.sh'), false, 'Save must NOT generate build.sh');
 assert.strictEqual(vfs.exists('/workspace/Makefile'), false, 'Save must NOT generate Makefile');
@@ -163,14 +164,14 @@ assert.strictEqual(vfs.exists('/workspace/Makefile'), true, 'Generate must creat
 const genBuildSh = vfs.readFile('/workspace/build.sh', true);
 assert.strictEqual(genBuildSh.includes('src/game.c'), true, 'build.sh must compile src/game.c');
 assert.strictEqual(genBuildSh.includes('src/utils.c'), true, 'build.sh must compile src/utils.c');
-assert.strictEqual(genBuildSh.includes('-lraylib'), true, 'build.sh must link raylib when enabled');
-assert.strictEqual(genBuildSh.includes('-o mygame.out\necho "Build complete: mygame.out"'), true, 'build.sh must have clean newline before echo');
+assert.strictEqual(genBuildSh.includes('-lraylib'), true, 'build.sh must link raylib when specified in linkerFlags');
+assert.strictEqual(genBuildSh.includes('-o mygame.out -lraylib\necho "Build complete: mygame.out"'), true, 'build.sh must have clean newline before echo');
 
 const genMakefile = vfs.readFile('/workspace/Makefile', true);
 assert.strictEqual(genMakefile.includes('src/game.c'), true, 'Makefile must include src/game.c');
 assert.strictEqual(genMakefile.includes('src/utils.c'), true, 'Makefile must include src/utils.c');
 assert.strictEqual(genMakefile.includes('TARGET = mygame.out'), true, 'Makefile must set TARGET = mygame.out');
-assert.strictEqual(genMakefile.includes('LDFLAGS = -lraylib'), true, 'Makefile must set LDFLAGS = -lraylib');
+assert.strictEqual(genMakefile.includes('LDFLAGS = -o mygame.out -lraylib'), true, 'Makefile must set LDFLAGS = -o mygame.out -lraylib');
 
 console.log('✓ SettingsModal separate Save and Generate Build Script buttons verified');
 

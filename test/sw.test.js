@@ -8,8 +8,8 @@ console.log('--- Running PWA & Service Worker Unit Tests ---');
 const manifestRaw = fs.readFileSync('public/manifest.webmanifest', 'utf-8');
 const manifest = JSON.parse(manifestRaw);
 
-assert.strictEqual(manifest.name, 'Wasm C/C++ Teaching IDE');
-assert.strictEqual(manifest.short_name, 'C/C++ IDE');
+assert.strictEqual(manifest.name, 'C/C++ Web IDE');
+assert.strictEqual(manifest.short_name, 'C/C++ Web IDE');
 assert.strictEqual(manifest.display, 'standalone');
 assert.strictEqual(manifest.start_url, './');
 assert.strictEqual(manifest.scope, './');

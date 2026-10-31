@@ -1,20 +1,38 @@
 // Project Settings Panel & Build File Generator
 
 export class SettingsModal {
-  constructor(vfs, config, onSave = () => {}, onGenerateBuildFiles = () => {}) {
+  constructor(vfs, config = {}, onSave = () => {}, onGenerateBuildFiles = () => {}) {
     this.vfs = vfs;
+    const rawLinker = (config && config.linkerFlags !== undefined)
+      ? config.linkerFlags
+      : (config && config.targetName !== undefined
+          ? (config.targetName.startsWith('-o') ? config.targetName : `-o ${config.targetName}`)
+          : '-o a.out');
+
     this.config = {
       mode: 'c',
       buildSystem: 'sh',
       enableRaylib: false,
       includePaths: ['include'],
       compilerFlags: ['-Wall', '-Wextra'],
-      targetName: 'a.out',
+      linkerFlags: rawLinker,
+      targetName: this.extractTarget(rawLinker),
       sources: ['src/calc.c', 'src/main.c'],
       ...config,
     };
+    if (this.config.linkerFlags) {
+      this.config.targetName = this.extractTarget(this.config.linkerFlags);
+    }
     this.onSave = onSave;
     this.onGenerateBuildFiles = onGenerateBuildFiles;
+  }
+
+  extractTarget(linkerFlags) {
+    if (!linkerFlags || typeof linkerFlags !== 'string') return 'a.out';
+    const match = linkerFlags.match(/(?:^|\s)-o\s*([^\s]+)/);
+    if (match) return match[1];
+    const token = linkerFlags.trim().split(/\s+/).find(t => !t.startsWith('-'));
+    return token || 'a.out';
   }
 
   readFormValues(modalOverlay) {
@@ -24,7 +42,13 @@ export class SettingsModal {
     const raylib = modalOverlay.querySelector('#setting-raylib');
     const includes = modalOverlay.querySelector('#setting-includes');
     const flags = modalOverlay.querySelector('#setting-flags');
-    const target = modalOverlay.querySelector('#setting-target');
+    const linkerEl = modalOverlay.querySelector('#setting-linker-flags');
+    const targetEl = modalOverlay.querySelector('#setting-target');
+    const linkerFlags = (linkerEl && linkerEl.value !== undefined && linkerEl.value !== '')
+      ? linkerEl
+      : (targetEl && targetEl.value !== undefined && targetEl.value !== '')
+        ? targetEl
+        : (linkerEl || targetEl);
 
     if (mode) this.config.mode = mode.value;
     if (buildSys) this.config.buildSystem = buildSys.value;
@@ -41,8 +65,11 @@ export class SettingsModal {
         .map(s => s.trim())
         .filter(Boolean);
     }
-    if (target) {
-      this.config.targetName = target.value.trim() || 'a.out';
+    if (linkerFlags) {
+      const val = linkerFlags.value.trim();
+      const resolved = val ? (val.startsWith('-') ? val : `-o ${val}`) : '-o a.out';
+      this.config.linkerFlags = resolved;
+      this.config.targetName = this.extractTarget(resolved);
     }
   }
 
@@ -91,8 +118,8 @@ export class SettingsModal {
             <input type="text" id="setting-flags" class="form-control" value="${this.config.compilerFlags.join(' ')}">
           </div>
           <div class="form-group">
-            <label for="setting-target">Output Target Binary:</label>
-            <input type="text" id="setting-target" class="form-control" value="${this.config.targetName}">
+            <label for="setting-linker-flags">Linker Flags:</label>
+            <input type="text" id="setting-linker-flags" class="form-control" value="${this.config.linkerFlags || '-o a.out'}">
           </div>
         </div>
         <div class="modal-footer">
@@ -142,46 +169,20 @@ export class SettingsModal {
     const incFlags = this.config.includePaths.map(p => `-I${p}`).join(' ');
     const extraFlags = this.config.compilerFlags.join(' ');
     const compiler = this.config.mode === 'cpp' ? 'g++' : 'gcc';
+    const linkerFlags = (this.config.linkerFlags || '-o a.out').trim();
+    const targetName = this.extractTarget(linkerFlags);
 
-    // Scan workspace for C/C++ source files and detect backend headers
+    // Scan workspace for C/C++ source files
     let sources = [];
-    let hasTurtleCanvasWasi = false;
-    let hasTurtleRaylib = false;
     try {
       const allFiles = this.vfs.getAllFiles('/workspace');
       sources = allFiles
         .filter(f => !f.isDir && (f.path.endsWith('.c') || f.path.endsWith('.cpp')))
         .map(f => f.path.replace(/^\/workspace\/?/, ''));
-
-      for (const s of sources) {
-        try {
-          const content = this.vfs.readFile(`/workspace/${s}`, true);
-          if (typeof content === 'string') {
-            if (content.includes('turtle_backend_canvas_wasi.h')) hasTurtleCanvasWasi = true;
-            if (content.includes('turtle_backend_raylib.h')) hasTurtleRaylib = true;
-          }
-        } catch {}
-      }
     } catch {}
 
     if (sources.length === 0) {
       sources = ['src/calc.c', 'src/main.c'];
-    }
-
-    let linkLibs = '';
-    if (this.config.enableRaylib) {
-      if (hasTurtleRaylib) {
-        // Rule (3): raylib is enabled && turtle_backend_raylib.h is included ==> -lturtle_raylib -lraylib
-        linkLibs = '-lturtle_raylib -lraylib';
-      } else if (hasTurtleCanvasWasi) {
-        // Rule (2): raylib is enabled && turtle_backend_canvas_wasi.h is included ==> -lturtle
-        linkLibs = '-lturtle';
-      } else {
-        linkLibs = '-lraylib';
-      }
-    } else if (hasTurtleCanvasWasi) {
-      // Rule (1): raylib is not enabled && turtle_backend_canvas_wasi.h is included ==> -lturtle
-      linkLibs = '-lturtle';
     }
 
     const objFiles = sources.map(s => {
@@ -197,21 +198,20 @@ export class SettingsModal {
         .join(' ');
       buildSh += `${compileCmd}\n`;
     }
-    const linkCmd = [compiler, ...objFiles, linkLibs, '-o', this.config.targetName]
+    const linkCmd = [compiler, ...objFiles, linkerFlags]
       .filter(Boolean)
       .join(' ');
     buildSh += `${linkCmd}\n`;
-    buildSh += `echo "Build complete: ${this.config.targetName}"\n`;
+    buildSh += `echo "Build complete: ${targetName}"\n`;
 
     this.vfs.writeFile('/workspace/build.sh', buildSh);
 
     // 2. Generate /workspace/Makefile
+    const cflags = [incFlags, extraFlags].filter(Boolean).join(' ');
     let makefile = `# Auto-generated Makefile\nCC = ${compiler}\n`;
-    makefile += `CFLAGS = ${incFlags} ${extraFlags}\n`;
-    if (linkLibs) {
-      makefile += `LDFLAGS = ${linkLibs}\n`;
-    }
-    makefile += `TARGET = ${this.config.targetName}\n\n`;
+    makefile += `CFLAGS = ${cflags}\n`;
+    makefile += `LDFLAGS = ${linkerFlags}\n`;
+    makefile += `TARGET = ${targetName}\n\n`;
     makefile += `all: $(TARGET)\n\n`;
     makefile += `build:\n\tmkdir -p build\n\n`;
 
@@ -219,8 +219,7 @@ export class SettingsModal {
       makefile += `${objFiles[i]}: ${sources[i]} | build\n\t$(CC) $(CFLAGS) -c ${sources[i]} -o ${objFiles[i]}\n\n`;
     }
 
-    const ldFlagsRef = linkLibs ? ' $(LDFLAGS)' : '';
-    makefile += `$(TARGET): ${objFiles.join(' ')}\n\t$(CC) ${objFiles.join(' ')}${ldFlagsRef} -o $(TARGET)\n\n`;
+    makefile += `$(TARGET): ${objFiles.join(' ')}\n\t$(CC) ${objFiles.join(' ')} $(LDFLAGS)\n\n`;
     makefile += `clean:\n\trm -rf build $(TARGET)\n`;
 
     this.vfs.writeFile('/workspace/Makefile', makefile);

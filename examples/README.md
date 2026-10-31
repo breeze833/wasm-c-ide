@@ -1,4 +1,4 @@
-# Wasm C/C++ IDE Examples
+# C/C++ Web IDE Examples
 
 This directory provides ready-to-run, single-file C programs demonstrating the different execution and graphics capabilities of the in-browser IDE.
 
