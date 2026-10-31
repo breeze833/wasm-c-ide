@@ -22,6 +22,7 @@ const WASM_DIR = path.join(projectRoot, 'public', 'sysroot', 'wasm');
 const RAYLIB_INC_DIR = path.join(projectRoot, 'public', 'sysroot', 'include', 'raylib');
 const TURTLE_INC_DIR = path.join(projectRoot, 'public', 'sysroot', 'include', 'turtle');
 const LIBTURTLE_BUILD_DIR = path.join(projectRoot, 'build', 'libturtle');
+const SYSROOT_DIR = path.join(projectRoot, 'build', 'sysroot');
 const TURTLE_HEADERS_JS = path.join(projectRoot, 'src', 'vfs', 'turtle-headers.js');
 
 const REQUIRED_FILES = [
@@ -180,7 +181,14 @@ async function downloadTurtleAssets() {
   fs.writeFileSync(TURTLE_HEADERS_JS, generatedJs);
   console.log('[sysroot] Generated src/vfs/turtle-headers.js');
 
-  // 4. Build libraries using make utility
+  // 4. Extract WASI sysroot if needed for host clang --sysroot
+  const sysrootTarPath = path.join(WASM_DIR, 'sysroot.tar.gz');
+  if (!fs.existsSync(path.join(SYSROOT_DIR, 'include'))) {
+    fs.mkdirSync(SYSROOT_DIR, { recursive: true });
+    execSync(`tar -xzf "${sysrootTarPath}" -C "${SYSROOT_DIR}"`);
+  }
+
+  // 5. Build libraries using make utility with downloaded WASI sysroot
   const libTurtlePath = path.join(WASM_DIR, 'libturtle.a');
   const libCanvasWasiPath = path.join(WASM_DIR, 'libturtle_canvas-wasi.a');
   const libRaylibTurtlePath = path.join(WASM_DIR, 'libturtle_raylib.a');
@@ -189,7 +197,11 @@ async function downloadTurtleAssets() {
 
   // Build canvas-wasi backend
   execSync(`make -C "${LIBTURTLE_BUILD_DIR}" clean BACKEND=canvas-wasi 2>/dev/null || true`);
-  execSync(`make -C "${LIBTURTLE_BUILD_DIR}" BACKEND=canvas-wasi`, { stdio: 'inherit' });
+  execSync(
+    `make -C "${LIBTURTLE_BUILD_DIR}" BACKEND=canvas-wasi ` +
+    `CFLAGS="-O2 -Wall -Wextra --target=wasm32-wasi --sysroot=${SYSROOT_DIR}"`,
+    { stdio: 'inherit' }
+  );
   const builtCanvasLib = path.join(LIBTURTLE_BUILD_DIR, 'build', 'canvas-wasi', 'libturtle_canvas-wasi.a');
   fs.copyFileSync(builtCanvasLib, libCanvasWasiPath);
   fs.copyFileSync(builtCanvasLib, libTurtlePath);
@@ -198,7 +210,7 @@ async function downloadTurtleAssets() {
   execSync(`make -C "${LIBTURTLE_BUILD_DIR}" clean BACKEND=raylib 2>/dev/null || true`);
   execSync(
     `make -C "${LIBTURTLE_BUILD_DIR}" BACKEND=raylib ` +
-    `CC=clang AR=llvm-ar CFLAGS="-O2 --target=wasm32-wasi" ` +
+    `CC=clang AR=llvm-ar CFLAGS="-O2 --target=wasm32-wasi --sysroot=${SYSROOT_DIR}" ` +
     `INCLUDES="-Iinclude -Ibackend/raylib/include -I${RAYLIB_INC_DIR}"`,
     { stdio: 'inherit' }
   );
