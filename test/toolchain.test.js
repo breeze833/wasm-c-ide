@@ -551,6 +551,57 @@ console.log('✓ Direct compile & link argument parsing passed');
     }
     console.log('✓ gcc/g++/clang/clang++ and ld/lld/wasm-ld delegation for --help and --version verified');
 
+    // Test 17: Linker reports error on undefined symbols, but permits whitelisted host imports
+    {
+      const undefinedSrc = "void nonexistent_lib_func(void);\nint main(void) { nonexistent_lib_func(); return 0; }\n";
+      vfs.writeFile('/workspace/undefined_test.c', undefinedSrc);
+
+      let linkErrMsg = '';
+      const errCode = await executeGccCommand({
+        cmd: 'gcc',
+        args: ['undefined_test.c', '-o', 'bad.out'],
+        cwd: '/workspace',
+        vfs,
+        toolchain: tc,
+        mode: 'c',
+        write: (m) => { linkErrMsg += m; }
+      });
+      assert.notStrictEqual(errCode, 0, 'Linking undefined symbol must fail');
+      assert.match(linkErrMsg, /undefined symbol:\s+nonexistent_lib_func/, 'Linker output must indicate undefined symbol');
+
+      // Explicit --allow-undefined flag overrides strict checking if requested
+      let explicitMsg = '';
+      const explicitCode = await executeGccCommand({
+        cmd: 'gcc',
+        args: ['undefined_test.c', '--allow-undefined', '-o', 'explicit.out'],
+        cwd: '/workspace',
+        vfs,
+        toolchain: tc,
+        mode: 'c',
+        write: (m) => { explicitMsg += m; }
+      });
+      assert.strictEqual(explicitCode, 0, 'Explicit --allow-undefined must succeed');
+      assert.strictEqual(vfs.exists('/workspace/explicit.out'), true);
+
+      // Whitelisted host functions (canvas-wasi) link cleanly without extra flags
+      const hostSrc = "void graphics_init(int w, int h, const char *t);\nint main(void) { graphics_init(800, 600, \"Test\"); return 0; }\n";
+      vfs.writeFile('/workspace/host_test.c', hostSrc);
+
+      let hostMsg = '';
+      const hostCode = await executeGccCommand({
+        cmd: 'gcc',
+        args: ['host_test.c', '-o', 'host.out'],
+        cwd: '/workspace',
+        vfs,
+        toolchain: tc,
+        mode: 'c',
+        write: (m) => { hostMsg += m; }
+      });
+      assert.strictEqual(hostCode, 0, 'Whitelisted host imports must link cleanly');
+      assert.strictEqual(vfs.exists('/workspace/host.out'), true);
+      console.log('✓ Linker reports error on undefined symbols and permits whitelisted host imports');
+    }
+
     console.log('--- ALL TOOLCHAIN DRIVER TESTS PASSED ---');
   });
 }

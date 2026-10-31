@@ -268,6 +268,18 @@ Agents executing this project should proceed milestone-by-milestone:
   - Map `gcc`/`g++` to `clang`/`clang++` and `ld`/`lld`/`ld.lld` to `wasm-ld`.
 - Resolve interactive stdin capturing: handle `stdin_request` event in `RuntimeManager` to seamlessly echo and buffer interactive terminal keystrokes for `scanf` / `cin`.
 
+### Milestone 18: Strict Link-Time Symbol Resolution & Host Whitelist Enforcement
+- Eliminate blanket `--allow-undefined` in `WasmToolchain.link()` (`src/toolchain/wasm-clang.js`) for executable binaries.
+- Implement host imports whitelist via `--allow-undefined-file=/usr/lib/wasm-host-imports.txt`:
+  - Mount `/usr/lib/wasm-host-imports.txt` during sysroot initialization (`src/vfs/sysroot.js`) containing the 37 host functions provided by `canvas-wasi` (`graphics_*` and `canvas_*`).
+  - Fall back to generating `/usr/lib/wasm-host-imports.txt` on-the-fly in `wasm-clang.js` if missing during isolated toolchain executions.
+- Enforce standard Unix linker behavior:
+  - Missing library flags (`-lraylib`, `-lturtle`, `-lm`), omitted object files in multi-file projects, or typos in function calls immediately produce link-time errors: `wasm-ld: error: <file>.o: undefined symbol: <name>`.
+  - Prevent broken binaries from reaching runtime execution and exploding with generic exit code 1 or unhandled `LinkError`.
+- Preserve `--allow-undefined` for WebAssembly shared objects (`.so`) where external symbol resolution is deferred to dynamic loading time.
+- Route `--allow-undefined` and `-Wl,--allow-undefined` in `parseCompilerArgs` (`src/toolchain/driver.js`) to linker flags, allowing advanced users to explicitly opt into permissive linking when desired.
+- Add test case in `test/toolchain.test.js` validating undefined symbol rejection and host whitelist acceptance.
+
 ---
 
 ## 4. Verification & Testing Checklist
@@ -276,6 +288,7 @@ Before marking any task complete, agents must verify:
 
 | Test Case | Expected Behavior |
 |---|---|
+| **Strict Link-Time Symbol Resolution** | Referencing undefined functions without required libraries (e.g. omitting `-lraylib` or multi-file `.o`) triggers `wasm-ld: error: undefined symbol` at link time; whitelisted host functions (`<graphics.h>`, `<graphics_canvas.h>`) link cleanly. |
 | **C++ Keyword in Pure C Mode** | Declaring `int class = 5;` or `int new = 1;` in Pure C mode triggers strict compile error. |
 | **Missing Semicolon / Syntax Error** | Compiler diagnostics with exact line/col and colors are printed to `xterm.js`. |
 | **Unsaved Edits** | Clicking Build without saving produces a dirty warning; output binary reflects disk state, not editor state. |

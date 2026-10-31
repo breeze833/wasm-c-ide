@@ -19,6 +19,7 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
   - Scatter/gather I/O (`fd_read`, `fd_write`) with direct zero-copy `Uint8Array.set` transfers into and out of WebAssembly linear memory.
   - In-code standard file I/O (`fopen`, `fread`, `fwrite`, `fseek`, `ftell`, `fclose`, `<fstream>`) and interactive standard I/O (`scanf`, `cin`, `getchar`) seamlessly coordinated.
 - **Pedagogical Discipline**: Enforce strict standard C mode (`-std=c11 -pedantic-errors`), disallow automatic saving to cultivate deliberate save habits, and route all GUI actions into visible shell terminal commands.
+- **Strict Standard Link-Time Symbol Resolution**: The linker enforces standard resolution of undefined symbols, immediately reporting missing libraries or unlinked object files as standard `wasm-ld: error: undefined symbol: <name>` diagnostics rather than deferring failures to opaque runtime crashes (exit code 1). Authorized host imports (`canvas-wasi`) are strictly whitelisted via `--allow-undefined-file=/usr/lib/wasm-host-imports.txt`.
 - **Decoupled Dual-Module Graphics Subsystems**:
   - **`canvas-wasi`**: Pure C direct software framebuffer (`<graphics.h>`), HTML5 Canvas 2D vector primitives (`<graphics_canvas.h>`), floating/dockable graphics console UI (`GraphicsWindowUI`), and shared 512-byte `SharedArrayBuffer` input coordination (`InputCoordinator`).
   - **`raylib-wasi`**: Standalone Raylib 5.5 port and WebGL ES 2.0 host bridge, providing Wasm imports (`gl`, `raylib`) and zero-Emscripten `PLATFORM_CUSTOM` execution.
@@ -109,6 +110,12 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 - **Driver Simplification (`driver.js`)**:
   - `executeGccCommand` coordinates command arguments, invokes Clang / LLD through `WasiHost`, and immediately accesses generated `.o`, `.s`, `.i`, or `a.out` binaries directly in `VFS`.
   - All legacy MemFS unlinking workarounds, 0-byte truncation invariants, and stale-file diffing logic are removed.
+- **Strict Symbol Resolution & Host Import Whitelist**:
+  - Blanket `--allow-undefined` is removed for executable targets.
+  - `wasm-ld` invokes with `--allow-undefined-file=/usr/lib/wasm-host-imports.txt`, whitelisting only the 37 host functions declared in `<graphics.h>` and `<graphics_canvas.h>`.
+  - Any reference to an unlinked function (e.g. omitting `-lraylib`, `-lturtle`, missing multi-file object files, or calling nonexistent C functions) halts immediately at link time with standard linker diagnostics (`wasm-ld: error: <file>.o: undefined symbol: <name>`).
+  - WebAssembly shared objects (`.so`) retain `--allow-undefined` to support dynamic symbol resolution.
+  - Compiler driver parses `--allow-undefined` and `-Wl,--allow-undefined` into linker flags, permitting explicit user overrides.
 
 ### 3.3 Runtime & Interactive Standard I/O
 - Target binaries run in `runtime.worker.js` using `WasiHost`.
@@ -136,6 +143,7 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 |---|---|
 | **Direct VFS Clang Compilation** | `llvm-box.wasm` (`clang`) compiles C source files reading directly from VFS `/workspace` without MemFS. |
 | **Direct VFS LLD Linkage** | `llvm-box.wasm` (`wasm-ld`) links object files and static archives directly from VFS `/lib/wasm32-wasip1` without MemFS. |
+| **Strict Linker Symbol Resolution** | Referencing undefined symbols without linking required libraries causes `wasm-ld` to fail at link time with `undefined symbol: <name>`; whitelisted host imports link without errors. |
 | **Zero-MemFS Asset Download** | `scripts/download-sysroot.js` runs without downloading or referencing `memfs.wasm`. |
 | **Direct Binary Generation** | Compiling `main.c` generates `build/main.o` and `a.out` directly in VFS without copy-out delay. |
 | **Header Probing Performance** | Clang `#include` resolution against 4,300+ sysroot headers executes swiftly via VFS path lookup. |

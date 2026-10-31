@@ -69,6 +69,8 @@ export function parseCompilerArgs(args, cwd = '/workspace') {
       compilerFlags.push(arg);
     } else if (arg === '-shared' || arg === '--shared') {
       linkerFlags.push('-shared');
+    } else if (arg === '--allow-undefined') {
+      linkerFlags.push('--allow-undefined');
     } else if (arg.startsWith('-Wl,')) {
       linkerFlags.push(...arg.substring(4).split(','));
     } else if (arg.startsWith('-')) {

@@ -750,6 +750,50 @@ export const USR_BIN_COMMANDS = [
   'strip',
 ];
 
+export const WASM_HOST_IMPORTS = [
+  // Generic Framebuffer Graphics (<graphics.h>)
+  'graphics_init',
+  'graphics_present',
+  'graphics_present_rgba',
+  'graphics_should_close',
+  'graphics_close',
+  'graphics_wait_frame',
+  'graphics_get_mouse',
+  'graphics_is_key_down',
+
+  // HTML5 Canvas 2D Vector Primitives (<graphics_canvas.h>)
+  'canvas_present',
+  'canvas_clear_rect',
+  'canvas_fill_rect',
+  'canvas_stroke_rect',
+  'canvas_begin_path',
+  'canvas_close_path',
+  'canvas_move_to',
+  'canvas_line_to',
+  'canvas_arc',
+  'canvas_fill',
+  'canvas_stroke',
+  'canvas_set_fill_style',
+  'canvas_set_stroke_style',
+  'canvas_set_fill_rgb',
+  'canvas_set_line_width',
+  'canvas_set_line_cap',
+  'canvas_fill_text',
+  'canvas_stroke_text',
+  'canvas_set_font',
+  'canvas_save',
+  'canvas_restore',
+  'canvas_translate',
+  'canvas_rotate',
+  'canvas_scale',
+  'canvas_get_image_data',
+  'canvas_put_image_data',
+  'canvas_get_pixels',
+  'canvas_put_pixels',
+  'canvas_get_pixel',
+  'canvas_set_pixel',
+];
+
 export function mountSysroot(vfs) {
   // Mount C standard headers
   for (const [filename, content] of Object.entries(STANDARD_C_HEADERS)) {
@@ -767,6 +811,9 @@ export function mountSysroot(vfs) {
       vfs.writeFile(`/usr/lib/${lib}`, `!<arch>\n/* ${lib} wasi-libc */\n`, Date.now(), true);
     }
   }
+
+  // Mount /usr/lib/wasm-host-imports.txt for wasm-ld --allow-undefined-file
+  vfs.writeFile('/usr/lib/wasm-host-imports.txt', WASM_HOST_IMPORTS.join('\n') + '\n', Date.now(), true);
 
   // Mount /bin built-in executables
   for (const cmd of BIN_COMMANDS) {

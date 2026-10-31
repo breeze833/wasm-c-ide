@@ -3,6 +3,7 @@
 
 import { Tar } from './tar.js';
 import { WasiHost, ProcExit, ESUCCESS, normalizePath } from '../vfs/wasi-host.js';
+import { WASM_HOST_IMPORTS } from '../vfs/sysroot.js';
 
 export { ProcExit };
 
@@ -425,14 +426,34 @@ export class WasmToolchain {
       : '/lib/wasm32-wasi';
     const crt1 = `${libdir}/crt1.o`;
 
+    // Ensure host imports whitelist file exists in VFS for wasm-ld --allow-undefined-file
+    const hostImportsPath = '/usr/lib/wasm-host-imports.txt';
+    if (this.vfs) {
+      const hasFile = typeof this.vfs.exists === 'function'
+        ? this.vfs.exists(hostImportsPath)
+        : (typeof this.vfs.has === 'function' ? this.vfs.has(hostImportsPath) : false);
+      if (!hasFile) {
+        const textData = WASM_HOST_IMPORTS.join('\n') + '\n';
+        try {
+          if (typeof this.vfs.writeFile === 'function') {
+            this.vfs.writeFile(hostImportsPath, textData, Date.now(), true);
+          } else if (typeof this.vfs.set === 'function') {
+            this.vfs.set(hostImportsPath, new TextEncoder().encode(textData));
+          }
+        } catch {}
+      }
+    }
+
+    const explicitAllowUndefined = customFlags.includes('--allow-undefined') || customFlags.includes('-Wl,--allow-undefined');
+
     const args = [
       '-flavor', 'wasm',
-      '--allow-undefined',
     ];
 
     if (isShared) {
       args.push(
         '--shared',
+        '--allow-undefined',
         `-L${libdir}`,
         `-L/lib/wasm32-wasip1`,
         `-L/lib/wasm32-wasi`,
@@ -446,6 +467,11 @@ export class WasmToolchain {
         '-o', cleanOut,
       );
     } else {
+      if (explicitAllowUndefined) {
+        args.push('--allow-undefined');
+      } else {
+        args.push(`--allow-undefined-file=${hostImportsPath}`);
+      }
       args.push(
         '-z', `stack-size=${stackSize}`,
         `-L${libdir}`,
@@ -460,7 +486,7 @@ export class WasmToolchain {
         '-lclang_rt.builtins',
         '-lc++',
         '-lc++abi',
-        ...customFlags,
+        ...customFlags.filter(f => f !== '--allow-undefined' && f !== '-Wl,--allow-undefined'),
         '-o', cleanOut,
       );
     }
