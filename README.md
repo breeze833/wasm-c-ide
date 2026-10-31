@@ -186,9 +186,9 @@ This IDE is specifically engineered for **students and systems programming educa
      - Unmounting Raylib in Project Settings cleanly unmounts `<turtle_backend_raylib.h>` and `libturtle_raylib.a` from VFS.
 - **Link-Time Backend Resolution**:
   - The public `turtle_begin(ctx)` macro expands to `(<backend>_turtle_init(ctx) && turtle_begin_core())` provided by `<turtle_backend_canvas_wasi.h>` or `<turtle_backend_raylib.h>`, ensuring compile/link failures if a program links against the incorrect backend archive.
-- **Automated In-Build Asset Compilation**:
-  - `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and uses standard `make` to compile both WebAssembly static archives and copy user headers to `public/sysroot/include/turtle/`.
-  - Auto-generates `src/vfs/turtle-headers.js` to ensure zero drift between physical headers and the in-browser virtual sysroot.
+- **Automated In-Tree Asset Compilation**:
+  - `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and uses the in-tree WebAssembly toolchain (`llvm-box.wasm` + `ar.js`) to compile both WebAssembly static archives with zero host compiler dependencies (`clang`, `llvm-ar`, or `make`).
+  - Copies user headers to `public/sysroot/include/turtle/` and auto-generates `src/vfs/turtle-headers.js` to ensure zero drift between physical headers and the in-browser virtual sysroot.
 - **Automatic Build Script Linking Rules**:
   - When generating `build.sh` or `Makefile`, the IDE automatically detects backend headers:
     - Raylib disabled && `turtle_backend_canvas_wasi.h` included $\implies$ `-lturtle`

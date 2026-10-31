@@ -211,8 +211,8 @@ Agents executing this project should proceed milestone-by-milestone:
 - **Link-Time Backend Resolution**:
   - `turtle.h` declares `bool turtle_begin_core(void)`.
   - Backend headers (`turtle_backend_canvas_wasi.h` and `turtle_backend_raylib.h`) wrap initialization in `#define turtle_begin(ctx) (<backend>_turtle_init(ctx) && turtle_begin_core())` to strictly prevent linking against incorrect backend archives.
-- **Automated In-Build Compilation & Zero-Drift Header Sync**:
-  - `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and builds both WASI static libraries via `make`.
+- **Automated In-Tree Compilation & Zero-Drift Header Sync**:
+  - `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and builds both WASI static libraries using the in-tree `llvm-box.wasm` WebAssembly toolchain (`WasmToolchain`) and `buildArchive` (`ar.js`), removing host toolchain requirements (`clang`, `llvm-ar`, `make`).
   - Copies user headers to `public/sysroot/include/turtle/` and auto-generates `src/vfs/turtle-headers.js` imported by `src/vfs/sysroot.js`, eliminating manual header duplication and string fallbacks.
 - Bundled example programs: `06_turtle_canvas.c` and `07_turtle_raylib.c`.
 
