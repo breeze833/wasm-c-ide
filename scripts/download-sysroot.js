@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { gunzipSync } from 'node:zlib';
+import { execSync } from 'node:child_process';
 import { Tar } from '../src/toolchain/tar.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -15,11 +16,13 @@ const projectRoot = path.resolve(__dirname, '..');
 const CLANG_WASI_TAG = 'v19.1.0';
 const CLANG_WASI_BASE_URL = `https://github.com/breeze833/clang-wasi/releases/download/${CLANG_WASI_TAG}`;
 const RAYLIB_WASI_BASE_URL = 'https://github.com/breeze833/raylib-wasi/releases/download/latest';
-const LIBTURTLE_RAW_BASE = 'https://raw.githubusercontent.com/breeze833/libturtle/main';
+const LIBTURTLE_REPO_URL = 'https://github.com/breeze833/libturtle.git';
 
 const WASM_DIR = path.join(projectRoot, 'public', 'sysroot', 'wasm');
 const RAYLIB_INC_DIR = path.join(projectRoot, 'public', 'sysroot', 'include', 'raylib');
 const TURTLE_INC_DIR = path.join(projectRoot, 'public', 'sysroot', 'include', 'turtle');
+const LIBTURTLE_BUILD_DIR = path.join(projectRoot, 'build', 'libturtle');
+const TURTLE_HEADERS_JS = path.join(projectRoot, 'src', 'vfs', 'turtle-headers.js');
 
 const REQUIRED_FILES = [
   path.join(WASM_DIR, 'llvm-box.wasm'),
@@ -34,6 +37,7 @@ const REQUIRED_FILES = [
   path.join(TURTLE_INC_DIR, 'turtle.h'),
   path.join(TURTLE_INC_DIR, 'turtle_backend_canvas_wasi.h'),
   path.join(TURTLE_INC_DIR, 'turtle_backend_raylib.h'),
+  TURTLE_HEADERS_JS,
 ];
 
 const force = process.argv.includes('--force');
@@ -132,41 +136,38 @@ async function downloadRaylibAssets() {
 
 async function downloadTurtleAssets() {
   fs.mkdirSync(TURTLE_INC_DIR, { recursive: true });
+  fs.mkdirSync(path.join(projectRoot, 'build'), { recursive: true });
 
-  const { TURTLE_HEADERS } = await import('../src/vfs/sysroot.js');
-  const headerMap = {
-    'turtle.h': path.join(TURTLE_INC_DIR, 'turtle.h'),
-    'turtle_backend_canvas_wasi.h': path.join(TURTLE_INC_DIR, 'turtle_backend_canvas_wasi.h'),
-    'turtle_backend_raylib.h': path.join(TURTLE_INC_DIR, 'turtle_backend_raylib.h'),
-  };
-
-  // Write sysroot headers
-  for (const [name, targetPath] of Object.entries(headerMap)) {
-    if (force || !fs.existsSync(targetPath) || fs.statSync(targetPath).size === 0) {
-      try {
-        const url = `${LIBTURTLE_RAW_BASE}/include/${name}`;
-        const altUrl = name.includes('canvas_wasi')
-          ? `${LIBTURTLE_RAW_BASE}/backend/canvas-wasi/include/${name}`
-          : (name.includes('raylib') ? `${LIBTURTLE_RAW_BASE}/backend/raylib/include/${name}` : url);
-        const res = await fetch(altUrl);
-        if (res.ok) {
-          const txt = await res.text();
-          fs.writeFileSync(targetPath, txt);
-          console.log(`[sysroot] Downloaded ${name} from libturtle repo.`);
-          continue;
-        }
-      } catch {}
-      // Fallback to embedded header
-      if (TURTLE_HEADERS[name]) {
-        fs.writeFileSync(targetPath, TURTLE_HEADERS[name]);
-        console.log(`[sysroot] Wrote embedded header for ${name}.`);
-      }
+  // 1. Clone or update libturtle in build/libturtle
+  if (!fs.existsSync(LIBTURTLE_BUILD_DIR)) {
+    console.log('[sysroot] Cloning libturtle into build/libturtle...');
+    execSync(`git clone --depth 1 ${LIBTURTLE_REPO_URL} "${LIBTURTLE_BUILD_DIR}"`, { stdio: 'inherit' });
+  } else {
+    console.log('[sysroot] Updating libturtle in build/libturtle...');
+    try {
+      execSync(`git -C "${LIBTURTLE_BUILD_DIR}" pull --rebase`, { stdio: 'inherit' });
+    } catch (err) {
+      console.warn('[sysroot] git pull failed, using existing clone:', err.message);
     }
   }
 
-  const libTurtlePath = path.join(WASM_DIR, 'libturtle.a');
-  const libCanvasWasiPath = path.join(WASM_DIR, 'libturtle_canvas-wasi.a');
-  const libRaylibTurtlePath = path.join(WASM_DIR, 'libturtle_raylib.a');
+  // 2. Copy user-facing headers to sysroot
+  const headerMap = {
+    'turtle.h': path.join(LIBTURTLE_BUILD_DIR, 'include', 'turtle.h'),
+    'turtle_backend_canvas_wasi.h': path.join(LIBTURTLE_BUILD_DIR, 'backend', 'canvas-wasi', 'include', 'turtle_backend_canvas_wasi.h'),
+    'turtle_backend_raylib.h': path.join(LIBTURTLE_BUILD_DIR, 'backend', 'raylib', 'include', 'turtle_backend_raylib.h'),
+  };
+
+  const headerContents = {};
+  for (const [name, srcPath] of Object.entries(headerMap)) {
+    if (!fs.existsSync(srcPath)) {
+      throw new Error(`Expected header ${srcPath} does not exist in libturtle clone`);
+    }
+    const content = fs.readFileSync(srcPath, 'utf-8');
+    headerContents[name] = content;
+    fs.writeFileSync(path.join(TURTLE_INC_DIR, name), content);
+    console.log(`[sysroot] Copied ${name} to sysroot.`);
+  }
 
   // Ensure turtle_hal.h is never published in the distributed sysroot
   const unpublishedHalPath = path.join(TURTLE_INC_DIR, 'turtle_hal.h');
@@ -174,179 +175,38 @@ async function downloadTurtleAssets() {
     fs.rmSync(unpublishedHalPath, { force: true });
   }
 
-  const needsLibBuild = force ||
-    !fs.existsSync(libTurtlePath) || fs.statSync(libTurtlePath).size === 0 ||
-    !fs.existsSync(libCanvasWasiPath) || fs.statSync(libCanvasWasiPath).size === 0 ||
-    !fs.existsSync(libRaylibTurtlePath) || fs.statSync(libRaylibTurtlePath).size === 0;
+  // 3. Auto-generate src/vfs/turtle-headers.js
+  const generatedJs = `// Auto-generated by scripts/download-sysroot.js - DO NOT EDIT MANUALLY\nexport const TURTLE_HEADERS = {\n  'turtle.h': ${JSON.stringify(headerContents['turtle.h'])},\n  'turtle_backend_canvas_wasi.h': ${JSON.stringify(headerContents['turtle_backend_canvas_wasi.h'])},\n  'turtle_backend_raylib.h': ${JSON.stringify(headerContents['turtle_backend_raylib.h'])},\n};\n`;
+  fs.writeFileSync(TURTLE_HEADERS_JS, generatedJs);
+  console.log('[sysroot] Generated src/vfs/turtle-headers.js');
 
-  if (!needsLibBuild) {
-    console.log('[sysroot] Turtle library archives already present, skipping build.');
-    return;
-  }
+  // 4. Build libraries using make utility
+  const libTurtlePath = path.join(WASM_DIR, 'libturtle.a');
+  const libCanvasWasiPath = path.join(WASM_DIR, 'libturtle_canvas-wasi.a');
+  const libRaylibTurtlePath = path.join(WASM_DIR, 'libturtle_raylib.a');
 
-  console.log('[sysroot] Building libturtle static archives for WebAssembly...');
+  console.log('[sysroot] Building libturtle static archives for WebAssembly via make...');
 
-  const TURTLE_HAL_H = `/* Hardware Abstraction Layer for Turtle Graphics */
-#ifndef TURTLE_HAL_H
-#define TURTLE_HAL_H
+  // Build canvas-wasi backend
+  execSync(`make -C "${LIBTURTLE_BUILD_DIR}" clean BACKEND=canvas-wasi 2>/dev/null || true`);
+  execSync(`make -C "${LIBTURTLE_BUILD_DIR}" BACKEND=canvas-wasi`, { stdio: 'inherit' });
+  const builtCanvasLib = path.join(LIBTURTLE_BUILD_DIR, 'build', 'canvas-wasi', 'libturtle_canvas-wasi.a');
+  fs.copyFileSync(builtCanvasLib, libCanvasWasiPath);
+  fs.copyFileSync(builtCanvasLib, libTurtlePath);
 
-#include <stdint.h>
-#include <stdbool.h>
+  // Build raylib backend for WebAssembly
+  execSync(`make -C "${LIBTURTLE_BUILD_DIR}" clean BACKEND=raylib 2>/dev/null || true`);
+  execSync(
+    `make -C "${LIBTURTLE_BUILD_DIR}" BACKEND=raylib ` +
+    `CC=clang AR=llvm-ar CFLAGS="-O2 --target=wasm32-wasi" ` +
+    `INCLUDES="-Iinclude -Ibackend/raylib/include -I${RAYLIB_INC_DIR}"`,
+    { stdio: 'inherit' }
+  );
+  const builtRaylibLib = path.join(LIBTURTLE_BUILD_DIR, 'build', 'raylib', 'libturtle_raylib.a');
+  fs.copyFileSync(builtRaylibLib, libRaylibTurtlePath);
 
-/**
- * Low-level Hardware Abstraction Layer for Turtle Graphics.
- * Implemented independently by libturtle_raylib and libturtle_canvas-wasi.
- * Coordinates passed to HAL are in physical screen space (origin at top-left).
- */
-
-/* Initialize the graphics context/window.
- * Must set *width and *height so turtle.c can calculate math center (0,0). */
-bool hal_turtle_init(void *context, double *out_width, double *out_height);
-
-/* Finalize, flush buffer, or present frame */
-void hal_turtle_present(void);
-
-/* Flush canvas and pause execution for specified milliseconds */
-void hal_turtle_delay(double ms);
-
-/* Update turtle cursor position (screen coordinates), orientation, and visibility */
-void hal_turtle_set_cursor(double screen_x, double screen_y, double heading_deg, bool visible);
-
-/* Release resources / close window */
-void hal_turtle_destroy(void);
-
-/* Clear viewport with background color (RGBA8888) */
-void hal_turtle_clear(uint32_t bg_color);
-
-/* Draw a line segment between two screen points */
-void hal_turtle_draw_line(double x1, double y1, 
-                          double x2, double y2, 
-                          double stroke_width, 
-                          uint32_t color);
-
-#endif /* TURTLE_HAL_H */
-`;
-
-  // Helper to fetch source with fallback
-  const fetchSource = async (relPath, fallbackContent = null) => {
-    try {
-      const res = await fetch(`${LIBTURTLE_RAW_BASE}/${relPath}`);
-      if (res.ok) return await res.text();
-    } catch {}
-    if (fallbackContent !== null) {
-      return fallbackContent;
-    }
-    throw new Error(`Unable to fetch ${relPath}`);
-  };
-
-  const [turtleSrc, halCanvasSrc, halRaylibSrc, turtleHalSrc] = await Promise.all([
-    fetchSource('src/turtle.c'),
-    fetchSource('backend/canvas-wasi/hal_canvas_wasi.c'),
-    fetchSource('backend/raylib/hal_raylib.c'),
-    fetchSource('include/turtle_hal.h', TURTLE_HAL_H),
-  ]);
-
-  const { WasmToolchain } = await import('../src/toolchain/wasm-clang.js');
-  const { buildArchive } = await import('../src/toolchain/ar.js');
-  const { VFS } = await import('../src/vfs/vfs.js');
-  const { mountSysroot } = await import('../src/vfs/sysroot.js');
-
-  const oldFetch = globalThis.fetch;
-  globalThis.fetch = async (url) => {
-    const relPath = url.replace(/^\/?sysroot\//, 'public/sysroot/');
-    const resolved = path.join(projectRoot, relPath);
-    if (fs.existsSync(resolved)) {
-      const data = fs.readFileSync(resolved);
-      return {
-        arrayBuffer: async () => data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
-      };
-    }
-    return oldFetch(url);
-  };
-
-  try {
-    const vfs = new VFS();
-    mountSysroot(vfs);
-    const tc = new WasmToolchain({ basePath: '/sysroot/wasm', vfs });
-    await tc.init();
-
-    // Mount raylib headers & library for compilation
-    if (fs.existsSync(path.join(RAYLIB_INC_DIR, 'raylib.h'))) {
-      vfs.writeFile('/include/raylib.h', fs.readFileSync(path.join(RAYLIB_INC_DIR, 'raylib.h')), Date.now(), true);
-      vfs.writeFile('/include/raymath.h', fs.readFileSync(path.join(RAYLIB_INC_DIR, 'raymath.h')), Date.now(), true);
-      vfs.writeFile('/include/rlgl.h', fs.readFileSync(path.join(RAYLIB_INC_DIR, 'rlgl.h')), Date.now(), true);
-    }
-
-    // Add turtle headers to VFS
-    for (const [name, targetPath] of Object.entries(headerMap)) {
-      if (fs.existsSync(targetPath)) {
-        vfs.writeFile(`/include/${name}`, fs.readFileSync(targetPath, 'utf-8'), Date.now(), true);
-      }
-    }
-
-    // Add internal HAL header to VFS for compiling the library (not published to sysroot)
-    vfs.writeFile('/include/turtle_hal.h', turtleHalSrc, Date.now(), true);
-    vfs.mkdir('/workspace/libturtle/src', true, true);
-    vfs.mkdir('/workspace/libturtle/backend/canvas-wasi', true, true);
-    vfs.mkdir('/workspace/libturtle/backend/raylib', true, true);
-    vfs.writeFile('/workspace/libturtle/src/turtle_hal.h', turtleHalSrc, Date.now(), true);
-
-    vfs.writeFile('/workspace/libturtle/src/turtle.c', turtleSrc, Date.now(), true);
-    vfs.writeFile('/workspace/libturtle/backend/canvas-wasi/hal_canvas_wasi.c', halCanvasSrc, Date.now(), true);
-    vfs.writeFile('/workspace/libturtle/backend/raylib/hal_raylib.c', halRaylibSrc, Date.now(), true);
-
-    // Compile core turtle.c
-    let code = await tc.compile(
-      '/workspace/libturtle/src/turtle.c',
-      '/workspace/libturtle/turtle.o',
-      'c',
-      ['-I/include', '-I/workspace/libturtle/src', '-O2']
-    );
-    if (code !== 0) throw new Error('Compilation of turtle.c failed');
-    const turtleObj = vfs.readFile('/workspace/libturtle/turtle.o', false);
-    if (!turtleObj || turtleObj.length === 0) throw new Error('Compilation of turtle.c produced empty object');
-
-    // Compile canvas-wasi hal_canvas_wasi.c
-    code = await tc.compile(
-      '/workspace/libturtle/backend/canvas-wasi/hal_canvas_wasi.c',
-      '/workspace/libturtle/hal_canvas_wasi.o',
-      'c',
-      ['-I/include', '-I/workspace/libturtle/backend/canvas-wasi/include', '-O2', '-std=gnu11']
-    );
-    if (code !== 0) throw new Error('Compilation of hal_canvas_wasi.c failed');
-    const canvasHalObj = vfs.readFile('/workspace/libturtle/hal_canvas_wasi.o', false);
-    if (!canvasHalObj || canvasHalObj.length === 0) throw new Error('Compilation of hal_canvas_wasi.c produced empty object');
-
-    // Compile raylib hal_raylib.c
-    code = await tc.compile(
-      '/workspace/libturtle/backend/raylib/hal_raylib.c',
-      '/workspace/libturtle/hal_raylib.o',
-      'c',
-      ['-I/include', '-I/workspace/libturtle/backend/raylib/include', '-O2']
-    );
-    if (code !== 0) throw new Error('Compilation of hal_raylib.c failed');
-    const raylibHalObj = vfs.readFile('/workspace/libturtle/hal_raylib.o', false);
-    if (!raylibHalObj || raylibHalObj.length === 0) throw new Error('Compilation of hal_raylib.c produced empty object');
-
-    // Build static archives
-    const canvasArchive = buildArchive([
-      { name: 'turtle.o', data: turtleObj },
-      { name: 'hal_canvas_wasi.o', data: canvasHalObj },
-    ]);
-    const raylibArchive = buildArchive([
-      { name: 'turtle.o', data: turtleObj },
-      { name: 'hal_raylib.o', data: raylibHalObj },
-    ]);
-
-    fs.writeFileSync(libCanvasWasiPath, canvasArchive);
-    fs.writeFileSync(libTurtlePath, canvasArchive);
-    fs.writeFileSync(libRaylibTurtlePath, raylibArchive);
-
-    console.log(`[sysroot] Built libturtle.a & libturtle_canvas-wasi.a (${canvasArchive.length} bytes)`);
-    console.log(`[sysroot] Built libturtle_raylib.a (${raylibArchive.length} bytes)`);
-  } finally {
-    globalThis.fetch = oldFetch;
-  }
+  console.log('[sysroot] Installed libturtle.a & libturtle_canvas-wasi.a');
+  console.log('[sysroot] Installed libturtle_raylib.a');
 }
 
 async function main() {

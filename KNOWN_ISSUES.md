@@ -158,5 +158,22 @@ In SPECv5, the dependency on `memfs.wasm` is completely eliminated:
 3. **Unified Host Implementation**: Both the toolchain (`llvm-box.wasm`) and the user execution runtime (`runtime.worker.js`) share the identical `WasiHost` implementation, enforcing consistent POSIX semantics, scatter/gather I/O, error codes, and unique inode tracking across compilation and execution.
 4. **Zero-Copy File Operations**: Source files and build artifacts exist directly in VFS without redundant intermediate transfers.
 
+---
 
+## 9. Link-Time Backend Resolution & Sysroot Virtual Header Synchronization in `libturtle`
 
+### Context & Historical Desync
+In earlier versions, `libturtle` declared a generic C function `bool turtle_begin(void *context);` in `<turtle.h>`. When multiple backends existed (`canvas-wasi` and `raylib`), passing a backend context with generic `void*` could lead to silent runtime linkage mismatches if linked against the wrong library archive.
+
+Upstream `libturtle` resolved this by redesigning the initialization protocol:
+- `<turtle.h>` declares platform-agnostic `bool turtle_begin_core(void);`.
+- Backend headers (`<turtle_backend_canvas_wasi.h>` and `<turtle_backend_raylib.h>`) provide `#define turtle_begin(ctx) (<backend>_turtle_init(ctx) && turtle_begin_core())`.
+- Code calling `turtle_begin(&ctx)` fails at link time if the user links against an incompatible backend archive.
+
+However, because `wasm-c-ide` embeds virtual sysroot headers for immediate synchronous in-browser mounting, manually hardcoding C headers in JavaScript creates a synchronization vulnerability: if the library archive is rebuilt with new symbols but the virtual header strings are not updated, the compiler will emit unresolved external function imports (such as `turtle_begin`), bypassing backend initializers and failing to pull in necessary graphics symbols (such as `graphics_init`).
+
+### Architectural Invariant & Resolution
+1. **Automated In-Build Compilation**: `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and builds both backends (`canvas-wasi` and `raylib`) for `wasm32-wasi` via `make` using toolchain variable overrides (`CC=clang`, `AR=llvm-ar`, `CFLAGS="-O2 --target=wasm32-wasi"`).
+2. **Automated Header Propagation**: Public headers are copied from `build/libturtle` to `public/sysroot/include/turtle/`.
+3. **Auto-Generated Virtual Module (`src/vfs/turtle-headers.js`)**: `download-sysroot.js` generates `src/vfs/turtle-headers.js` directly from the copied headers. `src/vfs/sysroot.js` imports these headers directly, ensuring the in-memory VFS always remains in lockstep with the compiled static archives.
+4. **Zero Fallbacks**: Eliminates redundant string fallbacks (e.g. `TURTLE_HAL_H`), making the build pipeline completely authoritative and self-contained.

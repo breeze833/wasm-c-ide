@@ -123,6 +123,9 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 - **`canvas-wasi`**: Pure C direct software framebuffer (`<graphics.h>`), Canvas 2D vector primitives (`<graphics_canvas.h>`), floating/dockable graphics console (`GraphicsWindowUI`), and 512-byte `SharedArrayBuffer` input coordination (`InputCoordinator`).
 - **`raylib-wasi`**: Standalone Raylib 5.5 WASI runtime and WebGL ES 2.0 host bridge (`createRaylibHost`).
 - **`libturtle`**: Modular educational turtle graphics with Canvas-WASI and Raylib backends.
+  - **Link-Time Backend Resolution**: High-level initialization expands via `#define turtle_begin(ctx) (<backend>_turtle_init(ctx) && turtle_begin_core())` to guarantee link failure if code is linked against the incorrect backend archive.
+  - **Automated In-Build Toolchain Compilation**: `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and builds both backends (`canvas-wasi` and `raylib`) for `wasm32-wasi` using standard `make` with toolchain variable overrides, eliminating hardcoded string fallbacks and manual archiving.
+  - **Zero-Drift Virtual Sysroot Sync**: Copied headers in `public/sysroot/include/turtle/` automatically generate `src/vfs/turtle-headers.js`, ensuring the virtual sysroot remains synchronized with compiled static libraries.
 - **Zero-Copy Frame Transfer**: Synchronous `transferToImageBitmap()` in Web Worker transferred via `postMessage({ type: 'frame', bitmap }, [bitmap])` to `ImageBitmapRenderingContext`.
 
 ---

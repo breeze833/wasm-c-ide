@@ -64,6 +64,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   ├── archive.js         # JSZip project export and import routines
 │   │   ├── storage.js         # IndexedDB synchronization and default project seed
 │   │   ├── sysroot.js         # Standard C/C++ sysroot header and binary mount definitions
+│   │   ├── turtle-headers.js  # Auto-generated virtual headers module for libturtle
 │   │   ├── vfs.js             # In-memory virtual filesystem with path normalization
 │   │   └── wasi-host.js       # Unified zero-dependency WASI Preview 1 host directly backed by VFS
 │   └── workers/
@@ -206,8 +207,13 @@ Agents executing this project should proceed milestone-by-milestone:
 - **Raylib Backend (`libturtle_raylib.a`)**:
   - Mounted dynamically when Raylib graphics support is enabled in Project Settings (`/usr/include/turtle_backend_raylib.h`, `/usr/lib/libturtle_raylib.a`).
   - Links with `-lturtle_raylib -lraylib`.
-  - Dynamically unmounts from VFS and purges from MemFS when Raylib is disabled.
-- Automated asset pipeline in `scripts/download-sysroot.js` downloading headers and compiling/unpacking static archives for offline execution.
+  - Dynamically unmounts from VFS when Raylib is disabled.
+- **Link-Time Backend Resolution**:
+  - `turtle.h` declares `bool turtle_begin_core(void)`.
+  - Backend headers (`turtle_backend_canvas_wasi.h` and `turtle_backend_raylib.h`) wrap initialization in `#define turtle_begin(ctx) (<backend>_turtle_init(ctx) && turtle_begin_core())` to strictly prevent linking against incorrect backend archives.
+- **Automated In-Build Compilation & Zero-Drift Header Sync**:
+  - `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and builds both WASI static libraries via `make`.
+  - Copies user headers to `public/sysroot/include/turtle/` and auto-generates `src/vfs/turtle-headers.js` imported by `src/vfs/sysroot.js`, eliminating manual header duplication and string fallbacks.
 - Bundled example programs: `06_turtle_canvas.c` and `07_turtle_raylib.c`.
 
 ### Milestone 14: Raylib Module Decoupling (`raylib-wasi`) & Architecture Unification
@@ -313,7 +319,8 @@ Before marking any task complete, agents must verify:
 | **Example Programs Suite** | `01_stdio.c`, `02_raylib_interactive.c`, `03_framebuffer_graphics.c`, `04_canvas_vector.c`, `05_canvas_pixels.c`, `06_turtle_canvas.c`, and `07_turtle_raylib.c` compile and run without error. |
 | **Canvas Turtle Graphics (`-lturtle`)** | Programs using `<turtle.h>` and `<turtle_backend_canvas_wasi.h>` compile by default and animate with `turtle_delay()`. |
 | **Raylib Turtle Graphics (`-lturtle_raylib`)** | Enabling Raylib mounts `<turtle_backend_raylib.h>` and `libturtle_raylib.a`, compiling and rendering in Raylib mode. |
-| **Turtle Sysroot Dynamic Unmount** | Disabling Raylib unmounts `<turtle_backend_raylib.h>` and `libturtle_raylib.a` from VFS and MemFS cleanly. |
+| **Turtle Link-Time Backend Resolution** | Programs link against matching backend archive via `turtle_begin(ctx)` macro and fail link-time resolution if mismatched. |
+| **Turtle Sysroot Dynamic Unmount** | Disabling Raylib unmounts `<turtle_backend_raylib.h>` and `libturtle_raylib.a` from VFS cleanly. |
 | **Offline PWA Installation** | Application provides valid manifest, registers service worker with COOP/COEP headers, and operates offline. |
 | **Portable Zip Distribution** | `npm run pack` creates a standalone `wasm-c-ide.zip` that runs in any static web server document root. |
 

@@ -3,6 +3,7 @@ dist/
 .DS_Store
 *.log
 *.zip
+build/
 public/sysroot/wasm/
 public/sysroot/include/raylib/
 public/sysroot/include/turtle/

@@ -1,5 +1,6 @@
 // Sysroot initialization for standard C/C++ headers in /usr/include
 import { GRAPHICS_H, GRAPHICS_CANVAS_H } from 'canvas-wasi/headers';
+import { TURTLE_HEADERS } from './turtle-headers.js';
 
 export const STANDARD_C_HEADERS = {
   'stdio.h': `/* Minimal WASI / Musl stdio.h */
@@ -409,92 +410,11 @@ extern int errno;
 
   'graphics.h': GRAPHICS_H,
   'graphics_canvas.h': GRAPHICS_CANVAS_H,
-  'turtle.h': `/* Public C Turtle Graphics API */
-#ifndef TURTLE_H
-#define TURTLE_H
-
-#include <stdint.h>
-#include <stdbool.h>
-
-#define TURTLE_RGBA(r, g, b, a) \\
-    (((uint32_t)(r) << 24) | ((uint32_t)(g) << 16) | ((uint32_t)(b) << 8) | (uint32_t)(a))
-
-/* Standard 8 Primary/Secondary Colors */
-#define TURTLE_BLACK   TURTLE_RGBA(0,   0,   0,   255)
-#define TURTLE_RED     TURTLE_RGBA(255, 0,   0,   255)
-#define TURTLE_GREEN   TURTLE_RGBA(0,   255, 0,   255)
-#define TURTLE_BLUE    TURTLE_RGBA(0,   0,   255, 255)
-#define TURTLE_YELLOW  TURTLE_RGBA(255, 255, 0,   255)
-#define TURTLE_MAGENTA TURTLE_RGBA(255, 0,   255, 255)
-#define TURTLE_CYAN    TURTLE_RGBA(0,   255, 255, 255)
-#define TURTLE_WHITE   TURTLE_RGBA(255, 255, 255, 255)
-
-/* Lifecycle & Canvas Control */
-bool turtle_begin(void *context);
-void turtle_end(void);
-void turtle_clear(uint32_t color);
-void turtle_home(void);
-void turtle_delay(double ms);         /* Pause execution & flush canvas for progressive drawing */
-
-/* Movement & Orientation */
-void turtle_forward(double steps);   /* Positive = forward, Negative = backward */
-void turtle_turn(double deg);        /* Math convention: CCW positive */
-void turtle_turn_left(double deg);   /* Counter-clockwise */
-void turtle_turn_right(double deg);  /* Clockwise */
-
-/* Pen State Management */
-void turtle_pen_down(void);
-void turtle_pen_up(void);
-int  turtle_is_pen_down(void);
-void turtle_pen_stroke(double stroke);
-void turtle_pen_color(uint32_t color);
-void turtle_pen(double stroke, uint32_t color, int is_down);
-
-/* Cursor Visibility */
-void turtle_set_visible(bool visible);
-bool turtle_is_visible(void);
-
-/* State Inspection (Useful for students implementing turtle_goto) */
-double turtle_get_x(void);
-double turtle_get_y(void);
-double turtle_get_heading(void);
-
-#endif /* TURTLE_H */
-`,
-  'turtle_backend_canvas_wasi.h': `/* Turtle Graphics canvas-wasi Backend Context */
-#ifndef TURTLE_BACKEND_CANVAS_WASI_H
-#define TURTLE_BACKEND_CANVAS_WASI_H
-
-typedef struct {
-    int width;
-    int height;
-    const char *title;
-} turtle_canvas_wasi_context_t;
-
-/* Alias for backwards compatibility */
-typedef turtle_canvas_wasi_context_t turtle_htmlcanvas_context_t;
-
-#endif /* TURTLE_BACKEND_CANVAS_WASI_H */
-`
+  'turtle.h': TURTLE_HEADERS['turtle.h'],
+  'turtle_backend_canvas_wasi.h': TURTLE_HEADERS['turtle_backend_canvas_wasi.h'],
 };
 
-export const TURTLE_HEADERS = {
-  'turtle.h': STANDARD_C_HEADERS['turtle.h'],
-  'turtle_backend_canvas_wasi.h': STANDARD_C_HEADERS['turtle_backend_canvas_wasi.h'],
-  'turtle_backend_raylib.h': `/* Turtle Graphics Raylib Backend Context */
-#ifndef TURTLE_BACKEND_RAYLIB_H
-#define TURTLE_BACKEND_RAYLIB_H
-
-typedef struct {
-    int width;
-    int height;
-    const char *title;
-    int target_fps;
-} turtle_raylib_context_t;
-
-#endif /* TURTLE_BACKEND_RAYLIB_H */
-`
-};
+export { TURTLE_HEADERS };
 
 export const STANDARD_CPP_HEADERS = {
   'iostream': `// Minimal C++ iostream header
