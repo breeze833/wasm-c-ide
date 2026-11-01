@@ -53,8 +53,9 @@ assert.deepStrictEqual(targets.get('clean').recipes, ['rm -rf build a.out']);
 console.log('✓ Makefile rules, prerequisites, and recipe variable substitutions parsed');
 
 // Test: SettingsModal separate Save and Generate Build Script buttons
-import { SettingsModal } from '../src/components/settings.js';
+import { SettingsModal, DEFAULT_RUN_COMMAND } from '../src/components/settings.js';
 import { VFS } from '../src/vfs/vfs.js';
+import fs from 'node:fs';
 
 const vfs = new VFS();
 vfs.writeFile('/workspace/src/game.c', 'int main() { return 0; }');
@@ -134,12 +135,17 @@ const generateBtn = getElement('modal-generate-btn');
 assert.strictEqual(Boolean(saveBtn), true, 'modal-save-btn must exist');
 assert.strictEqual(Boolean(generateBtn), true, 'modal-generate-btn must exist');
 
+// Verify default runCommand
+assert.strictEqual(DEFAULT_RUN_COMMAND, 'pushd . && cd /workspace && ./a.out; popd', 'DEFAULT_RUN_COMMAND must match expected value');
+assert.strictEqual(modal.config.runCommand, DEFAULT_RUN_COMMAND, 'modal.config.runCommand must default to DEFAULT_RUN_COMMAND');
+
 // Set form values
 getElement('setting-mode').value = 'cpp';
 getElement('setting-build-sys').value = 'make';
 getElement('setting-includes').value = 'include, src';
 getElement('setting-flags').value = '-Wall -O2';
 getElement('setting-linker-flags').value = '-o mygame.out -lraylib';
+getElement('setting-run-cmd').value = 'pushd . && cd /workspace && ./mygame.out; popd';
 
 // 1. Click Save button: saves config, does NOT generate build files
 saveBtn.click();
@@ -150,6 +156,7 @@ assert.deepStrictEqual(savedConfig.includePaths, ['include', 'src']);
 assert.deepStrictEqual(savedConfig.compilerFlags, ['-Wall', '-O2']);
 assert.strictEqual(savedConfig.linkerFlags, '-o mygame.out -lraylib');
 assert.strictEqual(savedConfig.targetName, 'mygame.out');
+assert.strictEqual(savedConfig.runCommand, 'pushd . && cd /workspace && ./mygame.out; popd');
 assert.strictEqual(vfs.exists('/workspace/build.sh'), false, 'Save must NOT generate build.sh');
 assert.strictEqual(vfs.exists('/workspace/Makefile'), false, 'Save must NOT generate Makefile');
 
@@ -171,6 +178,14 @@ assert.strictEqual(genMakefile.includes('src/utils.c'), true, 'Makefile must inc
 assert.strictEqual(genMakefile.includes('TARGET = mygame.out'), true, 'Makefile must set TARGET = mygame.out');
 assert.strictEqual(genMakefile.includes('LDFLAGS = -o mygame.out -lraylib'), true, 'Makefile must set LDFLAGS = -o mygame.out -lraylib');
 
+// 3. Verify main.js run command integration
+const mainCode = fs.readFileSync('src/main.js', 'utf8');
+assert.ok(mainCode.includes('DEFAULT_RUN_COMMAND'), 'main.js must import DEFAULT_RUN_COMMAND');
+assert.ok(mainCode.includes('this.runCommand = savedRunCmd || DEFAULT_RUN_COMMAND'), 'main.js must initialize this.runCommand with fallback');
+assert.ok(mainCode.includes('wasm_c_ide_run_command'), 'main.js must persist runCommand to localStorage wasm_c_ide_run_command');
+assert.ok(mainCode.includes('this.runCommand || DEFAULT_RUN_COMMAND'), 'btnRun click must use this.runCommand with fallback');
+
 console.log('✓ SettingsModal separate Save and Generate Build Script buttons verified');
+console.log('✓ SettingsModal Run Command field and main.js btnRun integration verified');
 
 console.log('--- ALL MAKE TESTS PASSED ---');

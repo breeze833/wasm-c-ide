@@ -15,7 +15,7 @@ import { executeArCommand } from './toolchain/ar.js';
 import { GraphicsWindowUI } from 'canvas-wasi';
 import 'canvas-wasi/style.css';
 
-import { SettingsModal } from './components/settings.js';
+import { SettingsModal, DEFAULT_RUN_COMMAND } from './components/settings.js';
 import { runMake } from './toolchain/make.js';
 
 export function checkIsolation() {
@@ -66,6 +66,8 @@ export class App {
     this.settingsModal = null;
     this.mode = 'c'; // 'c' or 'cpp'
     this.buildSystem = 'sh'; // 'sh' or 'make'
+    const savedRunCmd = typeof localStorage !== 'undefined' ? localStorage.getItem('wasm_c_ide_run_command') : null;
+    this.runCommand = savedRunCmd || DEFAULT_RUN_COMMAND;
     this.deferredInstallPrompt = null;
     this.sidebarWidth = 240;
     this.sidebarCollapsed = false;
@@ -568,10 +570,16 @@ export class App {
     if (btnSettings) {
       this.settingsModal = new SettingsModal(
         this.vfs,
-        { mode: this.mode, buildSystem: this.buildSystem },
+        { mode: this.mode, buildSystem: this.buildSystem, runCommand: this.runCommand },
         async (newConfig) => {
           this.mode = newConfig.mode;
           this.buildSystem = newConfig.buildSystem;
+          if (newConfig.runCommand !== undefined) {
+            this.runCommand = newConfig.runCommand;
+            if (typeof localStorage !== 'undefined') {
+              localStorage.setItem('wasm_c_ide_run_command', this.runCommand);
+            }
+          }
           if (modeSelect) modeSelect.value = newConfig.mode;
           if (buildSystemSelect) buildSystemSelect.value = newConfig.buildSystem;
           if (this.fileTreeUI) this.fileTreeUI.render();
@@ -584,6 +592,11 @@ export class App {
       );
 
       btnSettings.addEventListener('click', () => {
+        if (this.settingsModal) {
+          this.settingsModal.config.mode = this.mode;
+          this.settingsModal.config.buildSystem = this.buildSystem;
+          this.settingsModal.config.runCommand = this.runCommand;
+        }
         this.settingsModal.show();
       });
     }
@@ -662,7 +675,7 @@ export class App {
 
     if (btnRun) {
       btnRun.addEventListener('click', () => {
-        const cmd = 'pushd . && cd /workspace && ./a.out; popd';
+        const cmd = this.runCommand || DEFAULT_RUN_COMMAND;
         this.terminal.injectCommand(cmd);
       });
     }

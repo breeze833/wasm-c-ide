@@ -182,7 +182,7 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
   - Converts nanosecond timeouts to millisecond durations and sleeps synchronously via `Atomics.wait()` on `SharedArrayBuffer` when cross-origin isolated.
   - Powers standard POSIX `nanosleep(&ts, NULL)`, `usleep()`, `sleep()`, and turtle `delay_ms()` accurately without 100% CPU busy looping.
 
-### 3.6 Collapsible (Slim Rail) & Resizable Workspace Sidebar
+### 3.7 Collapsible (Slim Rail) & Resizable Workspace Sidebar
 - **Dynamic Horizontal Resizing**:
   - Draggable vertical divider (`#sidebar-resizer`, 5px) positioned between the sidebar and editor with `col-resize` cursor and active accent highlight.
   - Dragging dynamically resizes the sidebar between `160px` and `window.innerWidth - 300px` (clamped to max `600px`), immediately triggering `EditorManager.prototype.layout()`.
@@ -193,6 +193,16 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
   - While collapsed, `#sidebar-resizer` is automatically hidden (`display: none`).
 - **Keyboard Shortcut**: `Ctrl+B` / `Cmd+B` toggles the sidebar between collapsed and expanded states (bound globally and within Monaco editor).
 - **Session Persistence**: Both custom sidebar width (`wasm_c_ide_sidebar_width`) and collapsed state (`wasm_c_ide_sidebar_collapsed`) are persisted in `localStorage`.
+
+### 3.8 Project Settings Modal & Configurable Run Execution
+- **Decoupled Settings Modal Actions**:
+  - **Save Button**: Persists configuration state (language mode, build system, include directories, compiler warning flags, linker flags, and custom run command) to application state and `localStorage` without modifying existing files in `/workspace`.
+  - **Generate Build Script Button**: Scans source files in `/workspace` and generates or updates `/workspace/build.sh` and `/workspace/Makefile` reflecting configured compiler and linker flags.
+- **Configurable Run Command**:
+  - Adds the **Run Command** field (`#setting-run-cmd`) within the Project Settings modal for user customization of the command launched when clicking the toolbar **Run** button (`#btn-run`).
+  - **Default Value**: `pushd . && cd /workspace && ./a.out; popd` (transparently preserves directory stack while running the target binary in `/workspace`).
+  - **Session Persistence**: The custom run command is saved to `localStorage` under `wasm_c_ide_run_command` across browser sessions.
+  - **Fallback Safeguard**: If left empty, automatically defaults back to `pushd . && cd /workspace && ./a.out; popd` to prevent blank command execution errors.
 
 ---
 
@@ -222,3 +232,4 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 | **ANSI VT100 & UTF-8 Screen Control** | Programs using ANSI VT100 control sequences and UTF-8 multi-byte characters (box borders, cursor positioning, colors) render crisply in `xterm.js`. |
 | **Synchronous Timer Sleeping** | WASI `poll_oneoff` accurately parses clock events and sleeps synchronously via `Atomics.wait` on `SharedArrayBuffer` without busy looping. |
 | **Collapsible & Resizable Sidebar** | Sidebar freely resizes with smooth col-resize dragging, collapses to 36px slim vertical rail with vertical WORKSPACE label, responds to Ctrl+B, and persists width and collapsed state in localStorage. |
+| **Configurable Run Command** | Project Settings modal configures custom run command with default `pushd . && cd /workspace && ./a.out; popd`, persists in `localStorage`, and injects into xterm on clicking `#btn-run`. |

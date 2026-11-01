@@ -90,7 +90,7 @@ This IDE is specifically engineered for **students and systems programming educa
   - UI action buttons inject transparent directory stack commands into the terminal:
     - **Compile**: `pushd . && cd /workspace && gcc -Iinclude -Wall -c src/main.c -o build/main.o; popd`
     - **Build**: `pushd . && cd /workspace && make; popd` (or `sh build.sh`)
-    - **Run**: `pushd . && cd /workspace && ./a.out; popd`
+    - **Run**: `pushd . && cd /workspace && ./a.out; popd` (configurable in Project Settings)
   - Guarantees that the student's shell working directory is preserved even if compilation or execution exits with an error code.
 
 ### 3. Clang & LLD WebAssembly Toolchain
@@ -126,7 +126,7 @@ This IDE is specifically engineered for **students and systems programming educa
   - Built-in incremental `make` engine checks modification timestamps (`mtime`) against prerequisites to avoid redundant rebuilds.
 - **Project Settings Modal**:
   - Decoupled **Save** and **Generate Build Script** buttons: save configuration and toggle sysroots without clobbering existing files in `/workspace`.
-  - Configure language mode, include directories, compiler warning flags, default build track, target binary name, and linker flags.
+  - Configure language mode, include directories, compiler warning flags, default build track, target binary name, linker flags, and custom Run Command (default: `pushd . && cd /workspace && ./a.out; popd`).
 
 ### 5. Execution Sandbox, Synchronous Stdin & In-Code File I/O
 - **Dedicated Runtime Web Worker**: User executables run in an isolated WebAssembly execution sandbox with complete WASI Preview 1 filesystem emulation.

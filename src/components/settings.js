@@ -1,5 +1,15 @@
 // Project Settings Panel & Build File Generator
 
+export const DEFAULT_RUN_COMMAND = 'pushd . && cd /workspace && ./a.out; popd';
+
+function escapeAttr(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 export class SettingsModal {
   constructor(vfs, config = {}, onSave = () => {}, onGenerateBuildFiles = () => {}) {
     this.vfs = vfs;
@@ -16,11 +26,15 @@ export class SettingsModal {
       compilerFlags: ['-Wall', '-Wextra'],
       linkerFlags: rawLinker,
       targetName: this.extractTarget(rawLinker),
+      runCommand: (config && config.runCommand !== undefined) ? config.runCommand : DEFAULT_RUN_COMMAND,
       sources: ['src/calc.c', 'src/main.c'],
       ...config,
     };
     if (this.config.linkerFlags) {
       this.config.targetName = this.extractTarget(this.config.linkerFlags);
+    }
+    if (this.config.runCommand === undefined) {
+      this.config.runCommand = DEFAULT_RUN_COMMAND;
     }
     this.onSave = onSave;
     this.onGenerateBuildFiles = onGenerateBuildFiles;
@@ -68,6 +82,11 @@ export class SettingsModal {
       this.config.linkerFlags = resolved;
       this.config.targetName = this.extractTarget(resolved);
     }
+    const runCmdEl = modalOverlay.querySelector('#setting-run-cmd');
+    if (runCmdEl) {
+      const val = runCmdEl.value.trim();
+      this.config.runCommand = val !== '' ? val : (this.config.runCommand || DEFAULT_RUN_COMMAND);
+    }
   }
 
   show() {
@@ -111,6 +130,10 @@ export class SettingsModal {
           <div class="form-group">
             <label for="setting-linker-flags">Linker Flags:</label>
             <input type="text" id="setting-linker-flags" class="form-control" value="${this.config.linkerFlags || '-o a.out'}">
+          </div>
+          <div class="form-group">
+            <label for="setting-run-cmd">Run Command:</label>
+            <input type="text" id="setting-run-cmd" class="form-control" value="${escapeAttr(this.config.runCommand || DEFAULT_RUN_COMMAND)}">
           </div>
         </div>
         <div class="modal-footer">
