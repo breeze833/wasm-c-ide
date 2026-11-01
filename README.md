@@ -61,7 +61,12 @@ This IDE is specifically engineered for **students and systems programming educa
 - **Ergonomic Toolbar**:
   - Color-coded header action buttons with icons: **Save** (cyan), **Compile** (violet), **Build** (blue), **Run** (green), **Stop** (red), and **Settings**.
   - Compact sidebar workspace actions with floating tooltips: **New File**, **New Folder**, **Import Zip**, and **Export Zip**.
-- **Collapsible File Tree**: Hierarchical folder tree with inline file and directory creation, deletion, and file opening.
+- **Collapsible & Resizable File Tree**:
+  - **Horizontal Drag Resizing**: Vertical drag divider (`#sidebar-resizer`) between sidebar and editor with `col-resize` cursor (drag freely between 160px and 600px; double-click to reset to default 240px).
+  - **36px Slim Rail Collapse**: Collapses smoothly into a 36px slim vertical rail displaying the toggle button and vertical **WORKSPACE** badge, freeing up maximum horizontal width for the code editor.
+  - **Keyboard Shortcut**: `Ctrl+B` / `Cmd+B` toggles between collapsed and expanded modes.
+  - **Persistence**: Remembers custom width and collapsed state in `localStorage` across sessions.
+  - Hierarchical folder tree with inline file and directory creation, deletion, and file opening.
 
 ### 2. Interactive POSIX Shell & Terminal
 - **xterm.js Terminal**: Embedded terminal emulator with ANSI colors, line wrapping, and dynamic window resizing.

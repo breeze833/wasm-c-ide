@@ -67,6 +67,8 @@ export class App {
     this.mode = 'c'; // 'c' or 'cpp'
     this.buildSystem = 'sh'; // 'sh' or 'make'
     this.deferredInstallPrompt = null;
+    this.sidebarWidth = 240;
+    this.sidebarCollapsed = false;
   }
 
   async init() {
@@ -191,6 +193,9 @@ export class App {
 
     // Draggable Split Resizer between Editor and Terminal
     this.setupSplitResizer();
+
+    // Collapsible & Resizable Workspace Sidebar
+    this.setupSidebar();
 
     // PWA Install Prompt & Connection Status Listeners
     if (globalDeferredInstallPrompt) {
@@ -1115,6 +1120,136 @@ export class App {
       }
     });
   }
+
+  setupSidebar() {
+    const sidebar = document.querySelector('.sidebar');
+    const resizer = document.getElementById('sidebar-resizer');
+    const toggleBtn = document.getElementById('btn-sidebar-toggle');
+    const collapsedStrip = document.getElementById('sidebar-collapsed-strip');
+    if (!sidebar || !resizer) return;
+
+    // Load initial width and collapsed state from localStorage
+    try {
+      const savedWidth = parseInt(localStorage.getItem('wasm_c_ide_sidebar_width'), 10);
+      if (Number.isFinite(savedWidth) && savedWidth >= 160 && savedWidth <= 600) {
+        this.sidebarWidth = savedWidth;
+      }
+      const savedCollapsed = localStorage.getItem('wasm_c_ide_sidebar_collapsed');
+      if (savedCollapsed === 'true') {
+        this.sidebarCollapsed = true;
+      }
+    } catch {}
+
+    const applyState = () => {
+      if (this.sidebarCollapsed) {
+        sidebar.classList.add('collapsed');
+        resizer.classList.add('hidden');
+        sidebar.style.width = '36px';
+        if (toggleBtn) {
+          toggleBtn.title = 'Expand Sidebar (Ctrl+B)';
+          toggleBtn.setAttribute('data-tooltip', 'Expand (Ctrl+B)');
+          toggleBtn.setAttribute('aria-label', 'Expand Sidebar');
+        }
+      } else {
+        sidebar.classList.remove('collapsed');
+        resizer.classList.remove('hidden');
+        sidebar.style.width = `${this.sidebarWidth}px`;
+        if (toggleBtn) {
+          toggleBtn.title = 'Collapse Sidebar (Ctrl+B)';
+          toggleBtn.setAttribute('data-tooltip', 'Collapse (Ctrl+B)');
+          toggleBtn.setAttribute('aria-label', 'Collapse Sidebar');
+        }
+      }
+      if (this.editorManager) this.editorManager.layout();
+    };
+
+    applyState();
+
+    this.toggleSidebar = (force) => {
+      this.sidebarCollapsed = typeof force === 'boolean' ? force : !this.sidebarCollapsed;
+      try {
+        localStorage.setItem('wasm_c_ide_sidebar_collapsed', String(this.sidebarCollapsed));
+      } catch {}
+      applyState();
+    };
+
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleSidebar();
+      });
+    }
+
+    if (collapsedStrip) {
+      collapsedStrip.addEventListener('click', () => {
+        if (this.sidebarCollapsed) {
+          this.toggleSidebar(false);
+        }
+      });
+    }
+
+    sidebar.addEventListener('transitionend', (e) => {
+      if (e.propertyName === 'width' && this.editorManager) {
+        this.editorManager.layout();
+      }
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        this.toggleSidebar();
+      }
+    });
+
+    // Sidebar resizer drag handling
+    let isDragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    resizer.addEventListener('mousedown', (e) => {
+      if (this.sidebarCollapsed) return;
+      isDragging = true;
+      startX = e.clientX;
+      startWidth = sidebar.clientWidth;
+      sidebar.classList.add('resizing');
+      resizer.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging || this.sidebarCollapsed) return;
+      const deltaX = e.clientX - startX;
+      const maxW = Math.max(200, Math.min(600, window.innerWidth - 300));
+      const newW = Math.max(160, Math.min(maxW, startWidth + deltaX));
+      sidebar.style.width = `${newW}px`;
+      this.sidebarWidth = newW;
+      if (this.editorManager) this.editorManager.layout();
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (isDragging) {
+        isDragging = false;
+        sidebar.classList.remove('resizing');
+        resizer.classList.remove('dragging');
+        document.body.style.cursor = '';
+        try {
+          localStorage.setItem('wasm_c_ide_sidebar_width', String(this.sidebarWidth));
+        } catch {}
+        if (this.editorManager) this.editorManager.layout();
+      }
+    });
+
+    resizer.addEventListener('dblclick', () => {
+      if (this.sidebarCollapsed) return;
+      this.sidebarWidth = 240;
+      sidebar.style.width = '240px';
+      try {
+        localStorage.setItem('wasm_c_ide_sidebar_width', '240');
+      } catch {}
+      if (this.editorManager) this.editorManager.layout();
+    });
+  }
 }
 
 export function initApp() {
@@ -1199,32 +1334,45 @@ export function initApp() {
     <div class="main-layout">
       <aside class="sidebar">
         <div class="sidebar-header">
-          <span>Workspace</span>
+          <span class="sidebar-title">Workspace</span>
           <div class="sidebar-actions">
-            <button id="btn-new-file" class="icon-btn" title="New File" data-tooltip="New File" aria-label="New File">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M9 1H3a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h5v-1H3V2h5v3h3v3h1V4.5L8.5 1H9zm4 10v-2h-1v2H9v1h3v3h1v-3h3v-1h-3z"/>
-              </svg>
-            </button>
-            <button id="btn-new-folder" class="icon-btn" title="New Folder" data-tooltip="New Folder" aria-label="New Folder">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M7.25 3l.75 1h6a1 1 0 0 1 1 1v2.5h-1V5H8l-.75-1H2v9h6v1H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h4.25l1 1zm4.75 8v-2h-1v2H8v1h3v3h1v-3h3v-1h-3z"/>
-              </svg>
-            </button>
-            <button id="btn-import-zip" class="icon-btn" title="Import Zip" data-tooltip="Import Zip" aria-label="Import Zip">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M7.5 10.5V3.707L5.354 5.854l-.708-.708L8 1.793l3.354 3.353-.708.708L8.5 3.707v6.793h-1zM2 11.5v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2h-1v2H3v-2H2z"/>
-              </svg>
-            </button>
-            <button id="btn-export-zip" class="icon-btn" title="Export Zip" data-tooltip="Export Zip" aria-label="Export Zip">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M8.5 1.5v6.793l2.146-2.147.708.708L8 10.207 4.646 6.854l.708-.708 2.146 2.147V1.5h1zM2 11.5v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2h-1v2H3v-2H2z"/>
+            <div class="sidebar-action-tools">
+              <button id="btn-new-file" class="icon-btn" title="New File" data-tooltip="New File" aria-label="New File">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M9 1H3a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h5v-1H3V2h5v3h3v3h1V4.5L8.5 1H9zm4 10v-2h-1v2H9v1h3v3h1v-3h3v-1h-3z"/>
+                </svg>
+              </button>
+              <button id="btn-new-folder" class="icon-btn" title="New Folder" data-tooltip="New Folder" aria-label="New Folder">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M7.25 3l.75 1h6a1 1 0 0 1 1 1v2.5h-1V5H8l-.75-1H2v9h6v1H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h4.25l1 1zm4.75 8v-2h-1v2H8v1h3v3h1v-3h3v-1h-3z"/>
+                </svg>
+              </button>
+              <button id="btn-import-zip" class="icon-btn" title="Import Zip" data-tooltip="Import Zip" aria-label="Import Zip">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M7.5 10.5V3.707L5.354 5.854l-.708-.708L8 1.793l3.354 3.353-.708.708L8.5 3.707v6.793h-1zM2 11.5v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2h-1v2H3v-2H2z"/>
+                </svg>
+              </button>
+              <button id="btn-export-zip" class="icon-btn" title="Export Zip" data-tooltip="Export Zip" aria-label="Export Zip">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8.5 1.5v6.793l2.146-2.147.708.708L8 10.207 4.646 6.854l.708-.708 2.146 2.147V1.5h1zM2 11.5v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2h-1v2H3v-2H2z"/>
+                </svg>
+              </button>
+            </div>
+            <button id="btn-sidebar-toggle" class="icon-btn sidebar-toggle-btn" title="Collapse Sidebar (Ctrl+B)" data-tooltip="Collapse (Ctrl+B)" aria-label="Toggle Sidebar">
+              <svg id="sidebar-toggle-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path fill-rule="evenodd" d="M8.354 1.646a.5.5 0 0 1 0 .708L2.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
+                <path fill-rule="evenodd" d="M12.354 1.646a.5.5 0 0 1 0 .708L6.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
               </svg>
             </button>
           </div>
         </div>
         <div id="file-tree" class="file-tree-container"></div>
+        <div id="sidebar-collapsed-strip" class="sidebar-collapsed-strip" title="Click to Expand Workspace (Ctrl+B)">
+          <span class="collapsed-title">WORKSPACE</span>
+        </div>
       </aside>
+
+      <div id="sidebar-resizer" class="sidebar-resizer" title="Drag to resize sidebar (Double-click to reset)"></div>
 
       <main class="content-area">
         <section class="editor-section">

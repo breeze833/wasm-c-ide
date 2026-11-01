@@ -185,11 +185,33 @@ body, html {
 /* Sidebar / File Tree */
 .sidebar {
   width: 240px;
+  min-width: 160px;
+  max-width: 600px;
   background-color: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  position: relative;
+  transition: width 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.sidebar.resizing {
+  transition: none !important;
+  user-select: none;
+}
+
+.sidebar.collapsed {
+  width: 36px !important;
+  min-width: 36px !important;
+  max-width: 36px !important;
+  cursor: pointer;
+  overflow: visible;
+}
+
+.sidebar.collapsed:hover {
+  background-color: var(--bg-tertiary);
 }
 
 .sidebar-header {
@@ -203,12 +225,105 @@ body, html {
   text-transform: uppercase;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.sidebar.collapsed .sidebar-header {
+  justify-content: center;
+  padding: 0;
+  overflow: visible;
+}
+
+.sidebar.collapsed .sidebar-title,
+.sidebar.collapsed .sidebar-action-tools,
+.sidebar.collapsed #file-tree {
+  display: none !important;
 }
 
 .sidebar-actions {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.sidebar-action-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-toggle-btn {
+  flex-shrink: 0;
+}
+
+#sidebar-toggle-icon {
+  transition: transform 0.2s ease;
+}
+
+.sidebar.collapsed #sidebar-toggle-icon {
+  transform: rotate(180deg);
+}
+
+.sidebar.collapsed .sidebar-toggle-btn[data-tooltip]::after {
+  left: 42px;
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
+}
+
+.sidebar.collapsed .sidebar-toggle-btn[data-tooltip]:hover::after {
+  transform: translateY(-50%);
+}
+
+/* Collapsed Workspace Vertical Strip */
+.sidebar-collapsed-strip {
+  display: none;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 20px;
+  cursor: pointer;
+  user-select: none;
+  width: 100%;
+}
+
+.sidebar.collapsed .sidebar-collapsed-strip {
+  display: flex;
+}
+
+.collapsed-title {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  transition: color 0.15s ease;
+  white-space: nowrap;
+}
+
+.sidebar.collapsed:hover .collapsed-title {
+  color: var(--text-bright);
+}
+
+/* Sidebar Resizer */
+.sidebar-resizer {
+  width: 5px;
+  background-color: var(--border-color);
+  cursor: col-resize;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease;
+  z-index: 5;
+}
+
+.sidebar-resizer:hover, .sidebar-resizer.dragging {
+  background-color: var(--accent-color);
+}
+
+.sidebar-resizer.hidden {
+  display: none !important;
 }
 
 .icon-btn {

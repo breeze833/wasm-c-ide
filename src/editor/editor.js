@@ -63,6 +63,13 @@ export class EditorManager {
       this.resetFontSize();
     });
 
+    // Toggle Workspace Sidebar: Ctrl+B / Cmd+B
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyB, () => {
+      if (typeof window.__ideApp?.toggleSidebar === 'function') {
+        window.__ideApp.toggleSidebar();
+      }
+    });
+
     // Resize listener
     window.addEventListener('resize', () => {
       this.editor.layout();

@@ -182,6 +182,18 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
   - Converts nanosecond timeouts to millisecond durations and sleeps synchronously via `Atomics.wait()` on `SharedArrayBuffer` when cross-origin isolated.
   - Powers standard POSIX `nanosleep(&ts, NULL)`, `usleep()`, `sleep()`, and turtle `delay_ms()` accurately without 100% CPU busy looping.
 
+### 3.6 Collapsible (Slim Rail) & Resizable Workspace Sidebar
+- **Dynamic Horizontal Resizing**:
+  - Draggable vertical divider (`#sidebar-resizer`, 5px) positioned between the sidebar and editor with `col-resize` cursor and active accent highlight.
+  - Dragging dynamically resizes the sidebar between `160px` and `window.innerWidth - 300px` (clamped to max `600px`), immediately triggering `EditorManager.prototype.layout()`.
+  - Double-clicking the resizer handle resets the sidebar to its default `240px` width.
+- **Collapsible Slim Rail**:
+  - Collapsing reduces the sidebar to a `36px` slim vertical rail (`.sidebar.collapsed`) with the toggle button flipping to expand (`»`) and vertical label **`WORKSPACE`** (`writing-mode: vertical-rl; transform: rotate(180deg)`).
+  - Clicking either the toggle button or the vertical strip expands the sidebar back to its previously chosen width.
+  - While collapsed, `#sidebar-resizer` is automatically hidden (`display: none`).
+- **Keyboard Shortcut**: `Ctrl+B` / `Cmd+B` toggles the sidebar between collapsed and expanded states (bound globally and within Monaco editor).
+- **Session Persistence**: Both custom sidebar width (`wasm_c_ide_sidebar_width`) and collapsed state (`wasm_c_ide_sidebar_collapsed`) are persisted in `localStorage`.
+
 ---
 
 ## 4. Verification & Testing Checklist
@@ -209,3 +221,4 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 | **Detached Floating Terminal Mode** | Floating window snaps to 80x24 standard VT100 dimensions, cycles through presets (100x30, 120x36), supports title dragging with viewport clamping, dynamic minimize/maximize icons (`_` and `□`), and active green glow focus. |
 | **ANSI VT100 & UTF-8 Screen Control** | Programs using ANSI VT100 control sequences and UTF-8 multi-byte characters (box borders, cursor positioning, colors) render crisply in `xterm.js`. |
 | **Synchronous Timer Sleeping** | WASI `poll_oneoff` accurately parses clock events and sleeps synchronously via `Atomics.wait` on `SharedArrayBuffer` without busy looping. |
+| **Collapsible & Resizable Sidebar** | Sidebar freely resizes with smooth col-resize dragging, collapses to 36px slim vertical rail with vertical WORKSPACE label, responds to Ctrl+B, and persists width and collapsed state in localStorage. |

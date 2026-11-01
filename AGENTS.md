@@ -321,6 +321,18 @@ Agents executing this project should proceed milestone-by-milestone:
   - Mount and preload `libraylib.a` and `libturtle_raylib.a` in `/usr/lib/` and `/lib/wasm32-wasip1/` out of the box.
   - Remove `#setting-raylib` checkbox from Project Settings; users explicitly specify linker flags (`-lraylib`, `-lturtle_raylib -lraylib`).
 
+### Milestone 21: Collapsible (Slim Rail) & Resizable Workspace Sidebar
+- Implement horizontal draggable divider (`#sidebar-resizer`) between sidebar and editor allowing dynamic width adjustment (160px–600px).
+- Implement double-click on resizer handle to reset sidebar to default 240px.
+- Implement collapsible slim vertical rail:
+  - Collapsing reduces sidebar width to 36px with transition animation.
+  - Displays toggle button (flipping between `«` and `»`) and vertical label **`WORKSPACE`** (`writing-mode: vertical-rl; transform: rotate(180deg)`).
+  - Clicking the toggle button or the collapsed vertical strip expands the sidebar back to its previous width.
+  - Automatically hides `#sidebar-resizer` while collapsed.
+- Implement keyboard shortcut: `Ctrl+B` / `Cmd+B` toggles sidebar between collapsed and expanded states (bound globally and within Monaco editor).
+- Implement session persistence: stores custom width (`wasm_c_ide_sidebar_width`) and collapsed state (`wasm_c_ide_sidebar_collapsed`) in `localStorage`.
+- Add comprehensive automated test suite in `test/sidebar.test.js`.
+
 ---
 
 ## 4. Verification & Testing Checklist
@@ -379,4 +391,5 @@ Before marking any task complete, agents must verify:
 | **Synchronous Timer Sleeping** | WASI `poll_oneoff` accurately parses clock events and sleeps synchronously via `Atomics.wait` on `SharedArrayBuffer` without busy looping. |
 | **Offline PWA Installation** | Application provides valid manifest, registers service worker with COOP/COEP headers, and operates offline. |
 | **Portable Zip Distribution** | `npm run pack` creates a standalone `wasm-c-ide.zip` that runs in any static web server document root. |
+| **Collapsible & Resizable Sidebar** | Sidebar freely resizes with smooth col-resize dragging, collapses to 36px slim vertical rail with vertical WORKSPACE label, responds to Ctrl+B, and persists width and collapsed state in localStorage. |
 
