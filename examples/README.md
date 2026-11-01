@@ -118,3 +118,23 @@ You can copy and paste the code from any of these files into the IDE editor (`wo
   ./a.out
   ```
 
+---
+
+## 8. ANSI Terminal & Screen Control Demo
+* **File**: [`08_ansi_terminal.c`](./08_ansi_terminal.c)
+* **API Used**: Standard C `<stdio.h>`, `<stdlib.h>`, `<unistd.h>` (DEC VT100 / xterm.js ANSI sequences)
+* **Features**:
+  * Full-screen 80×24 text-mode TUI layout with Unicode/VT100 double-line box drawing
+  * Direct cursor coordinate positioning (`\033[<r>;<c>H`) and cursor hiding/restoring (`\033[?25l` / `\033[?25h`)
+  * SGR text styling: Bold, Dim, Italic, Underline, and Reverse video
+  * 16-color standard ANSI color palette and 256-color gradient spectrum bar
+  * Smooth in-place animated progress bar with telemetry counter without screen flicker
+  * Zero external libraries or link flags needed!
+* **Recommended Mode**:
+  * Click the **Detach Terminal** button (`↗`) on the Terminal pane header (or press `Ctrl+Shift+D`) to pop the terminal into its default **80×24 floating mode**.
+* **How to Compile & Run**:
+  ```bash
+  gcc 08_ansi_terminal.c -o a.out
+  ./a.out
+  ```
+

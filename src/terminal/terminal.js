@@ -13,6 +13,9 @@ export class TerminalManager {
     this.onInput = onInput;
     this.onInterrupt = onInterrupt;
     this.onFontSizeChange = null;
+    this.onDimensionsChange = null;
+    this.isDetached = false;
+    this.fixedGrid = false;
 
     let initialFontSize = 13;
     try {
@@ -81,10 +84,22 @@ export class TerminalManager {
       return true;
     });
 
-    // Resize observer
+    // Terminal resize event listener
+    this.term.onResize(({ cols, rows }) => {
+      if (typeof this.onDimensionsChange === 'function') {
+        this.onDimensionsChange(cols, rows);
+      }
+    });
+
+    // Resize observer on container
     const ro = new ResizeObserver(() => {
       try {
-        this.fitAddon.fit();
+        if (!this.fixedGrid) {
+          this.fitAddon.fit();
+        }
+        if (typeof this.onDimensionsChange === 'function') {
+          this.onDimensionsChange(this.term.cols, this.term.rows);
+        }
       } catch {}
     });
     ro.observe(this.container);
@@ -98,6 +113,63 @@ export class TerminalManager {
       }
       this.onInput(data);
     });
+  }
+
+  fit() {
+    try {
+      this.fitAddon.fit();
+      if (typeof this.onDimensionsChange === 'function') {
+        this.onDimensionsChange(this.term.cols, this.term.rows);
+      }
+    } catch {}
+  }
+
+  getGridDimensions() {
+    return { cols: this.term.cols, rows: this.term.rows };
+  }
+
+  setGridDimensions(cols, rows) {
+    const targetCols = Math.max(10, Math.min(240, Math.round(cols)));
+    const targetRows = Math.max(5, Math.min(100, Math.round(rows)));
+    try {
+      this.term.resize(targetCols, targetRows);
+    } catch {}
+    if (typeof this.onDimensionsChange === 'function') {
+      this.onDimensionsChange(this.term.cols, this.term.rows);
+    }
+    return { cols: this.term.cols, rows: this.term.rows };
+  }
+
+  computeCellDimensions() {
+    // 1. Try render service dimensions
+    const dims = this.term._core?._renderService?.dimensions;
+    if (dims && dims.actualCellWidth > 0 && dims.actualCellHeight > 0) {
+      return { width: dims.actualCellWidth, height: dims.actualCellHeight };
+    }
+    // 2. Try measuring .xterm-screen DOM element
+    const screen = this.container?.querySelector('.xterm-screen');
+    if (screen && this.term.cols > 0 && this.term.rows > 0 && screen.clientWidth > 0 && screen.clientHeight > 0) {
+      return {
+        width: screen.clientWidth / this.term.cols,
+        height: screen.clientHeight / this.term.rows,
+      };
+    }
+    // 3. Fallback based on font size
+    return {
+      width: Math.max(6, Math.round(this.fontSize * 0.60)),
+      height: Math.max(12, Math.round(this.fontSize * 1.25)),
+    };
+  }
+
+  computeContainerSizeForGrid(cols = 80, rows = 24) {
+    const cell = this.computeCellDimensions();
+    const padX = 16; // 8px left + 8px right
+    const padY = 12; // 6px top + 6px bottom
+    const headerH = 28; // height of .terminal-header
+    return {
+      width: Math.ceil(cols * cell.width) + padX,
+      height: Math.ceil(rows * cell.height) + headerH + padY,
+    };
   }
 
   getFontSize() {

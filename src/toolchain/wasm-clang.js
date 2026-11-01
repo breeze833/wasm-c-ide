@@ -167,7 +167,7 @@ export class WasmToolchain {
         }
       }
 
-      // Preload default libturtle.a into VFS
+      // Preload default runtime libraries into VFS
       try {
         const turtleRes = await fetch(`${this.basePath}/libturtle.a`);
         if (turtleRes && turtleRes.ok) {
@@ -180,6 +180,32 @@ export class WasmToolchain {
             this.vfs.writeFile('/lib/wasm32-wasip1/libturtle_canvas-wasi.a', turtleU8, Date.now(), true);
             this.vfs.writeFile('/lib/wasm32-wasi/libturtle.a', turtleU8, Date.now(), true);
             this.vfs.writeFile('/lib/wasm32-wasi/libturtle_canvas-wasi.a', turtleU8, Date.now(), true);
+          }
+        }
+      } catch {}
+
+      try {
+        const raylibRes = await fetch(`${this.basePath}/libraylib.a`);
+        if (raylibRes && raylibRes.ok) {
+          const raylibBuf = await raylibRes.arrayBuffer();
+          const raylibU8 = new Uint8Array(raylibBuf);
+          if (this.vfs) {
+            this.vfs.writeFile('/usr/lib/libraylib.a', raylibU8, Date.now(), true);
+            this.vfs.writeFile('/lib/wasm32-wasip1/libraylib.a', raylibU8, Date.now(), true);
+            this.vfs.writeFile('/lib/wasm32-wasi/libraylib.a', raylibU8, Date.now(), true);
+          }
+        }
+      } catch {}
+
+      try {
+        const turtleRaylibRes = await fetch(`${this.basePath}/libturtle_raylib.a`);
+        if (turtleRaylibRes && turtleRaylibRes.ok) {
+          const turtleRaylibBuf = await turtleRaylibRes.arrayBuffer();
+          const turtleRaylibU8 = new Uint8Array(turtleRaylibBuf);
+          if (this.vfs) {
+            this.vfs.writeFile('/usr/lib/libturtle_raylib.a', turtleRaylibU8, Date.now(), true);
+            this.vfs.writeFile('/lib/wasm32-wasip1/libturtle_raylib.a', turtleRaylibU8, Date.now(), true);
+            this.vfs.writeFile('/lib/wasm32-wasi/libturtle_raylib.a', turtleRaylibU8, Date.now(), true);
           }
         }
       } catch {}

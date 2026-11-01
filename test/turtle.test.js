@@ -40,9 +40,11 @@ mountSysroot(vfs);
 
 assert.strictEqual(vfs.exists('/usr/include/turtle.h'), true, '/usr/include/turtle.h must exist by default');
 assert.strictEqual(vfs.exists('/usr/include/turtle_backend_canvas_wasi.h'), true);
+assert.strictEqual(vfs.exists('/usr/include/turtle_backend_raylib.h'), true, 'turtle_backend_raylib.h must be mounted by default in sysroot');
 assert.strictEqual(vfs.exists('/usr/include/turtle_hal.h'), false, 'turtle_hal.h internal header must not be mounted in /usr/include');
 assert.strictEqual(vfs.exists('/usr/lib/libturtle.a'), true);
 assert.strictEqual(vfs.exists('/usr/lib/libturtle_canvas-wasi.a'), true);
+assert.strictEqual(vfs.exists('/usr/lib/libturtle_raylib.a'), true);
 
 const turtleHContent = vfs.readFile('/usr/include/turtle.h');
 assert.strictEqual(turtleHContent.includes('turtle_begin'), true);
@@ -50,9 +52,9 @@ assert.strictEqual(turtleHContent.includes('turtle_forward'), true);
 assert.strictEqual(turtleHContent.includes('turtle_turn'), true);
 assert.strictEqual(turtleHContent.includes('turtle_delay'), true);
 assert.strictEqual(turtleHContent.includes('turtle_end'), true);
-console.log('✓ VFS default sysroot mounting with canvas-wasi turtle backend verified');
+console.log('✓ VFS default sysroot mounting with canvas-wasi and raylib turtle backends verified');
 
-// Test 3: Raylib turtle backend dynamic mount & unmount lifecycle
+// Test 3: Raylib turtle backend backward-compatible mount & unmount lifecycle
 const dummyRaylibHeaders = {
   'raylib.h': '/* raylib.h */',
   'raymath.h': '/* raymath.h */',
@@ -80,7 +82,6 @@ settingsVfs.writeFile('/workspace/main.c', '#include <turtle.h>\n#include <turtl
 const settings = new SettingsModal(settingsVfs, {
   mode: 'c',
   buildSystem: 'sh',
-  enableRaylib: false,
   linkerFlags: '-o turtle_app.out -lturtle',
 });
 settings.regenerateBuildFiles();
@@ -101,7 +102,6 @@ assert.strictEqual(makefile.includes('-lturtle'), false, 'Makefile must NOT auto
 
 // 3. Manually specified Raylib turtle backend flags
 settings.config.linkerFlags = '-o turtle_app.out -lturtle_raylib -lraylib';
-settings.config.enableRaylib = true;
 settings.regenerateBuildFiles();
 
 const raylibBuildSh = settingsVfs.readFile('/workspace/build.sh', true);

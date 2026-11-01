@@ -12,7 +12,6 @@ export class SettingsModal {
     this.config = {
       mode: 'c',
       buildSystem: 'sh',
-      enableRaylib: false,
       includePaths: ['include'],
       compilerFlags: ['-Wall', '-Wextra'],
       linkerFlags: rawLinker,
@@ -39,7 +38,6 @@ export class SettingsModal {
     if (!modalOverlay) return;
     const mode = modalOverlay.querySelector('#setting-mode');
     const buildSys = modalOverlay.querySelector('#setting-build-sys');
-    const raylib = modalOverlay.querySelector('#setting-raylib');
     const includes = modalOverlay.querySelector('#setting-includes');
     const flags = modalOverlay.querySelector('#setting-flags');
     const linkerEl = modalOverlay.querySelector('#setting-linker-flags');
@@ -52,7 +50,6 @@ export class SettingsModal {
 
     if (mode) this.config.mode = mode.value;
     if (buildSys) this.config.buildSystem = buildSys.value;
-    if (raylib) this.config.enableRaylib = raylib.checked;
     if (includes) {
       this.config.includePaths = includes.value
         .split(',')
@@ -102,12 +99,6 @@ export class SettingsModal {
               <option value="sh" ${this.config.buildSystem === 'sh' ? 'selected' : ''}>Shell Script (build.sh)</option>
               <option value="make" ${this.config.buildSystem === 'make' ? 'selected' : ''}>Makefile (make)</option>
             </select>
-          </div>
-          <div class="form-group" style="flex-direction: row; align-items: center; gap: 8px; margin: 4px 0;">
-            <input type="checkbox" id="setting-raylib" ${this.config.enableRaylib ? 'checked' : ''} style="cursor: pointer; width: 16px; height: 16px;">
-            <label for="setting-raylib" style="cursor: pointer; font-size: 13px; color: var(--text-bright); font-weight: 500;">
-              🎮 Enable Raylib Graphics Support
-            </label>
           </div>
           <div class="form-group">
             <label for="setting-includes">Include Directories (comma-separated):</label>

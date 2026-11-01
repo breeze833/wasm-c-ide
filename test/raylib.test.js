@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import { VFS } from '../src/vfs/vfs.js';
-import { mountRaylibSysroot, unmountRaylibSysroot } from '../src/vfs/sysroot.js';
+import { mountSysroot, mountRaylibSysroot, unmountRaylibSysroot, RAYLIB_HEADERS } from '../src/vfs/sysroot.js';
 import { SettingsModal } from '../src/components/settings.js';
 import { createRaylibHost } from 'raylib-wasi';
 import { InputCoordinator } from 'canvas-wasi';
@@ -21,36 +21,40 @@ assert.strictEqual(fs.existsSync('public/sysroot/include/raylib/raymath.h'), tru
 assert.strictEqual(fs.existsSync('public/sysroot/include/raylib/rlgl.h'), true);
 console.log('✓ Precompiled libraylib.a archive and headers verified');
 
-// Test 2: VFS mounting and unmounting of Raylib sysroot
-const vfs = new VFS();
+// Test 2: VFS default mounting of Raylib in sysroot
+const defaultVfs = new VFS();
+mountSysroot(defaultVfs);
+assert.strictEqual(defaultVfs.exists('/usr/include/raylib.h'), true, 'raylib.h must be mounted by default in sysroot');
+assert.strictEqual(defaultVfs.exists('/usr/include/raymath.h'), true, 'raymath.h must be mounted by default in sysroot');
+assert.strictEqual(defaultVfs.exists('/usr/include/rlgl.h'), true, 'rlgl.h must be mounted by default in sysroot');
+assert.strictEqual(defaultVfs.exists('/usr/lib/libraylib.a'), true, 'libraylib.a must be mounted by default in sysroot');
+assert.strictEqual(typeof RAYLIB_HEADERS['raylib.h'], 'string');
+assert.strictEqual(defaultVfs.readFile('/usr/include/raylib.h', true), RAYLIB_HEADERS['raylib.h']);
+
+// Backward-compatible mountRaylibSysroot & unmountRaylibSysroot test
+const customVfs = new VFS();
 const dummyHeaders = {
-  'raylib.h': '/* raylib.h */',
-  'raymath.h': '/* raymath.h */',
-  'rlgl.h': '/* rlgl.h */',
+  'raylib.h': '/* custom raylib.h */',
+  'raymath.h': '/* custom raymath.h */',
+  'rlgl.h': '/* custom rlgl.h */',
 };
 const dummyLib = new Uint8Array([1, 2, 3, 4]);
 
-mountRaylibSysroot(vfs, dummyHeaders, dummyLib);
-assert.strictEqual(vfs.exists('/usr/include/raylib.h'), true);
-assert.strictEqual(vfs.exists('/usr/include/raymath.h'), true);
-assert.strictEqual(vfs.exists('/usr/include/rlgl.h'), true);
-assert.strictEqual(vfs.exists('/usr/lib/libraylib.a'), true);
-assert.strictEqual(vfs.readFile('/usr/include/raylib.h', true), '/* raylib.h */');
-assert.deepStrictEqual(vfs.readFile('/usr/lib/libraylib.a', false), dummyLib);
+mountRaylibSysroot(customVfs, dummyHeaders, dummyLib);
+assert.strictEqual(customVfs.exists('/usr/include/raylib.h'), true);
+assert.strictEqual(customVfs.readFile('/usr/include/raylib.h', true), '/* custom raylib.h */');
+assert.deepStrictEqual(customVfs.readFile('/usr/lib/libraylib.a', false), dummyLib);
 
-unmountRaylibSysroot(vfs);
-assert.strictEqual(vfs.exists('/usr/include/raylib.h'), false);
-assert.strictEqual(vfs.exists('/usr/include/raymath.h'), false);
-assert.strictEqual(vfs.exists('/usr/include/rlgl.h'), false);
-assert.strictEqual(vfs.exists('/usr/lib/libraylib.a'), false);
-console.log('✓ VFS mountRaylibSysroot and unmountRaylibSysroot verified');
+unmountRaylibSysroot(customVfs);
+assert.strictEqual(customVfs.exists('/usr/include/raylib.h'), false);
+assert.strictEqual(customVfs.exists('/usr/lib/libraylib.a'), false);
+console.log('✓ VFS default sysroot mounting and backward-compatible mount/unmount verified');
 
 // Test 3: Project Settings modal generates build.sh & Makefile with manual linkerFlags and does not auto-add flags
 const settingsVfs = new VFS();
 const settings = new SettingsModal(settingsVfs, {
   mode: 'c',
   buildSystem: 'sh',
-  enableRaylib: true,
   linkerFlags: '-o game.out -lraylib',
 });
 settings.regenerateBuildFiles();
@@ -67,7 +71,6 @@ assert.strictEqual(makefile.includes('LDFLAGS = -o game.out -lraylib'), true, 'M
 const settingsNoAuto = new SettingsModal(settingsVfs, {
   mode: 'c',
   buildSystem: 'sh',
-  enableRaylib: true,
   linkerFlags: '-o game.out',
 });
 settingsNoAuto.regenerateBuildFiles();

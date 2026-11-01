@@ -1,6 +1,7 @@
 // Sysroot initialization for standard C/C++ headers in /usr/include
 import { GRAPHICS_H, GRAPHICS_CANVAS_H } from 'canvas-wasi/headers';
 import { TURTLE_HEADERS } from './turtle-headers.js';
+import { RAYLIB_HEADERS } from './raylib-headers.js';
 
 export const STANDARD_C_HEADERS = {
   'stdio.h': `/* Minimal WASI / Musl stdio.h */
@@ -412,9 +413,13 @@ extern int errno;
   'graphics_canvas.h': GRAPHICS_CANVAS_H,
   'turtle.h': TURTLE_HEADERS['turtle.h'],
   'turtle_backend_canvas_wasi.h': TURTLE_HEADERS['turtle_backend_canvas_wasi.h'],
+  'turtle_backend_raylib.h': TURTLE_HEADERS['turtle_backend_raylib.h'],
+  'raylib.h': RAYLIB_HEADERS['raylib.h'],
+  'raymath.h': RAYLIB_HEADERS['raymath.h'],
+  'rlgl.h': RAYLIB_HEADERS['rlgl.h'],
 };
 
-export { TURTLE_HEADERS };
+export { TURTLE_HEADERS, RAYLIB_HEADERS };
 
 export const STANDARD_CPP_HEADERS = {
   'iostream': `// Minimal C++ iostream header
@@ -709,6 +714,8 @@ export const STANDARD_LIBS = [
   'libpthread.a',
   'libturtle.a',
   'libturtle_canvas-wasi.a',
+  'libturtle_raylib.a',
+  'libraylib.a',
 ];
 
 export const BIN_COMMANDS = [

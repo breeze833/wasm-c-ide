@@ -10,7 +10,6 @@ import { execSync } from 'node:child_process';
 import { Tar } from '../src/toolchain/tar.js';
 import { VFS } from '../src/vfs/vfs.js';
 import { mountSysroot } from '../src/vfs/sysroot.js';
-import { WasmToolchain } from '../src/toolchain/wasm-clang.js';
 import { buildArchive } from '../src/toolchain/ar.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -44,8 +43,13 @@ const RAYLIB_INC_DIR = path.join(projectRoot, 'public', 'sysroot', 'include', 'r
 const TURTLE_INC_DIR = path.join(projectRoot, 'public', 'sysroot', 'include', 'turtle');
 const LIBTURTLE_BUILD_DIR = path.join(projectRoot, 'build', 'libturtle');
 const TURTLE_HEADERS_JS = path.join(projectRoot, 'src', 'vfs', 'turtle-headers.js');
+const RAYLIB_HEADERS_JS = path.join(projectRoot, 'src', 'vfs', 'raylib-headers.js');
+
+const WASI_HOST_JS = path.join(projectRoot, 'src', 'vfs', 'wasi-host.js');
+const CLANG_WASI_RAW_URL = 'https://raw.githubusercontent.com/breeze833/clang-wasi/main/src/wasi-host.js';
 
 const REQUIRED_FILES = [
+  WASI_HOST_JS,
   path.join(WASM_DIR, 'llvm-box.wasm'),
   path.join(WASM_DIR, 'sysroot.tar.gz'),
   path.join(WASM_DIR, 'libraylib.a'),
@@ -59,6 +63,7 @@ const REQUIRED_FILES = [
   path.join(TURTLE_INC_DIR, 'turtle_backend_canvas_wasi.h'),
   path.join(TURTLE_INC_DIR, 'turtle_backend_raylib.h'),
   TURTLE_HEADERS_JS,
+  RAYLIB_HEADERS_JS,
 ];
 
 const force = process.argv.includes('--force');
@@ -87,6 +92,35 @@ async function downloadToFile(url, destPath) {
 }
 
 async function downloadClangWasiAssets() {
+  // 1. Ensure src/vfs/wasi-host.js is single-sourced from clang-wasi
+  if (force || !fs.existsSync(WASI_HOST_JS) || fs.statSync(WASI_HOST_JS).size === 0) {
+    fs.mkdirSync(path.dirname(WASI_HOST_JS), { recursive: true });
+    const localClangWasi = process.env.CLANG_WASI_DIR
+      ? path.join(process.env.CLANG_WASI_DIR, 'src', 'wasi-host.js')
+      : path.resolve(projectRoot, '../clang-wasi/src/wasi-host.js');
+
+    if (fs.existsSync(localClangWasi)) {
+      fs.copyFileSync(localClangWasi, WASI_HOST_JS);
+      console.log(`[sysroot] Copied wasi-host.js from local clang-wasi: ${localClangWasi}`);
+    } else {
+      console.log(`[sysroot] Downloading wasi-host.js from ${CLANG_WASI_RAW_URL} ...`);
+      let res = await fetch(CLANG_WASI_RAW_URL);
+      if (!res.ok) {
+        const releaseUrl = `${CLANG_WASI_BASE_URL}/wasi-host.js`;
+        res = await fetch(releaseUrl);
+        if (!res.ok) {
+          throw new Error(`Failed to download wasi-host.js: ${res.status} ${res.statusText}`);
+        }
+      }
+      const code = await res.text();
+      fs.writeFileSync(WASI_HOST_JS, code, 'utf-8');
+      console.log(`[sysroot] Downloaded and saved src/vfs/wasi-host.js (${code.length} bytes)`);
+    }
+  } else {
+    console.log('[sysroot] src/vfs/wasi-host.js already present, skipping.');
+  }
+
+  // 2. Download toolchain binaries
   const binaries = ['llvm-box.wasm', 'sysroot.tar.gz'];
   for (const name of binaries) {
     const dest = path.join(WASM_DIR, name);
@@ -108,7 +142,7 @@ async function downloadRaylibAssets() {
   ];
 
   const needsDownload = force || raylibFiles.some((f) => !fs.existsSync(f) || fs.statSync(f).size === 0);
-  if (!needsDownload) {
+  if (!needsDownload && fs.existsSync(RAYLIB_HEADERS_JS) && fs.statSync(RAYLIB_HEADERS_JS).size > 0) {
     console.log('[sysroot] Raylib assets already present, skipping.');
     return;
   }
@@ -122,37 +156,46 @@ async function downloadRaylibAssets() {
     fs.copyFileSync(path.join(moduleDistInc, 'raymath.h'), path.join(RAYLIB_INC_DIR, 'raymath.h'));
     fs.copyFileSync(path.join(moduleDistInc, 'rlgl.h'), path.join(RAYLIB_INC_DIR, 'rlgl.h'));
     console.log('[sysroot] Copied Raylib assets from node_modules/raylib-wasi/dist.');
-    return;
-  }
+  } else if (needsDownload) {
+    const url = `${RAYLIB_WASI_BASE_URL}/raylib-wasi.tar.gz`;
+    console.log(`[sysroot] Downloading ${url} ...`);
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
+    }
 
-  const url = `${RAYLIB_WASI_BASE_URL}/raylib-wasi.tar.gz`;
-  console.log(`[sysroot] Downloading ${url} ...`);
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
-  }
+    const arrayBuf = await res.arrayBuffer();
+    const uncompressed = gunzipSync(Buffer.from(arrayBuf));
+    const tar = new Tar(uncompressed.buffer.slice(uncompressed.byteOffset, uncompressed.byteOffset + uncompressed.byteLength));
+    const entries = tar.getEntries();
 
-  const arrayBuf = await res.arrayBuffer();
-  const uncompressed = gunzipSync(Buffer.from(arrayBuf));
-  const tar = new Tar(uncompressed.buffer.slice(uncompressed.byteOffset, uncompressed.byteOffset + uncompressed.byteLength));
-  const entries = tar.getEntries();
+    const fileMap = {
+      'lib/libraylib.a': path.join(WASM_DIR, 'libraylib.a'),
+      'include/raylib.h': path.join(RAYLIB_INC_DIR, 'raylib.h'),
+      'include/raymath.h': path.join(RAYLIB_INC_DIR, 'raymath.h'),
+      'include/rlgl.h': path.join(RAYLIB_INC_DIR, 'rlgl.h'),
+    };
 
-  const fileMap = {
-    'lib/libraylib.a': path.join(WASM_DIR, 'libraylib.a'),
-    'include/raylib.h': path.join(RAYLIB_INC_DIR, 'raylib.h'),
-    'include/raymath.h': path.join(RAYLIB_INC_DIR, 'raymath.h'),
-    'include/rlgl.h': path.join(RAYLIB_INC_DIR, 'rlgl.h'),
-  };
-
-  for (const entry of entries) {
-    if (fileMap[entry.filename] && entry.contents) {
-      const dest = fileMap[entry.filename];
-      const tmpPath = `${dest}.tmp`;
-      fs.writeFileSync(tmpPath, entry.contents);
-      fs.renameSync(tmpPath, dest);
-      console.log(`[sysroot] Extracted ${path.relative(projectRoot, dest)} (${entry.contents.length} bytes)`);
+    for (const entry of entries) {
+      if (fileMap[entry.filename] && entry.contents) {
+        const dest = fileMap[entry.filename];
+        const tmpPath = `${dest}.tmp`;
+        fs.writeFileSync(tmpPath, entry.contents);
+        fs.renameSync(tmpPath, dest);
+        console.log(`[sysroot] Extracted ${path.relative(projectRoot, dest)} (${entry.contents.length} bytes)`);
+      }
     }
   }
+
+  // Auto-generate src/vfs/raylib-headers.js
+  const raylibHeaderContents = {
+    'raylib.h': fs.readFileSync(path.join(RAYLIB_INC_DIR, 'raylib.h'), 'utf-8'),
+    'raymath.h': fs.readFileSync(path.join(RAYLIB_INC_DIR, 'raymath.h'), 'utf-8'),
+    'rlgl.h': fs.readFileSync(path.join(RAYLIB_INC_DIR, 'rlgl.h'), 'utf-8'),
+  };
+  const generatedJs = `// Auto-generated by scripts/download-sysroot.js - DO NOT EDIT MANUALLY\nexport const RAYLIB_HEADERS = {\n  'raylib.h': ${JSON.stringify(raylibHeaderContents['raylib.h'])},\n  'raymath.h': ${JSON.stringify(raylibHeaderContents['raymath.h'])},\n  'rlgl.h': ${JSON.stringify(raylibHeaderContents['rlgl.h'])},\n};\n`;
+  fs.writeFileSync(RAYLIB_HEADERS_JS, generatedJs);
+  console.log('[sysroot] Generated src/vfs/raylib-headers.js');
 }
 
 async function downloadTurtleAssets() {
@@ -211,6 +254,7 @@ async function downloadTurtleAssets() {
   const vfs = new VFS();
   mountSysroot(vfs);
 
+  const { WasmToolchain } = await import('../src/toolchain/wasm-clang.js');
   const tc = new WasmToolchain({ basePath: '/sysroot/wasm', vfs });
   await tc.init();
 

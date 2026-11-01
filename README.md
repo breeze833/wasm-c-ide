@@ -65,6 +65,13 @@ This IDE is specifically engineered for **students and systems programming educa
 
 ### 2. Interactive POSIX Shell & Terminal
 - **xterm.js Terminal**: Embedded terminal emulator with ANSI colors, line wrapping, and dynamic window resizing.
+- **Detached Floating Window Mode**:
+  - Detach the terminal from the bottom dock into a floating window snapping to standard **80x24** VT100 dimensions.
+  - Interactive preset cycling badge: click the dimension badge to cycle through standard presets (`80x24` $\to$ `100x30` $\to$ `120x36`).
+  - Draggable title bar with viewport edge boundary clamping and dynamic dimension calculation on resize.
+  - Window control actions: minimize to title bar (`_`) and maximize/restore (`□`).
+  - Active focus tracking with distinct green glow outline.
+  - Global keyboard shortcut: `Ctrl+Shift+D` (or `Cmd+Shift+D`) to toggle between docked and floating modes.
 - **Interactive Shell Worker**:
   - POSIX utilities: `sh`, `ls`, `cd`, `pwd`, `cat`, `rm`, `mkdir`, `cp`, `mv`, `clear`, `echo` (with `>` and `>>` redirection), and `which`.
   - **Directory Stack**: Full support for `pushd`, `popd`, `dirs`, and `cd -`.
@@ -104,7 +111,7 @@ This IDE is specifically engineered for **students and systems programming educa
 - **WebAssembly Shared Objects (`.so`)**:
   - Position-Independent Code: `-fPIC` and `-fpic` flags compile code with position-independent relocation records.
   - Shared library creation: `gcc -shared -fPIC src/math.c -o build/libmath.so` (and `g++ -shared -fPIC ...` for C++) generates standard WebAssembly dynamic libraries with `dylink.0` custom sections.
-- **Zero-MemFS Direct VFS Architecture**: `memfs.wasm` is completely eliminated. The unified `WasiHost` (`src/vfs/wasi-host.js`) directly bridges `llvm-box.wasm` (`clang`, `wasm-ld`, `llvm-ar`) and runtime binaries (`a.out`) to the application `VFS`, eliminating double-buffering, memory limits, and intermediate file copying.
+- **Zero-MemFS Direct VFS Architecture**: `memfs.wasm` is completely eliminated. Sourced directly from [`clang-wasi`](https://github.com/breeze833/clang-wasi), the unified `WasiHost` (`src/vfs/wasi-host.js`, fetched on-demand via `scripts/download-sysroot.js`) directly bridges `llvm-box.wasm` (`clang`, `wasm-ld`, `llvm-ar`) and runtime binaries (`a.out`) to the application `VFS`, eliminating double-buffering, memory limits, and intermediate file copying.
 
 ### 4. Dual Build Systems (Shell Script & Makefile)
 - **Track 1: Shell Script (`build.sh`)**:
@@ -114,7 +121,7 @@ This IDE is specifically engineered for **students and systems programming educa
   - Built-in incremental `make` engine checks modification timestamps (`mtime`) against prerequisites to avoid redundant rebuilds.
 - **Project Settings Modal**:
   - Decoupled **Save** and **Generate Build Script** buttons: save configuration and toggle sysroots without clobbering existing files in `/workspace`.
-  - Configure language mode, include directories, compiler warning flags, default build track, target binary name, and optional Raylib graphics.
+  - Configure language mode, include directories, compiler warning flags, default build track, target binary name, and linker flags.
 
 ### 5. Execution Sandbox, Synchronous Stdin & In-Code File I/O
 - **Dedicated Runtime Web Worker**: User executables run in an isolated WebAssembly execution sandbox with complete WASI Preview 1 filesystem emulation.
@@ -143,10 +150,12 @@ This IDE is specifically engineered for **students and systems programming educa
   - Direct C bridge to the browser's native `OffscreenCanvas` 2D context (`CanvasRenderingContext2D`).
   - Vector primitives: `canvas_fill_rect`, `canvas_stroke_rect`, `canvas_clear_rect`, `canvas_arc`, `canvas_begin_path`, `canvas_fill`, `canvas_stroke`, `canvas_set_fill_style`, `canvas_set_stroke_style`, `canvas_fill_text`, `canvas_set_font`, `canvas_save`, `canvas_restore`, `canvas_rotate`, `canvas_scale`, `canvas_present`.
   - Pixel manipulation & framebuffer interop: `canvas_get_pixels`, `canvas_put_pixels`, `canvas_get_image_data`, `canvas_put_image_data`, `canvas_get_pixel`, `canvas_set_pixel` for direct pixel-level reading, writing, and 2D image processing filter implementation.
-- **Opt-In Raylib 5.5 Game Engine (`raylib-wasi`)**:
+- **Bundled Raylib 5.5 Game Engine (`raylib-wasi`)**:
   - Full-featured 2D/3D GLES2/WebGL game engine integration decoupled into the standalone package [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) without Emscripten, compiled natively with LLVM 19.
+  - Standard C headers (`<raylib.h>`, `<raymath.h>`, `<rlgl.h>`) and static library archive (`libraylib.a`) are mounted permanently into the sysroot by default.
   - Zero ad-hoc host dispatchers: WebGL ES 2.0 state machine, handle tables, and Wasm runtime imports (`gl`, `raylib`) are imported directly from `raylib-wasi`.
   - Shares the 512-byte `SharedArrayBuffer` `InputCoordinator` and floating/dockable `GraphicsWindowUI` with `canvas-wasi`.
+  - Compiles and links out-of-the-box using standard `-lraylib` linker flag.
 - **Synchronous Zero-Copy Frame Delivery**:
   - Prevents microtask starvation during synchronous WebAssembly execution loops (`while (!graphics_should_close())`).
   - Invokes `offscreen2d.transferToImageBitmap()`, creating an `ImageBitmap` **synchronously** without Promise delays and posting it directly to the UI thread via `postMessage({ type: 'frame', bitmap }, [bitmap])`.
@@ -181,19 +190,18 @@ This IDE is specifically engineered for **students and systems programming educa
      - Links directly with `-lturtle` (e.g. `gcc main.c -lturtle`) with zero additional flags or setup.
      - Driven by native `OffscreenCanvas` 2D context via the `canvas-wasi` bridge.
   2. **Raylib Backend (`libturtle_raylib.a`)**:
-     - **Opt-In / Dynamically Mounted**: Mounted when Raylib graphics support is enabled in Project Settings (`/usr/include/turtle_backend_raylib.h`, `/usr/lib/libturtle_raylib.a`).
-     - Links with `-lturtle_raylib -lraylib`.
-     - Unmounting Raylib in Project Settings cleanly unmounts `<turtle_backend_raylib.h>` and `libturtle_raylib.a` from VFS.
+     - **Enabled by Default**: Mounted permanently in sysroot alongside canvas-wasi (`/usr/include/turtle_backend_raylib.h`, `/usr/lib/libturtle_raylib.a`).
+     - Links directly with `-lturtle_raylib -lraylib`.
 - **Link-Time Backend Resolution**:
   - The public `turtle_begin(ctx)` macro expands to `(<backend>_turtle_init(ctx) && turtle_begin_core())` provided by `<turtle_backend_canvas_wasi.h>` or `<turtle_backend_raylib.h>`, ensuring compile/link failures if a program links against the incorrect backend archive.
 - **Automated In-Tree Asset Compilation**:
   - `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and uses the in-tree WebAssembly toolchain (`llvm-box.wasm` + `ar.js`) to compile both WebAssembly static archives with zero host compiler dependencies (`clang`, `llvm-ar`, or `make`).
   - Copies user headers to `public/sysroot/include/turtle/` and auto-generates `src/vfs/turtle-headers.js` to ensure zero drift between physical headers and the in-browser virtual sysroot.
-- **Automatic Build Script Linking Rules**:
-  - When generating `build.sh` or `Makefile`, the IDE automatically detects backend headers:
-    - Raylib disabled && `turtle_backend_canvas_wasi.h` included $\implies$ `-lturtle`
-    - Raylib enabled && `turtle_backend_canvas_wasi.h` included $\implies$ `-lturtle`
-    - Raylib enabled && `turtle_backend_raylib.h` included $\implies$ `-lturtle_raylib -lraylib`
+- **Standard Linker Flag Specification**:
+  - Linker flags are explicitly configured in the Project Settings Linker Flags field or passed on the terminal CLI:
+    - Turtle with Canvas-WASI: `-lturtle`
+    - Turtle with Raylib: `-lturtle_raylib -lraylib`
+    - Standalone Raylib: `-lraylib`
 
 ### 8. Interactive Educational Examples Suite
 The repository includes a ready-to-run suite of single-file C programs in the `examples/` directory for manual testing and pedagogical demonstration:
@@ -204,6 +212,7 @@ The repository includes a ready-to-run suite of single-file C programs in the `e
 - **`05_canvas_pixels.c`**: HTML5 Canvas 2D pixel manipulation & image processing demo (`<graphics_canvas.h>`) combining vector scene underlay with direct pixel access and 2D spatial convolution filters in pure C (Sobel edge detection gradient filter, 3x3 box blur, grayscale & contrast adjustment, color inversion, and interactive mouse spotlight lens).
 - **`06_turtle_canvas.c`**: Progressive turtle graphics demo using the default canvas-wasi backend (`<turtle.h>`, `<turtle_backend_canvas_wasi.h>`) drawing a multi-colored animated star spiral with stylized turtle cursor.
 - **`07_turtle_raylib.c`**: Progressive turtle graphics demo using the Raylib backend (`<turtle.h>`, `<turtle_backend_raylib.h>`) drawing a geometric rosette pattern.
+- **`08_ansi_terminal.c`**: Comprehensive ANSI VT100 screen control, cursor positioning, color rendering, and progress animation demo in pure C using UTF-8 box characters and POSIX `nanosleep()` frame timing.
 - **`examples/README.md`**: Step-by-step user compilation and running guide for each example.
 
 ### 9. Virtual File System & Storage
@@ -211,7 +220,7 @@ The repository includes a ready-to-run suite of single-file C programs in the `e
 - **IndexedDB Persistence**: Automatically persists `/workspace` across browser sessions and page refreshes.
 - **Bidirectional Runtime Synchronization**: Changes made to `/workspace` files via C/C++ `fopen`/`fwrite`/`fputs` or C++ `<fstream>` automatically sync back to VFS in real-time and persist to IndexedDB, updating the file tree and editor tabs.
 - **Zip Import & Export**: One-click export of `/workspace` into a standard `.zip` file using JSZip, and direct zip unpacking into the workspace.
-- **Sysroot Protection**: Read-only protection on system root paths (`/usr`, `/bin`), pre-mounting standard C/C++ headers (`<stdio.h>`, `<stdlib.h>`, `<iostream>`, `<fstream>`, etc.), `<graphics.h>`, `<graphics_canvas.h>`, `<turtle.h>`, and runtime static libraries (`libc.a`, `libturtle.a`, and conditionally `libraylib.a`).
+- **Sysroot Protection**: Read-only protection on system root paths (`/usr`, `/bin`), pre-mounting standard C/C++ headers (`<stdio.h>`, `<stdlib.h>`, `<iostream>`, `<fstream>`, etc.), `<graphics.h>`, `<graphics_canvas.h>`, `<turtle.h>`, `<raylib.h>`, and runtime static libraries (`libc.a`, `libturtle.a`, `libraylib.a`, and `libturtle_raylib.a`).
 
 ### 10. Progressive Web App (PWA) & Offline Execution
 - **Installable Desktop/Mobile App**: Certified PWA with Web App Manifest (`manifest.webmanifest`), dark theme colors, and icons.
@@ -252,7 +261,7 @@ Open your browser and navigate to `http://localhost:5173`.
 > **Note**: Vite is configured with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` HTTP headers to enable `SharedArrayBuffer` support out of the box during development.
 
 ### Running Tests
-Execute the full unit test suite (covering VFS, Shell parser, Toolchain driver, Static Archiver, Runtime Atomics, Make engine, PWA Service Worker, Zoom controls, Pipelines & Redirections, Raylib graphics, Generic Graphics / Canvas 2D, Shared Objects, Turtle Graphics, and In-Code File I/O):
+Execute the full unit test suite (covering VFS, Shell parser, Toolchain driver, Static Archiver, Runtime Atomics, Make engine, PWA Service Worker, Zoom controls, Pipelines & Redirections, Raylib graphics, Generic Graphics / Canvas 2D, Shared Objects, Turtle Graphics, In-Code File I/O, and Detached Terminal / ANSI):
 
 ```bash
 npm test

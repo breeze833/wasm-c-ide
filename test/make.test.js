@@ -117,7 +117,7 @@ let savedConfig = null;
 
 const modal = new SettingsModal(
   vfs,
-  { mode: 'c', buildSystem: 'sh', enableRaylib: false, targetName: 'game.out' },
+  { mode: 'c', buildSystem: 'sh', targetName: 'game.out' },
   (cfg) => {
     saveCalled = true;
     savedConfig = cfg;
@@ -137,7 +137,6 @@ assert.strictEqual(Boolean(generateBtn), true, 'modal-generate-btn must exist');
 // Set form values
 getElement('setting-mode').value = 'cpp';
 getElement('setting-build-sys').value = 'make';
-getElement('setting-raylib').checked = true;
 getElement('setting-includes').value = 'include, src';
 getElement('setting-flags').value = '-Wall -O2';
 getElement('setting-linker-flags').value = '-o mygame.out -lraylib';
@@ -147,7 +146,6 @@ saveBtn.click();
 assert.strictEqual(saveCalled, true, 'onSave callback must be invoked on Save click');
 assert.strictEqual(savedConfig.mode, 'cpp');
 assert.strictEqual(savedConfig.buildSystem, 'make');
-assert.strictEqual(savedConfig.enableRaylib, true);
 assert.deepStrictEqual(savedConfig.includePaths, ['include', 'src']);
 assert.deepStrictEqual(savedConfig.compilerFlags, ['-Wall', '-O2']);
 assert.strictEqual(savedConfig.linkerFlags, '-o mygame.out -lraylib');

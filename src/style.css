@@ -471,6 +471,9 @@ body, html {
 .split-resizer:hover {
   background-color: var(--accent-color);
 }
+.split-resizer.hidden {
+  display: none !important;
+}
 
 /* Terminal Section */
 .terminal-section {
@@ -481,6 +484,55 @@ body, html {
   border-top: 1px solid var(--border-color);
   flex-shrink: 0;
   position: relative;
+}
+
+.terminal-section.detached {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  resize: both;
+  overflow: hidden;
+  min-width: 380px;
+  min-height: 200px;
+  max-width: 98vw;
+  max-height: 95vh;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Green Phosphor Glow when Focused (matching canvas-wasi blue glow) */
+.terminal-section.detached:focus-within,
+.terminal-section.detached.focused {
+  border-color: #23d18b !important;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 0 1px #23d18b, 0 0 24px rgba(35, 209, 139, 0.45) !important;
+}
+
+.terminal-section.detached:focus-within .terminal-header,
+.terminal-section.detached.focused .terminal-header {
+  border-bottom-color: rgba(35, 209, 139, 0.35);
+}
+
+.terminal-section.detached:focus-within .terminal-title,
+.terminal-section.detached.focused .terminal-title {
+  color: #23d18b;
+  text-shadow: 0 0 8px rgba(35, 209, 139, 0.4);
+}
+
+/* Detached Window Minimized State (only shows title bar) */
+.terminal-section.detached.minimized {
+  height: 28px !important;
+  min-height: 28px !important;
+  resize: none !important;
+}
+
+.terminal-section.detached.minimized .terminal-container {
+  display: none !important;
+}
+
+.terminal-section.detached .terminal-header {
+  cursor: move;
+  user-select: none;
+  border-top-left-radius: 5px;
+  border-top-right-radius: 5px;
 }
 
 .terminal-header {
@@ -494,6 +546,27 @@ body, html {
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
+}
+
+.terminal-dim-badge {
+  font-family: var(--font-mono, 'Cascadia Code', Consolas, monospace);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 7px;
+  background-color: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: var(--text-bright, #e0e0e0);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+  margin-right: 2px;
+}
+
+.terminal-dim-badge:hover {
+  background-color: rgba(255, 255, 255, 0.18);
+  border-color: var(--accent-color, #007acc);
+  color: #fff;
 }
 
 .terminal-container {

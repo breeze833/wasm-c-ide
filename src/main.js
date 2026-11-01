@@ -2,7 +2,7 @@
 
 import { VFS } from './vfs/vfs.js';
 import { loadWorkspace, setupAutoSync } from './vfs/storage.js';
-import { mountSysroot, mountRaylibSysroot, unmountRaylibSysroot } from './vfs/sysroot.js';
+import { mountSysroot } from './vfs/sysroot.js';
 import { EditorManager } from './editor/editor.js';
 import { TabsUI } from './editor/tabs.js';
 import { FileTreeUI } from './components/filetree.js';
@@ -75,7 +75,7 @@ export class App {
     // Mount read-only sysroot headers
     mountSysroot(this.vfs);
 
-    // Asynchronously preload libturtle.a into VFS /usr/lib/libturtle.a
+    // Asynchronously preload runtime libraries into VFS /usr/lib/
     (async () => {
       try {
         let basePath = './';
@@ -88,12 +88,22 @@ export class App {
           basePath = new URL(baseUrl, loc.href).href;
           if (!basePath.endsWith('/')) basePath += '/';
         }
-        const res = await fetch(`${basePath}sysroot/wasm/libturtle.a`);
-        if (res && res.ok) {
-          const buf = await res.arrayBuffer();
-          const u8 = new Uint8Array(buf);
-          this.vfs.writeFile('/usr/lib/libturtle.a', u8, Date.now(), true);
-          this.vfs.writeFile('/usr/lib/libturtle_canvas-wasi.a', u8, Date.now(), true);
+        const preloadLibs = [
+          { url: `${basePath}sysroot/wasm/libturtle.a`, paths: ['/usr/lib/libturtle.a', '/usr/lib/libturtle_canvas-wasi.a'] },
+          { url: `${basePath}sysroot/wasm/libraylib.a`, paths: ['/usr/lib/libraylib.a'] },
+          { url: `${basePath}sysroot/wasm/libturtle_raylib.a`, paths: ['/usr/lib/libturtle_raylib.a'] },
+        ];
+        for (const item of preloadLibs) {
+          try {
+            const res = await fetch(item.url);
+            if (res && res.ok) {
+              const buf = await res.arrayBuffer();
+              const u8 = new Uint8Array(buf);
+              for (const p of item.paths) {
+                this.vfs.writeFile(p, u8, Date.now(), true);
+              }
+            }
+          } catch {}
         }
       } catch {}
     })();
@@ -175,6 +185,9 @@ export class App {
 
     // Zoom Controls for Editor and Terminal
     this.setupZoomControls();
+
+    // Detached / Floating Windowing for Terminal
+    this.setupTerminalWindowing();
 
     // Draggable Split Resizer between Editor and Terminal
     this.setupSplitResizer();
@@ -528,44 +541,6 @@ export class App {
     throw new Error(`${cmd}: command not found`);
   }
 
-  async syncRaylibState(enabled) {
-    if (enabled) {
-      if (!this.vfs.exists('/usr/include/raylib.h') || !this.vfs.exists('/usr/lib/libraylib.a')) {
-        try {
-          let basePath = './';
-          if (typeof window !== 'undefined' && window.location) {
-            const baseUrl = import.meta.env?.BASE_URL || './';
-            let loc = new URL(window.location.href);
-            if (!loc.pathname.endsWith('/') && !loc.pathname.split('/').pop().includes('.')) {
-              loc.pathname += '/';
-            }
-            basePath = new URL(baseUrl, loc.href).href;
-            if (!basePath.endsWith('/')) basePath += '/';
-          }
-          const [raylibH, raymathH, rlglH, libA, turtleRaylibH, turtleRaylibLibA] = await Promise.all([
-            fetch(`${basePath}sysroot/include/raylib/raylib.h`).then(r => r.text()),
-            fetch(`${basePath}sysroot/include/raylib/raymath.h`).then(r => r.text()),
-            fetch(`${basePath}sysroot/include/raylib/rlgl.h`).then(r => r.text()),
-            fetch(`${basePath}sysroot/wasm/libraylib.a`).then(r => r.arrayBuffer()),
-            fetch(`${basePath}sysroot/include/turtle/turtle_backend_raylib.h`).then(r => r.ok ? r.text() : '').catch(() => ''),
-            fetch(`${basePath}sysroot/wasm/libturtle_raylib.a`).then(r => r.ok ? r.arrayBuffer() : null).catch(() => null),
-          ]);
-          mountRaylibSysroot(this.vfs, {
-            'raylib.h': raylibH,
-            'raymath.h': raymathH,
-            'rlgl.h': rlglH,
-            'turtle_backend_raylib.h': turtleRaylibH,
-          }, new Uint8Array(libA), {}, turtleRaylibLibA ? new Uint8Array(turtleRaylibLibA) : null);
-        } catch (err) {
-          console.warn('Failed to mount Raylib sysroot:', err);
-        }
-      }
-    } else {
-      unmountRaylibSysroot(this.vfs, this.toolchain);
-    }
-    if (this.fileTreeUI) this.fileTreeUI.render();
-  }
-
   attachHeaderActions() {
     const btnSave = document.getElementById('btn-save');
     const btnCompile = document.getElementById('btn-compile');
@@ -594,7 +569,6 @@ export class App {
           this.buildSystem = newConfig.buildSystem;
           if (modeSelect) modeSelect.value = newConfig.mode;
           if (buildSystemSelect) buildSystemSelect.value = newConfig.buildSystem;
-          await this.syncRaylibState(Boolean(newConfig.enableRaylib));
           if (this.fileTreeUI) this.fileTreeUI.render();
           showToast('Settings saved.', 'success', 3000);
         },
@@ -603,11 +577,6 @@ export class App {
           showToast('Build scripts generated.', 'success', 3000);
         }
       );
-
-      // Restore Raylib state if enabled in settings
-      if (this.settingsModal.config && this.settingsModal.config.enableRaylib) {
-        this.syncRaylibState(true);
-      }
 
       btnSettings.addEventListener('click', () => {
         this.settingsModal.show();
@@ -769,6 +738,349 @@ export class App {
     });
   }
 
+  setupTerminalWindowing() {
+    const terminalSection = document.querySelector('.terminal-section');
+    const terminalHeader = terminalSection?.querySelector('.terminal-header');
+    const resizer = document.getElementById('split-resizer');
+    const btnDetach = document.getElementById('btn-term-detach');
+    const btnMin = document.getElementById('btn-term-min');
+    const dimBadge = document.getElementById('term-dimension-badge');
+    if (!terminalSection || !btnDetach || !this.terminal) return;
+
+    let dockedHeight = terminalSection.clientHeight || 240;
+    let isDetached = false;
+    let isMinimized = false;
+    let preMinHeight = '';
+    let isProgrammaticResize = false;
+
+    // Presets for dimension snapping
+    const presets = [
+      { cols: 80, rows: 24, label: '80x24' },
+      { cols: 80, rows: 25, label: '80x25' },
+      { cols: 100, rows: 30, label: '100x30' },
+      { cols: 120, rows: 40, label: '120x40' },
+      { cols: 132, rows: 24, label: '132x24' },
+    ];
+    let presetIdx = 0;
+
+    const updateDimBadge = (cols, rows) => {
+      if (!dimBadge) return;
+      dimBadge.textContent = `${cols}x${rows}`;
+      if (!isDetached) {
+        dimBadge.title = `Terminal Dimensions: ${cols}x${rows} (Click to Detach 80x24)`;
+        dimBadge.setAttribute('data-tooltip', 'Detach (80x24)');
+      } else {
+        const nextIdx = (presetIdx + 1) % presets.length;
+        const next = presets[nextIdx];
+        dimBadge.title = `Terminal Dimensions: ${cols}x${rows} (Click to switch to ${next.label})`;
+        dimBadge.setAttribute('data-tooltip', `Switch to ${next.label}`);
+      }
+    };
+
+    this.terminal.onDimensionsChange = (cols, rows) => {
+      updateDimBadge(cols, rows);
+    };
+
+    // Initialize dimensions badge
+    const dims = this.terminal.getGridDimensions();
+    updateDimBadge(dims.cols, dims.rows);
+
+    const detachSVG = `<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M1.5 1a.5.5 0 0 0-.5.5v13a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5V9a.5.5 0 0 0-1 0v5H2V2h5a.5.5 0 0 0 0-1H1.5z"/>
+      <path d="M10 .5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0V1.707L8.854 7.854a.5.5 0 1 1-.708-.708L14.293 1H10.5a.5.5 0 0 1-.5-.5z"/>
+    </svg>`;
+
+    const dockSVG = `<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M14.5 15a.5.5 0 0 0 .5-.5v-13a.5.5 0 0 0-.5-.5h-13a.5.5 0 0 0-.5.5V7a.5.5 0 0 0 1 0V2h12v12H9a.5.5 0 0 0 0 1h5.5z"/>
+      <path d="M6 15.5a.5.5 0 0 1-.5.5h-5a.5.5 0 0 1-.5-.5v-5a.5.5 0 0 1 1 0v3.793l6.146-6.147a.5.5 0 1 1 .708.708L1.707 15H5.5a.5.5 0 0 1 .5.5z"/>
+    </svg>`;
+
+    const minSVG = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M2 13a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 13z"/>
+    </svg>`;
+
+    const maxSVG = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M3 3h10v10H3V3zm1.5 1.5v7h7v-7h-7z"/>
+    </svg>`;
+
+    const setDetachedFocus = (focused) => {
+      if (!isDetached) return;
+      if (focused) {
+        terminalSection.classList.add('focused');
+        terminalSection.style.zIndex = '1001';
+        this.terminal.focus();
+      } else {
+        terminalSection.classList.remove('focused');
+        terminalSection.style.zIndex = '1000';
+      }
+    };
+
+    const toggleMinimize = () => {
+      if (!isDetached) return;
+      isMinimized = !isMinimized;
+      if (isMinimized) {
+        preMinHeight = terminalSection.style.height || `${terminalSection.clientHeight}px`;
+        terminalSection.classList.add('minimized');
+        if (btnMin) {
+          btnMin.innerHTML = maxSVG;
+          btnMin.title = 'Maximize Terminal';
+          btnMin.setAttribute('data-tooltip', 'Maximize');
+          btnMin.setAttribute('aria-label', 'Maximize Terminal');
+        }
+      } else {
+        terminalSection.classList.remove('minimized');
+        if (preMinHeight) {
+          terminalSection.style.height = preMinHeight;
+        }
+        if (btnMin) {
+          btnMin.innerHTML = minSVG;
+          btnMin.title = 'Minimize Terminal';
+          btnMin.setAttribute('data-tooltip', 'Minimize');
+          btnMin.setAttribute('aria-label', 'Minimize Terminal');
+        }
+        isProgrammaticResize = true;
+        this.terminal.fit();
+        setTimeout(() => { isProgrammaticResize = false; }, 60);
+        setDetachedFocus(true);
+      }
+    };
+
+    const detachTerminal = (cols = 80, rows = 24) => {
+      isDetached = true;
+      this.terminal.isDetached = true;
+      dockedHeight = terminalSection.clientHeight || dockedHeight;
+
+      terminalSection.classList.add('detached');
+      if (resizer) resizer.classList.add('hidden');
+      if (btnMin) {
+        btnMin.style.display = 'inline-flex';
+        btnMin.innerHTML = minSVG;
+        btnMin.title = 'Minimize Terminal';
+      }
+
+      // Compute exact 80x24 window size
+      const targetSize = this.terminal.computeContainerSizeForGrid(cols, rows);
+      const winW = Math.min(window.innerWidth - 30, Math.max(480, targetSize.width));
+      const winH = Math.min(window.innerHeight - 50, Math.max(260, targetSize.height));
+
+      // Center floating window
+      const left = Math.max(20, Math.round((window.innerWidth - winW) / 2));
+      const top = Math.max(40, Math.round((window.innerHeight - winH) / 2));
+
+      isProgrammaticResize = true;
+      presetIdx = 0;
+      terminalSection.style.position = 'fixed';
+      terminalSection.style.left = `${left}px`;
+      terminalSection.style.top = `${top}px`;
+      terminalSection.style.width = `${winW}px`;
+      terminalSection.style.height = `${winH}px`;
+      terminalSection.style.zIndex = '1001';
+
+      this.terminal.fixedGrid = true;
+      this.terminal.setGridDimensions(cols, rows);
+      updateDimBadge(cols, rows);
+      setTimeout(() => { isProgrammaticResize = false; }, 80);
+
+      btnDetach.innerHTML = dockSVG;
+      btnDetach.title = 'Dock Terminal (Ctrl+Shift+D)';
+      btnDetach.setAttribute('data-tooltip', 'Dock Terminal');
+      btnDetach.setAttribute('aria-label', 'Dock Terminal');
+
+      if (this.editorManager) this.editorManager.layout();
+      setDetachedFocus(true);
+    };
+
+    const dockTerminal = () => {
+      isDetached = false;
+      this.terminal.isDetached = false;
+      this.terminal.fixedGrid = false;
+      if (isMinimized) {
+        isMinimized = false;
+        terminalSection.classList.remove('minimized');
+      }
+
+      terminalSection.classList.remove('detached');
+      terminalSection.classList.remove('focused');
+      if (resizer) resizer.classList.remove('hidden');
+      if (btnMin) btnMin.style.display = 'none';
+
+      terminalSection.style.position = '';
+      terminalSection.style.left = '';
+      terminalSection.style.top = '';
+      terminalSection.style.width = '';
+      terminalSection.style.height = `${dockedHeight}px`;
+      terminalSection.style.zIndex = '';
+
+      btnDetach.innerHTML = detachSVG;
+      btnDetach.title = 'Detach Terminal (Floating 80x24)';
+      btnDetach.setAttribute('data-tooltip', 'Detach Terminal (80x24)');
+      btnDetach.setAttribute('aria-label', 'Detach Terminal');
+
+      this.terminal.fit();
+      updateDimBadge(this.terminal.term.cols, this.terminal.term.rows);
+      if (this.editorManager) this.editorManager.layout();
+      this.terminal.focus();
+    };
+
+    this.toggleTerminalDetach = () => {
+      if (isDetached) {
+        dockTerminal();
+      } else {
+        detachTerminal(80, 24);
+      }
+    };
+
+    btnDetach.addEventListener('click', (e) => {
+      e.preventDefault();
+      this.toggleTerminalDetach();
+    });
+
+    btnMin?.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      setDetachedFocus(true);
+    });
+
+    btnMin?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleMinimize();
+    });
+
+    // Clicking dimension badge (prevents focus loss and allows cycling presets)
+    dimBadge?.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      setDetachedFocus(true);
+    });
+
+    dimBadge?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDetachedFocus(true);
+      if (!isDetached) {
+        detachTerminal(80, 24);
+        return;
+      }
+      if (isMinimized) {
+        toggleMinimize();
+      }
+      // If already detached, cycle through presets
+      presetIdx = (presetIdx + 1) % presets.length;
+      const target = presets[presetIdx];
+      isProgrammaticResize = true;
+      this.terminal.fixedGrid = true;
+      const targetSize = this.terminal.computeContainerSizeForGrid(target.cols, target.rows);
+      const winW = Math.min(window.innerWidth - 30, targetSize.width);
+      const winH = Math.min(window.innerHeight - 50, targetSize.height);
+      terminalSection.style.width = `${winW}px`;
+      terminalSection.style.height = `${winH}px`;
+      if (winW < targetSize.width || winH < targetSize.height) {
+        this.terminal.fixedGrid = false;
+        this.terminal.fit();
+      } else {
+        this.terminal.setGridDimensions(target.cols, target.rows);
+      }
+      updateDimBadge(this.terminal.term.cols, this.terminal.term.rows);
+      setTimeout(() => {
+        isProgrammaticResize = false;
+        this.terminal.focus();
+      }, 80);
+    });
+
+    // Bring detached window to focus on any click inside
+    terminalSection.addEventListener('mousedown', () => {
+      if (isDetached) {
+        setDetachedFocus(true);
+      }
+    });
+
+    // Header dragging & focus support
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let initLeft = 0;
+    let initTop = 0;
+
+    terminalHeader?.addEventListener('mousedown', (e) => {
+      if (!isDetached) return;
+      setDetachedFocus(true);
+      if (e.target.closest('button') || e.target.closest('.terminal-dim-badge') || e.target.closest('.pane-zoom-controls')) {
+        return;
+      }
+      isDragging = true;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      const rect = terminalSection.getBoundingClientRect();
+      initLeft = rect.left;
+      initTop = rect.top;
+      document.body.style.cursor = 'move';
+      e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging || !isDetached) return;
+      const dx = e.clientX - dragStartX;
+      const dy = e.clientY - dragStartY;
+      const maxL = window.innerWidth - 80;
+      const maxT = window.innerHeight - 40;
+      terminalSection.style.left = `${Math.max(0, Math.min(maxL, initLeft + dx))}px`;
+      terminalSection.style.top = `${Math.max(0, Math.min(maxT, initTop + dy))}px`;
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (isDragging) {
+        isDragging = false;
+        document.body.style.cursor = '';
+      }
+    });
+
+    // Clicking outside unfocuses detached window
+    window.addEventListener('mousedown', (e) => {
+      if (isDetached && !terminalSection.contains(e.target)) {
+        setDetachedFocus(false);
+      }
+    });
+
+    // Terminal internal focus events
+    if (this.terminal.term?.onFocus) {
+      this.terminal.term.onFocus(() => {
+        if (isDetached) setDetachedFocus(true);
+      });
+    }
+
+    // Drag-resize observer when floating window is resized by user
+    let prevW = 0;
+    let prevH = 0;
+    const roFloating = new ResizeObserver((entries) => {
+      if (!isDetached || isMinimized) return;
+      for (const entry of entries) {
+        const cr = entry.contentRect;
+        if (!cr || cr.width === 0 || cr.height === 0) continue;
+        if (isProgrammaticResize) {
+          prevW = cr.width;
+          prevH = cr.height;
+          return;
+        }
+        if (Math.abs(cr.width - prevW) > 2 || Math.abs(cr.height - prevH) > 2) {
+          prevW = cr.width;
+          prevH = cr.height;
+          presetIdx = -1;
+          this.terminal.fixedGrid = false;
+          this.terminal.fit();
+          updateDimBadge(this.terminal.term.cols, this.terminal.term.rows);
+        }
+      }
+    });
+    roFloating.observe(terminalSection);
+
+    // Global keyboard shortcut: Ctrl+Shift+D (or Cmd+Shift+D) to toggle detach/dock
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+        e.preventDefault();
+        this.toggleTerminalDetach();
+      }
+    });
+  }
+
   setupSplitResizer() {
     const resizer = document.getElementById('split-resizer');
     const terminalSection = document.querySelector('.terminal-section');
@@ -779,6 +1091,7 @@ export class App {
     let startHeight = 0;
 
     resizer.addEventListener('mousedown', (e) => {
+      if (terminalSection.classList.contains('detached')) return;
       isDragging = true;
       startY = e.clientY;
       startHeight = terminalSection.clientHeight;
@@ -787,7 +1100,7 @@ export class App {
     });
 
     window.addEventListener('mousemove', (e) => {
-      if (!isDragging) return;
+      if (!isDragging || terminalSection.classList.contains('detached')) return;
       const deltaY = startY - e.clientY;
       const newHeight = Math.max(100, Math.min(window.innerHeight - 150, startHeight + deltaY));
       terminalSection.style.height = `${newHeight}px`;
@@ -938,8 +1251,9 @@ export function initApp() {
 
         <section class="terminal-section">
           <div class="terminal-header">
-            <span>Terminal</span>
+            <span class="terminal-title">Terminal</span>
             <div class="terminal-actions">
+              <span id="term-dimension-badge" class="terminal-dim-badge" title="Terminal Dimensions (Click to Detach 80x24)" data-tooltip="Detach (80x24)">80x24</span>
               <div class="pane-zoom-controls" id="terminal-zoom-controls">
                 <button id="btn-term-zoom-out" class="icon-btn zoom-btn" title="Zoom Out Terminal Font (Ctrl+-)" data-tooltip="Zoom Out (Ctrl+-)" aria-label="Zoom Out Terminal Font">
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
@@ -956,6 +1270,17 @@ export function initApp() {
               <button id="btn-clear-term" class="icon-btn" title="Clear Terminal" data-tooltip="Clear Terminal" aria-label="Clear Terminal">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M5 2V1h6v1h4v1H1V2h4zm1 3v8h1V5H6zm3 0v8h1V5H9zm-6 0v9a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5H3z"/>
+                </svg>
+              </button>
+              <button id="btn-term-min" class="icon-btn" title="Minimize Terminal" data-tooltip="Minimize" aria-label="Minimize Terminal" style="display: none;">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M2 13a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 13z"/>
+                </svg>
+              </button>
+              <button id="btn-term-detach" class="icon-btn" title="Detach Terminal (Floating 80x24)" data-tooltip="Detach Terminal (80x24)" aria-label="Detach Terminal">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M1.5 1a.5.5 0 0 0-.5.5v13a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5V9a.5.5 0 0 0-1 0v5H2V2h5a.5.5 0 0 0 0-1H1.5z"/>
+                  <path d="M10 .5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0V1.707L8.854 7.854a.5.5 0 1 1-.708-.708L14.293 1H10.5a.5.5 0 0 1-.5-.5z"/>
                 </svg>
               </button>
             </div>

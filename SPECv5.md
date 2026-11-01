@@ -23,7 +23,7 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 - **Decoupled Dual-Module Graphics Subsystems**:
   - **`canvas-wasi`**: Pure C direct software framebuffer (`<graphics.h>`), HTML5 Canvas 2D vector primitives (`<graphics_canvas.h>`), floating/dockable graphics console UI (`GraphicsWindowUI`), and shared 512-byte `SharedArrayBuffer` input coordination (`InputCoordinator`).
   - **`raylib-wasi`**: Standalone Raylib 5.5 port and WebGL ES 2.0 host bridge, providing Wasm imports (`gl`, `raylib`) and zero-Emscripten `PLATFORM_CUSTOM` execution.
-- **Turtle Graphics Subsystem (`libturtle`)**: Dual backend support (Canvas-WASI backend enabled by default; Raylib backend enabled dynamically via Project Settings).
+- **Turtle Graphics Subsystem (`libturtle`)**: Modular educational turtle graphics with dual backend support (Canvas-WASI and Raylib backends both permanently bundled into sysroot out-of-the-box).
 - **Toolchain Startup Acceleration & IndexedDB Binary Persistence**:
   - Eliminates slow remote downloads and compilation freezes on repeated IDE visits.
   - Streaming compilation (`WebAssembly.compileStreaming`) compiles bytecode concurrently as network chunks stream over the wire.
@@ -85,7 +85,8 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 ## 3. Detailed Component Specifications
 
 ### 3.1 Unified WASI Preview 1 Host (`WasiHost`)
-- **Module Location**: `src/vfs/wasi-host.js`
+- **Module Location**: `src/vfs/wasi-host.js` (dynamically fetched from `breeze833/clang-wasi`, excluded from git tracking)
+- **Single Source of Truth**: Maintained authoritatively in upstream repository `breeze833/clang-wasi` (`src/wasi-host.js`) and downloaded or copied on-demand during project setup and build lifecycles via `scripts/download-sysroot.js`.
 - **Scope & Role**: Implements the `wasi_snapshot_preview1` and `wasi_unstable` interfaces for both compilation (`clang.wasm`, `lld.wasm`) and runtime execution (`a.out`).
 - **Core Syscall Implementation**:
   - `path_open`: Resolves file access relative to directory descriptors (`dirfd`). Preopened descriptor 3 maps to `/workspace` (or `.`) and descriptor 4 maps to `/`. Translates WASI creation flags (`O_CREAT`, `O_TRUNC`, `O_EXCL`, `O_DIRECTORY`) and append mode (`FDFLAG_APPEND`). Allocates numerical file descriptors (`fd >= 10`).
@@ -124,7 +125,7 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 - **Sysroot Mount (`sysroot.tar.gz`)**:
   - Downloaded on demand and unpacked directly into `VFS`.
   - Headers mounted under `/usr/include`, `/include/wasm32-wasip1`, `/lib/clang/19/include`, and `/usr/include/c++/v1`.
-  - Static libraries mounted under `/usr/lib` and `/lib/wasm32-wasip1`: `crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libclang_rt.builtins.a`, `libm.a`, `libpthread.a`, `libturtle.a`, `libturtle_canvas-wasi.a` (and `libturtle_raylib.a` when Raylib is enabled).
+  - Static libraries mounted under `/usr/lib` and `/lib/wasm32-wasip1`: `crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libclang_rt.builtins.a`, `libm.a`, `libpthread.a`, `libturtle.a`, `libturtle_canvas-wasi.a`, `libturtle_raylib.a`, `libraylib.a`.
 - **Driver Simplification (`driver.js`)**:
   - `executeGccCommand` coordinates command arguments, invokes Clang / LLD through `WasiHost`, and immediately accesses generated `.o`, `.s`, `.i`, or `a.out` binaries directly in `VFS`.
   - All legacy MemFS unlinking workarounds, 0-byte truncation invariants, and stale-file diffing logic are removed.
@@ -144,13 +145,17 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 - Real-time VFS sync:
   - File operations (`fopen`, `<fstream>`, `fwrite`, `remove`, `rename`) directly update `VFS` and emit real-time event notifications (`file_sync`, `file_delete`) to refresh Monaco editor tabs and the File Tree UI.
 
-### 3.4 Decoupled Graphics Subsystems & Turtle Graphics
+### 3.4 Decoupled Graphics Subsystems, Turtle Graphics & Direct Sysroot Bundling
 - **`canvas-wasi`**: Pure C direct software framebuffer (`<graphics.h>`), Canvas 2D vector primitives (`<graphics_canvas.h>`), floating/dockable graphics console (`GraphicsWindowUI`), and 512-byte `SharedArrayBuffer` input coordination (`InputCoordinator`).
 - **`raylib-wasi`**: Standalone Raylib 5.5 WASI runtime and WebGL ES 2.0 host bridge (`createRaylibHost`).
+- **Uniform Virtual Headers & Permanent Sysroot Bundling**:
+  - `scripts/download-sysroot.js` auto-generates virtual header JS modules: `src/vfs/turtle-headers.js` and `src/vfs/raylib-headers.js`.
+  - `mountSysroot(vfs)` mounts all graphics headers (`graphics.h`, `graphics_canvas.h`, `turtle.h`, `turtle_backend_canvas_wasi.h`, `turtle_backend_raylib.h`, `raylib.h`, `raymath.h`, `rlgl.h`) permanently under `/usr/include/` on app startup.
+  - `libraylib.a`, `libturtle_raylib.a`, `libturtle.a`, and `libturtle_canvas-wasi.a` are preloaded into `/usr/lib/` and `/lib/wasm32-wasip1/` out of the box, requiring zero network calls or dynamic fetching at runtime.
+  - Project Settings eliminates the `Enable Raylib Graphics Support` checkbox; users specify `-lraylib` or `-lturtle_raylib -lraylib` directly in Linker Flags.
 - **`libturtle`**: Modular educational turtle graphics with Canvas-WASI and Raylib backends.
   - **Link-Time Backend Resolution**: High-level initialization expands via `#define turtle_begin(ctx) (<backend>_turtle_init(ctx) && turtle_begin_core())` to guarantee link failure if code is linked against the incorrect backend archive.
-  - **Automated Hermetic In-Tree Compilation**: `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and compiles both backends (`canvas-wasi` and `raylib`) for `wasm32-wasi` directly via the in-tree `llvm-box.wasm` toolchain (`WasmToolchain`) and archives them via `buildArchive` (`ar.js`), eliminating host toolchain dependencies (no host `clang`, `llvm-ar`, or `make` required) and manual string fallbacks.
-  - **Zero-Drift Virtual Sysroot Sync**: Copied headers in `public/sysroot/include/turtle/` automatically generate `src/vfs/turtle-headers.js`, ensuring the virtual sysroot remains synchronized with compiled static libraries.
+  - **Automated Hermetic In-Tree Compilation**: `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and compiles both backends (`canvas-wasi` and `raylib`) for `wasm32-wasi` directly via the in-tree `llvm-box.wasm` toolchain (`WasmToolchain`) and archives them via `buildArchive` (`ar.js`), eliminating host toolchain dependencies.
 - **Zero-Copy Frame Transfer**: Synchronous `transferToImageBitmap()` in Web Worker transferred via `postMessage({ type: 'frame', bitmap }, [bitmap])` to `ImageBitmapRenderingContext`.
 
 ### 3.5 Service Worker & Large Asset Delivery Optimization (`coi-serviceworker.js`)
@@ -159,6 +164,23 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
   - For large WebAssembly binaries (`llvm-box.wasm` ~56 MB), the Service Worker fetch handler explicitly bypasses `networkResponse.clone()` and `cache.put()`.
   - **Eliminating Abort Errors**: Buffering and cloning 56 MB streams inside a Service Worker fetch event frequently triggers stream buffer locks, high memory usage, and browser worker keepalive timeouts (30-60s), resulting in `DOMException: The operation was aborted.` (`AbortError`).
   - Bypassing `CacheStorage` cloning allows the network response to stream directly through to the client with COOP/COEP headers, while persistent caching is handled deterministically by the client-side IndexedDB binary cache.
+
+### 3.6 Detached Floating Terminal Mode, ANSI VT100 Screen Control & Synchronous Sleep
+- **Detached Floating Terminal Mode**:
+  - Allows detaching the docked bottom terminal into a floating, draggable window with preset dimensions (80x24 standard VT100 geometry, cycling to 100x30 and 120x36).
+  - Title bar dragging with viewport edge boundary clamping.
+  - Sizing badge with interactive click-to-detach and click-to-cycle presets.
+  - Window control actions: dynamic minimize/maximize toggling with proper icons (`_` underscore and `□` square).
+  - Active focus tracking with distinct green glow outline (`box-shadow: 0 0 0 2px #22c55e, 0 16px 40px rgba(0,0,0,0.6)`).
+  - Keyboard shortcut: `Ctrl+Shift+D` (or `Cmd+Shift+D`) to toggle between docked and floating modes.
+- **ANSI VT100 Screen Control & UTF-8 Text Decoding**:
+  - `WasiHost.prototype.readStr` in `src/vfs/wasi-host.js` decodes text streams using `TextDecoder('utf-8')` instead of single-byte concatenation.
+  - Guarantees multi-byte UTF-8 sequences, box-drawing characters (`─`, `│`, `┌`, `┐`, `└`, `┘`, `┼`), and international characters render crisply in `xterm.js`.
+  - Bundled example `08_ansi_terminal.c` demonstrating VT100 screen control, direct cursor positioning (`\033[%d;%dH`), colors, and animated progress bars.
+- **Synchronous Timer Sleeping in WASI (`poll_oneoff`)**:
+  - Implements clock timer subscription parsing (`WASI_EVENTTYPE_CLOCK`) in `WasiHost.prototype.poll_oneoff`.
+  - Converts nanosecond timeouts to millisecond durations and sleeps synchronously via `Atomics.wait()` on `SharedArrayBuffer` when cross-origin isolated.
+  - Powers standard POSIX `nanosleep(&ts, NULL)`, `usleep()`, `sleep()`, and turtle `delay_ms()` accurately without 100% CPU busy looping.
 
 ---
 
@@ -176,10 +198,14 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 | **Interactive `scanf` & `Ctrl-D` EOF** | Runtime worker standard input blocks via `SharedArrayBuffer` until Enter; `Ctrl-D` sends EOF cleanly. |
 | **Pipelines & Redirections** | Command pipelines (`|`) and stream redirections (`<`, `>`, `>>`) execute deterministically across stages. |
 | **Static Archiver (`ar rcs`)** | Built-in `ar` creates archives directly in VFS; `wasm-ld` links against them without errors. |
+| **Permanent Sysroot Bundling** | Raylib 5.5 and Raylib turtle development files (`raylib.h`, `raymath.h`, `rlgl.h`, `turtle_backend_raylib.h`, `libraylib.a`, `libturtle_raylib.a`) mount in sysroot by default. |
 | **Canvas & Raylib Graphics** | Generic framebuffer, 2D vector canvas, and Raylib interactive graphics render at ~60 FPS via zero-copy `ImageBitmap`. |
-| **Turtle Graphics Subsystem** | Both `canvas-wasi` and Raylib turtle backends compile and render progressive animations. |
+| **Turtle Graphics Subsystem** | Both `canvas-wasi` and Raylib turtle backends compile and render progressive animations out-of-the-box. |
 | **Wasm Binary IndexedDB Caching** | First run saves 56MB `ArrayBuffer` to IndexedDB `wasm_modules`; subsequent sessions retrieve from local disk in <100ms with 0 network bytes. |
 | **Cross-Browser DataCloneError Prevention** | Storing raw `ArrayBuffer` in IndexedDB succeeds across Firefox and Chrome without `DataCloneError`. |
 | **Streaming Compilation & Fallback** | `WebAssembly.compileStreaming` compiles chunks concurrently with download; falls back gracefully to `arrayBuffer()`. |
 | **Service Worker Large Asset Delivery** | `llvm-box.wasm` streams directly through Service Worker with COOP/COEP headers without buffer locks or timeout aborts (`The operation was aborted.`). |
 | **Silent Background Pre-Warming** | Background toolchain warmup completes silently without printing to or disrupting the active xterm terminal prompt. |
+| **Detached Floating Terminal Mode** | Floating window snaps to 80x24 standard VT100 dimensions, cycles through presets (100x30, 120x36), supports title dragging with viewport clamping, dynamic minimize/maximize icons (`_` and `□`), and active green glow focus. |
+| **ANSI VT100 & UTF-8 Screen Control** | Programs using ANSI VT100 control sequences and UTF-8 multi-byte characters (box borders, cursor positioning, colors) render crisply in `xterm.js`. |
+| **Synchronous Timer Sleeping** | WASI `poll_oneoff` accurately parses clock events and sleeps synchronously via `Atomics.wait` on `SharedArrayBuffer` without busy looping. |

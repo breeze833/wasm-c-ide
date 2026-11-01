@@ -143,3 +143,22 @@ In standard HTML5 Canvas 2D implementations, modifying individual pixels via `ct
 2. **Direct Framebuffer Recommendation**: For procedural pixel effects, raytracers, or 2D image filters (such as Sobel edge detection or blur), developers should avoid per-pixel host calls and instead use:
    - **Direct Linear Memory Raster Buffers**: Fetch and commit pixel buffers in bulk via `canvas_get_pixels()` / `canvas_put_pixels()` or `canvas_get_image_data()` / `canvas_put_image_data()`.
    - **Generic Software Framebuffer**: Use `<graphics.h>` (`graphics_present()`), which writes directly to a continuous C memory array and transfers the entire frame in a single host call.
+
+---
+
+## 8. Synchronous Timer Precision & Sub-Millisecond Delays in WASI Preview 1
+
+### Context & Implementation
+Standard C/POSIX timing functions (`nanosleep`, `usleep`, `sleep`) invoke the WASI Preview 1 `poll_oneoff` syscall with clock subscription events (`WASI_EVENTTYPE_CLOCK`).
+
+In `wasm-c-ide`, `WasiHost.prototype.poll_oneoff` resolves clock timeouts by:
+1. Parsing the target timeout nanoseconds and calculating delta delay against the monotonic clock.
+2. If delta exceeds 0:
+   - When **Cross-Origin Isolated** (`window.crossOriginIsolated` / worker `SharedArrayBuffer` available), performing a synchronous timed wait via `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.ceil(deltaNs / 1e6))`.
+   - When **Unisolated**, falling back to monotonic busy-polling with `performance.now()`.
+
+### Limitations & Pedagogical Guidance
+1. **Millisecond Quantization**: The `Atomics.wait()` timeout parameter accepts millisecond granularity integer values. Sub-millisecond sleeps (e.g. `usleep(100)`) round up to at least 1 millisecond.
+2. **Unisolated Environment CPU Usage**: In non-cross-origin isolated contexts, `Atomics.wait` is unavailable. While `performance.now()` ensures accurate wall-clock elapsed time, long delays (`sleep(5)`) will spin the worker CPU core during the delay window.
+3. **Recommended Practice**: Programs requiring progressive pacing or animation delays (such as `08_ansi_terminal.c` or turtle graphics) should use standard millisecond-scale sleeps (e.g. `nanosleep(&ts, NULL)` or `turtle_delay(16)` ~60 FPS).
+
