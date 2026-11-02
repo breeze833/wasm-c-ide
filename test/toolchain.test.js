@@ -603,6 +603,49 @@ console.log('✓ Direct compile & link argument parsing passed');
       console.log('✓ Linker reports error on undefined symbols and permits whitelisted host imports');
     }
 
+    // Test 18: Standard C++ headers (<cstdio>, <cstdlib>, <cstring>, <cmath>, <vector>, <string>, etc.) compilation & linking
+    {
+      const stdCppSrc = `#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cmath>
+#include <cctype>
+#include <cassert>
+#include <iostream>
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <memory>
+
+int main() {
+    std::vector<std::string> v = {"hello", "world"};
+    std::sort(v.begin(), v.end());
+    std::unique_ptr<int> p = std::make_unique<int>(42);
+    double root = std::sqrt(16.0);
+    int upper = std::toupper('a');
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%d", *p);
+    assert(std::strcmp(buf, "42") == 0);
+    return 0;
+}
+`;
+      vfs.writeFile('/workspace/std_cpp_test.cpp', stdCppSrc);
+
+      let stdCppMsg = '';
+      const stdCppCode = await executeGccCommand({
+        cmd: 'g++',
+        args: ['std_cpp_test.cpp', '-o', 'std_cpp.out'],
+        cwd: '/workspace',
+        vfs,
+        toolchain: tc,
+        mode: 'cpp',
+        write: (m) => { stdCppMsg += m; }
+      });
+      assert.strictEqual(stdCppCode, 0, `Standard C++ headers must compile and link cleanly: ${stdCppMsg}`);
+      assert.strictEqual(vfs.exists('/workspace/std_cpp.out'), true, 'std_cpp.out must be created');
+      console.log('✓ Standard C++ headers (<cstdio>, <cstdlib>, <cstring>, <cmath>, <vector>, etc.) verified');
+    }
+
     // Test 9: WebAssembly module cache and streaming compilation fallback unit tests
     {
       // Test 9.1: Graceful fallback when indexedDB is undefined

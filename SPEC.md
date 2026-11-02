@@ -1,321 +1,318 @@
-# Software Specification: In-Browser C/C++ Teaching IDE (Pure Static Wasm)
+# Software Specification: In-Browser C/C++ Teaching IDE with Unified VFS WASI Host & Zero-MemFS Architecture (Pure Static Wasm)
 
 ## 1. Project Overview & Objectives
-The goal of this project is to build an installation-free, zero-backend, multi-file C/C++ programming development and learning environment that runs entirely client-side in modern web browsers via WebAssembly (Wasm). 
+The goal of this project is to build an installation-free, zero-backend, multi-file C/C++ programming development and learning environment that runs entirely client-side in modern web browsers via WebAssembly (Wasm).
+
+This specification defines the architecture and design invariants of `wasm-c-ide`, featuring a zero-backend, multi-file C/C++ teaching IDE that completely eliminates `memfs.wasm` from the compilation toolchain and unifies all WASI Preview 1 (`wasi_snapshot_preview1`) host filesystem bindings across both the toolchain (`clang.wasm`, `lld.wasm`) and user binary runtime sandboxes (`runtime.worker.js`) into a single, high-performance, direct Virtual File System host (`src/vfs/wasi-host.js`). The IDE maintains a single, authoritative in-memory Virtual File System (`VFS`) serving as the single source of truth for the Monaco editor, file tree, shell worker, compiler, linker, archiver, and runtime execution.
 
 ### Key Objectives:
-- **Zero Backend / Pure Static**: Hostable on static hosting services (e.g., GitHub Pages, Cloudflare Pages, static Nginx).
-- **Educational Transparency**: Demystify the compilation, assembly, and linking phases. Users can observe object files (`.o`), executables (`.wasm`/binary), paths, and compiler flags directly.
-- **Pedagogical Discipline**: Enforce strict standard C mode when enabled, disallow automatic saving to foster explicit save habits, and direct all GUI operations into visible shell terminal commands.
+- **Zero Backend / Pure Static**: Hostable on static hosting services (e.g., GitHub Pages, Cloudflare Pages, static Nginx) with no server-side execution.
+- **Single Source of Truth VFS**: Elimination of parallel in-memory filesystems. The compiler frontend (`clang.wasm`), linker (`lld.wasm`), runtime worker (`runtime.worker.js`), shell worker (`shell.worker.js`), and user interface all operate on the same unified `VFS`.
+- **Zero-MemFS Toolchain**:
+  - Eliminates `memfs.wasm` download, instantiation, and runtime overhead.
+  - Eliminates all pre-compilation file synchronization and post-compilation artifact extraction bridges.
+  - Eliminates historical C-level inode exhaustion, inode reuse, and buffer offset corruption bugs by relying on clean JavaScript `Map` and `Uint8Array` memory management.
+  - Standard C/C++ sysroot headers and static runtime libraries (`sysroot.tar.gz`) unpack directly into `VFS` read-only system paths (`/usr/include`, `/include/wasm32-wasip1`, `/include/wasm32-wasip1/c++/v1`, `/lib/wasm32-wasip1`).
+- **Comprehensive Standard C & C++ Library Headers**:
+  - Full availability of standard C headers (`<stdio.h>`, `<stdlib.h>`, `<string.h>`, `<math.h>`, `<ctype.h>`, `<assert.h>`, `<stdint.h>`, `<stddef.h>`, `<stdbool.h>`, `<time.h>`, `<limits.h>`, `<float.h>`, `<inttypes.h>`, `<fcntl.h>`, `<sys/stat.h>`, `<dirent.h>`, etc.) and standard C++ headers (`<cstdio>`, `<cstdlib>`, `<cstring>`, `<cmath>`, `<cctype>`, `<cstddef>`, `<cstdint>`, `<cassert>`, `<ctime>`, `<climits>`, `<cfloat>`, `<cerrno>`, `<iostream>`, `<vector>`, `<string>`, `<fstream>`, `<algorithm>`, `<memory>`, `<map>`, `<set>`, etc.).
+  - Zero missing header errors during teaching, with offline/in-memory virtual fallbacks mounted at `/usr/include/` on startup.
+- **Unified WASI Preview 1 Host (`WasiHost`)**:
+  - Single, modular JavaScript engine implementing the complete WASI Preview 1 specification (`wasi_snapshot_preview1`).
+  - Supports capability-based preopened directories (`.` / `/workspace`, `/`).
+  - Scatter/gather I/O (`fd_read`, `fd_write`) with direct zero-copy `Uint8Array.set` transfers into and out of WebAssembly linear memory.
+  - In-code standard file I/O (`fopen`, `fread`, `fwrite`, `fseek`, `ftell`, `fclose`, `<fstream>`) and interactive standard I/O (`scanf`, `cin`, `getchar`) seamlessly coordinated.
+- **Pedagogical Discipline**: Enforce strict standard C mode (`-std=c11 -pedantic-errors`), disallow automatic saving to cultivate deliberate save habits, and route all GUI actions into visible shell terminal commands.
+- **Strict Standard Link-Time Symbol Resolution**: The linker enforces standard resolution of undefined symbols, immediately reporting missing libraries or unlinked object files as standard `wasm-ld: error: undefined symbol: <name>` diagnostics rather than deferring failures to opaque runtime crashes (exit code 1). Authorized host imports (`canvas-wasi`) are strictly whitelisted via `--allow-undefined-file=/usr/lib/wasm-host-imports.txt`.
+- **Decoupled Dual-Module Graphics Subsystems**:
+  - **`canvas-wasi`**: Pure C direct software framebuffer (`<graphics.h>`), HTML5 Canvas 2D vector primitives (`<graphics_canvas.h>`), floating/dockable graphics console UI (`GraphicsWindowUI`), and shared 512-byte `SharedArrayBuffer` input coordination (`InputCoordinator`).
+  - **`raylib-wasi`**: Standalone Raylib 5.5 port and WebGL ES 2.0 host bridge, providing Wasm imports (`gl`, `raylib`) and zero-Emscripten `PLATFORM_CUSTOM` execution.
+- **Turtle Graphics Subsystem (`libturtle`)**: Modular educational turtle graphics with dual backend support (Canvas-WASI and Raylib backends both permanently bundled into sysroot out-of-the-box).
+- **SQLite 3 Embedded Database & CLI Subsystem (`sqlite-wasi`)**: Precompiled SQLite 3.54.1 WASI Preview 1 static library (`libsqlite3.a`), C headers (`sqlite3.h`, `sqlite3ext.h`), and standalone interactive CLI (`sqlite3.wasm` mounted at `/usr/bin/sqlite3`) bundled permanently into sysroot out-of-the-box, supporting SQL relational databases with real-time VFS persistence.
+- **Unified Terminal Line Editor & Interactive Stdin Subsystem (`LineEditor`)**:
+  - Zero-dependency prompt-safe line editor (`src/terminal/line-editor.js`) that unifies terminal input handling across the shell prompt (`ide:~$ `), interactive shell builtins (`cat`), and running WASI binaries (`sqlite3`, `scanf`, `fgets`).
+  - Supports full in-line cursor movement (Left/Right arrows, Home/End, Ctrl+A/E), text editing (Backspace, Delete, Ctrl+K, Ctrl+U), and Up/Down arrow history recall with uncommitted scratch edit preservation.
+  - Prompt-safe relative cursor redrawing ensures external/process prompts (such as `sqlite> `) are never overwritten or corrupted during history navigation.
+  - Contextual history isolation maintains distinct history rings for shell commands versus application-level queries (e.g. `sqlite3`).
+  - Strict preservation of `Ctrl-C` interrupt, `Ctrl-D` EOF handling, and Tab completion.
+- **Toolchain Startup Acceleration & IndexedDB Binary Persistence**:
+  - Eliminates slow remote downloads and compilation freezes on repeated IDE visits.
+  - Streaming compilation (`WebAssembly.compileStreaming`) compiles bytecode concurrently as network chunks stream over the wire.
+  - Universal binary caching: Persists raw 56 MB `ArrayBuffer` binaries inside IndexedDB (`wasm-c-ide-wasm-cache` -> `wasm_modules`), completely bypassing browser deprecation of `WebAssembly.Module` structured cloning (`DataCloneError`) across Firefox, Chrome, and Safari.
+  - Subsequent launches retrieve the pre-downloaded binary from local disk in **<100ms** with zero network transfer.
+  - Background pre-warming initiates silently on app startup so tools are warm before the user compiles.
+  - Service Worker streaming: Large WebAssembly binaries (`llvm-box.wasm`) bypass Service Worker `CacheStorage` stream cloning, eliminating worker memory exhaustion and timeout-induced `AbortError` (`"The operation was aborted."`).
 
 ---
 
 ## 2. System Architecture
 ```
-+-------------------------------------------------------------------------+
-|                               Browser UI                                |
-|  +---------------------------+  +------------------------------------+  |
-|  | Multi-tab Code Editor     |  | Project Settings & Build Action Bar|  |
-|  | (Monaco Editor & Zoom +/-)|  | (Save/Compile/Build/Run/Install PWA|  |
-|  +-------------+-------------+  +-----------------+------------------+  |
-|                |                                  | (Transparent        |
-|                v (Explicit Save / Dirty Marker)   v  pushd/cd/popd cmd) |
-|  +-------------+----------------------------------+------------------+  |
-|  |               xterm.js Virtual Terminal & Zoom (+/-)              |  |
-|  +------------------------------------+------------------------------+  |
-+---------------------------------------|---------------------------------+
-                                        | (Pty Stdin / Stdout stream)
-+---------------------------------------v---------------------------------+
-|                         Web Worker Execution Sandboxes                  |
-|                                                                         |
-|  +--------------------------+          +-----------------------------+  |
-|  |    POSIX Shell Worker    |          |  Wasm Runtime (Target App)  |  |
-|  |  - History & Autocomplete|          |  - SharedArrayBuffer        |  |
-|  |  - Directory Stack & Globs          |  - Atomics.wait blocking IO |  |
-|  +-------------+------------+          +--------------+--------------+  |
-|                | (executes commands)                  |                 |
-|                v                                      v                 |
-|  +-------------------------------------------------------------------+  |
-|  |  Clang / LLD / Make Wasm Toolchain (Async instantiate / MemFS sync)|  |
-|  +------------------------------------+------------------------------+  |
-|                                       |                                 |
-|                                       v                                 |
-|  +------------------------------------+------------------------------+  |
-|  | Virtual File System (VFS - Single Source of Truth)                 |  |
-|  | - /workspace (Read-Write, IndexedDB Sync, .zip Export/Import)     |  |
-|  | - /usr/include & /usr/lib (Read-Only Headers and Static Libraries)|  |
-|  | - /bin & /usr/bin (Read-Only POSIX and Toolchain Binaries)        |  |
-|  +-------------------------------------------------------------------+  |
-+-------------------------------------------------------------------------+
-| Offline Engine: Unified PWA Service Worker (COOP/COEP & CacheStorage)   |
-+-------------------------------------------------------------------------+
++-----------------------------------------------------------------------------------------+
+|                                        Browser UI                                       |
+|  +---------------------------+  +------------------------------------+  +------------+  |
+|  | Multi-tab Code Editor     |  | Project Settings & Build Action Bar|  | Graphical  |  |
+|  | (Monaco Editor & Zoom +/-)|  | (Save/Compile/Build/Run/Canvas/PWA)|  | Console    |  |
+|  +-------------+-------------+  +-----------------+------------------+  | (Floating/ |  |
+|                |                                  | (Transparent        |  Pop-out   |  |
+|                v (Explicit Save / Dirty Marker)   v  pushd/cd/popd cmd) |  Canvas via|  |
+|  +-------------+----------------------------------+------------------+  | canvas-    |  |
+|  |               xterm.js Virtual Terminal & Zoom (+/-)              |  | wasi UI)   |  |
+|  +------------------------------------+------------------------------+  +-----+------+  |
+|                                       | (Keystrokes & ANSI Escapes)           |         |
+|                       +---------------v---------------+                       |         |
+|                       |   Unified LineEditor Engine   |                       |         |
+|                       | (History, Cursor Nav, Editing)|                       |         |
+|                       +-------+---------------+-------+                       |         |
++-------------------------------|---------------|-------------------------------|---------+
+                                |               |                               | (Zero-copy
++-------------------------------v---------------v-------------------------------v--+ ImageBitmap)
+|                         Web Worker Execution Sandboxes                           |
+|                                                                                  |
+|  +--------------------------+          +--------------------------------------+  |
+|  |    POSIX Shell Worker    |          |  Wasm Runtime (App + Raylib / Turtle)|  |
+|  |  - History & Autocomplete|          |  - SharedArrayBuffer (Stdin & Input) |  |
+|  |  - Directory Stack & Globs|         |  - Atomics.wait (Blocking IO & FPS)  |  |
+|  |  - Pipelines & Redirects |          |  - OffscreenCanvas (WebGL/2D Context)|  |
+|  +-------------+------------+          |  - Unified WasiHost (WASI Preview 1) |  |
+|                | (executes commands)   +------------------+-------------------+  |
+|                v                                          |                      |
+|  +--------------------------------------------------------+                      |
+|  |  LLVM 19 Single-Binary Toolchain (Direct VFS Host)                               |
+|  |  - llvm-box.wasm 19.1.0 (clang, clang++, wasm-ld, ar, nm, size, objdump, etc.)    |
+|  |  - WebAssembly.compileStreaming & IndexedDB Binary Persistence (wasm-cache.js)  |
+|  |  - Unified WasiHost (Direct VFS I/O, Zero MemFS)                               |
+|  +------------------------------------+------------------------------------------+
+|                                       |
+|                                       v
+|  +-------------------------------------------------------------------------------+
+|  | Virtual File System (VFS - Single Source of Truth)                            |
+|  | - /workspace (Read-Write, IndexedDB Sync, .zip Export/Import)                |
+|  | - /usr/include & /include/wasm32-wasip1 (C/C++, graphics, turtle, raylib)     |
+|  | - /usr/lib & /lib/wasm32-wasip1 (libc, libc++, compiler-rt, libturtle, raylib)|
+|  | - /bin & /usr/bin (POSIX and Toolchain Binaries: gcc, g++, ar, make, etc.)   |
+|  +-------------------------------------------------------------------------------+
++----------------------------------------------------------------------------------+
+| Offline Engine: Unified PWA Service Worker (COOP/COEP) + IndexedDB Wasm Cache    |
++----------------------------------------------------------------------------------+
 ```
 
 ---
 
 ## 3. Detailed Component Specifications
 
-### 3.1 Code Editor Component
-- **Engine**: Monaco Editor.
-- **Implementation**: Pure Vanilla JS / DOM with standard ES modules.
-- **Multi-File / Multi-Tab**: Tabbed interface corresponding to files under `/workspace`.
-- **Dirty State Indicator**:
-  - Unsaved modifications display a prominent dirty marker (e.g., `*` or solid dot on tab).
-  - **No Auto-Save**: Files MUST NOT auto-save on edit or build.
-  - **Save Action**: Explicit `Ctrl+S` / `Cmd+S` or UI Save button writes content into the Virtual File System (VFS).
-- **Build Pre-Condition Warning**:
-  - If a user triggers "Compile Active File" or "Build" while the active file or any workspace file is dirty, show a non-blocking toast warning: `"Warning: File has unsaved changes. Build proceeds with last saved disk state."` (Do not block compilation, but never auto-save).
+### 3.1 Unified WASI Preview 1 Host (`WasiHost`) Integration
+- **Upstream Source of Truth**: The `WasiHost` engine and its standard WASI Preview 1 syscall implementations (`path_open`, `fd_read`, `fd_write`, `fd_filestat_get`, `fd_readdir`, etc.) are authoritatively specified and maintained in [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi) (`SPEC.md`).
+- **Module Location & Lifecycle**: `src/vfs/wasi-host.js` is dynamically fetched from `clang-wasi` (`src/wasi-host.js`) on demand during project installation and setup via `scripts/download-sysroot.js`. It is gitignored to avoid repository divergence.
+- **Direct VFS Binding**:
+  - `WasiHost` binds directly to `wasm-c-ide`'s in-memory `VFS` instance (`src/vfs/vfs.js`).
+  - Eliminates `memfs.wasm` and intermediate memory copying: all file operations operate directly on JavaScript `Uint8Array` buffers and the unified `Map` hierarchy shared by the Monaco editor, file tree sidebar, and terminal workers.
+- **Dual Preopen Operational Modes**:
+  1. **Toolchain Mode (`wasm-clang.js` & `driver.js`)**:
+     - Preopens descriptor 3 (`name: '.'`, `path: '/workspace'`) and descriptor 4 (`name: '/'`, `path: '/'`).
+     - Enables `llvm-box.wasm` (`clang`, `wasm-ld`, `llvm-ar`) to resolve user sources in `/workspace` alongside sysroot headers and runtime libraries in `/usr/include`, `/usr/lib`, `/include/wasm32-wasip1`, and `/lib/wasm32-wasip1`.
+     - Supports dynamic inode mapping (`_getInode`) and non-zero device identifiers (`st_dev = 1n`) ensuring Clang header guards and inclusion tracking work reliably without circular loops.
+  2. **Runtime Sandbox Mode (`runtime.worker.js`)**:
+     - Preopens descriptor 3 (`name: '.'`, `path: '/workspace'`) exclusively.
+     - Confines user application execution (`a.out`, `sqlite3`, etc.) to `/workspace`, preventing user code from mutating sysroot directories or system binaries.
+- **Terminal & Stream Synchronization**:
+  - **Standard Output & Error (`stdout`, `stderr`)**: Directs character streams to xterm.js, or captures streams to memory buffers during pipeline stages (`|`) and file redirections (`>`, `>>`).
+  - **Standard Input (`stdin`)**: Synchronizes with the main browser thread via `SharedArrayBuffer` and `Atomics.wait()` in worker threads for blocking interactive reads (`scanf`, `cin`, `getchar`), coupled with the host `LineEditor`. Supports immediate buffer feed for `<` input redirection.
+  - **Bidirectional File Sync (`onFileSync`, `onFileDelete`)**: WasiHost lifecycle hooks stream file modification and unlinking events to `VFS`, immediately synchronizing dirty states with Monaco tabs and updating `FileTreeUI`.
 
-### 3.2 Terminal & Shell Subsystem
-- **Terminal Emulator**: `xterm.js` with `xterm-addon-fit`.
-- **Shell**: Dedicated Web Worker running interactive POSIX-compatible shell.
-  - **Built-in CLI Utilities**: `sh`, `ls`, `cd`, `pwd`, `cat`, `rm`, `mkdir`, `cp`, `mv`, `clear`, `echo` (with `>` and `>>` output redirection), `which`, `pushd`, `popd`, and `dirs`.
-  - **External Toolchain Dispatch**: External commands (`gcc`, `clang`, `g++`, `clang++`, `wasm-ld`, `make`, `./a.out` or `./*`) are delegated to Wasm toolchain and runtime worker execution sandboxes.
-  - **Interactive Features**: Interactive prompt (`$ ` with cwd display), command history (Up/Down arrows), autocompletion (Tab), line editing, and ANSI colors.
-  - **Directory Stack & Navigation**:
-    - `pushd <dir>`: Saves current working directory onto stack and navigates to target.
-    - `pushd .`: Pushes current directory onto stack.
-    - `pushd` (parameterless): Swaps current directory with top of directory stack.
-    - `popd`: Pops the top directory from stack and restores working directory.
-    - `dirs`: Displays current directory stack formatted with `~` representing `/workspace`.
-    - `cd -`: Swaps to the previous working directory (`oldPwd`).
-  - **Command Chaining & Operators**:
-    - The shell command interpreter supports operator chaining: sequential `;`, conditional `&&`, and conditional `||`, properly respecting quoted strings.
-    - **Pipes (`|`)**: Supports multi-stage pipeline command chaining (`cmd1 | cmd2 | cmd3`), connecting stdout of stage $k$ to stdin of stage $k+1$ across both built-in utilities and external binaries via deterministic sequential buffer staging.
-    - **Stream Redirections (`<`, `>`, `>>`)**:
-      - Output Redirection: `> target` (truncate/overwrite) and `>> target` (append) capture stdout of builtins (`echo`, `ls`, `cat`, etc.) and external commands (`./a.out`, `gcc`, `make`) to files in the VFS.
-      - Input Redirection: `< source` feeds files from the VFS directly into the standard input of commands (`./a.out < input.txt`, `cat < input.txt`).
-      - Operators within quoted strings are preserved as literal characters.
-  - **Standard Input Closure (`Ctrl-D` / EOF)**:
-    - Pressing `Ctrl-D` (`\x04`) while standard input is active cleanly transmits End-of-File (EOF) to the executing process without terminating the process or shell.
-  - **Glob Pattern Expansion**:
-    - Unquoted command arguments containing glob wildcards (`*`, `?`) are recursively expanded against the VFS file tree before command execution. Unmatched patterns are preserved as literal strings.
-  - **File-Aware & Multi-Target `ls`**:
-    - Supports multiple target paths, listing individual files directly with metadata and directory contents under section headers.
-  - **File Operations (`mv` and `cp`) Semantics**:
-    - **Directory Destination Variants**: `mv <src> <dest_dir>` and `mv <src> <dest_dir>/` move `<src>` inside `<dest_dir>` using the source basename.
-    - **Multi-Source Support**: `mv file1 file2 <dest_dir>/` and `cp file1 file2 <dest_dir>/`.
-    - **Trailing Slash Enforcement**: If a target ends with `/`, it must exist and be a directory.
-    - **Atomic File Overwriting**: Moving a file onto an existing regular file replaces it cleanly without error.
-    - **Directory Safety**: Prohibits overwriting directories with non-directories, non-empty directories, or moving a directory into a subdirectory of itself.
-    - **Recursive Copy**: `cp -r` / `cp -R` recursively copies directory hierarchies.
-- **UI Button Action Redirection (Strict Principle & Working Directory Transparency)**:
-  - GUI action buttons (Compile, Build, Run, Stop) **MUST NOT** invoke hidden internal APIs.
-  - Action buttons dynamically construct shell command sequences and inject them directly into `xterm.js` via `terminal.injectCommand(cmd)`.
-  - **Directory Stack Preservation**: Because the student may be navigating arbitrary directories in the shell (e.g. `src/` or `/usr/include`), UI action buttons MUST transparently switch to `/workspace` and restore the user's directory upon completion using the directory stack:
-    - **Compile**: `pushd . && cd /workspace && gcc -Iinclude -Wall -c <relPath> -o <objPath>; popd` (or `g++` when active project is in C++ mode)
-    - **Build**: `pushd . && cd /workspace && make; popd` (or `pushd . && cd /workspace && sh build.sh; popd`)
-    - **Run**: `pushd . && cd /workspace && ./a.out; popd`
-  - The `; popd` delimiter ensures the user's working directory is always restored even when compilation or program execution fails with a non-zero exit code.
+### 3.2 Toolchain & Sysroot Integration (Zero-MemFS Single Binary)
+- **Unified Toolchain Module (`llvm-box.wasm`)**:
+  - Upstream LLVM 19.1.0 multicall binary from `breeze833/clang-wasi`.
+  - Executes Clang compiler (`clang`, `clang++`, `clang-cpp`), LLD linker (`wasm-ld`, `lld`, `ld.lld`, `ld`), and LLVM utilities (`ar`, `ranlib`, `nm`, `objdump`, `size`, `cxxfilt`, `strings`, `readelf`, `strip`) through a single WebAssembly module instance.
+  - Executed directly against `WasiHost` backed by `VFS`.
+  - No `memfs.wasm` dependency and zero duplicate binary downloads (~110MB saved). Zero copy-in / copy-out overhead.
+- **Toolchain Startup Lifecycle & Persistent Binary Cache (`wasm-cache.js`)**:
+  - `src/toolchain/wasm-cache.js` provides an IndexedDB persistence layer (`wasm-c-ide-wasm-cache` database, `wasm_modules` object store).
+  - Stores the raw 56 MB `ArrayBuffer` under cache key `'llvm-box-19.1.0'`.
+  - **Overcoming Browser Engine Restrictions**: Modern browser engines (Firefox Gecko and Chromium V8) deprecated and removed structured cloning of `WebAssembly.Module` instances into IndexedDB, rejecting it with `DataCloneError`. The IDE therefore stores the raw `ArrayBuffer`, which is universally structured-cloneable across all browsers without restrictions.
+  - **Subsequent Session Performance**: On repeat visits or tab reloads, `_getLlvmBox()` queries IndexedDB, reading the binary from local disk in **~50ms** and compiling it locally via `WebAssembly.compile()`, bypassing network transfer completely with **0 bytes downloaded**.
+- **Streaming Compilation & Parallel Buffer Capture**:
+  - On initial download, `_getLlvmBox()` concurrently compiles incoming network chunks via `WebAssembly.compileStreaming(res)` while teeing the response stream via `clone.arrayBuffer()` to simultaneously capture the `ArrayBuffer` for IndexedDB persistence without double-downloading.
+  - Robust fallback: If `compileStreaming` fails (e.g. non-standard MIME type or test environment), cleanly falls back to `fetch().then(r => r.arrayBuffer())` and `WebAssembly.compile()`.
+- **Silent Background Pre-Warming**:
+  - `src/main.js` initiates `toolchain._getLlvmBox({ silent: true })` immediately after sysroot headers finish unpacking in the background. While the user reads code or edits files, the compiler is fetched and compiled without printing to or disrupting the terminal prompt.
+- **Sysroot Mount (`sysroot.tar.gz`) & Header Hierarchy**:
+  - Downloaded on demand and unpacked directly into `VFS`.
+  - **Standard C / POSIX Headers**: Musl C headers reside under `/include/wasm32-wasip1/` and are mirrored directly to `/usr/include/` and `/include/`.
+  - **Standard C++ Headers (`libc++`)**: The complete suite of LLVM `libc++` headers resides under `/include/wasm32-wasip1/c++/v1/` (`iostream`, `vector`, `string`, `cstdio`, `cstdlib`, `cmath`, `cstring`, `algorithm`, `memory`, `map`, `set`, etc.).
+  - **Target-Independent Placeholder**: `/include/c++/v1/` is maintained as an empty directory placeholder according to the upstream `wasi-sdk` multi-target specification.
+  - **Compiler Built-in Headers**: Clang built-in headers reside under `/lib/clang/19/include/`.
+  - **In-Memory Virtual Fallback Headers (`sysroot.js`)**: `STANDARD_C_HEADERS` and `STANDARD_CPP_HEADERS` mount into `/usr/include/` immediately at app bootstrap, ensuring immediate Monaco editor syntax completions and offline fallback compilation even before `sysroot.tar.gz` is retrieved.
+  - **Static Libraries**: Mounted under `/usr/lib` and `/lib/wasm32-wasip1`: `crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libclang_rt.builtins.a`, `libm.a`, `libpthread.a`, `libturtle.a`, `libturtle_canvas-wasi.a`, `libturtle_raylib.a`, `libraylib.a`, `libsqlite3.a`.
+- **Compiler Frontend Search Priority & Zero-Shadowing Invariant (`wasm-clang.js`)**:
+  - In C++ mode (`mode === 'cpp'`), `compile()` invokes `-cc1` with strictly ordered system search paths:
+    1. `-internal-isystem /include/wasm32-wasip1/c++/v1` (primary libc++ headers)
+    2. `-internal-isystem /include/c++/v1` (target-independent fallback placeholder)
+    3. `-internal-isystem /lib/clang/19/include` (compiler builtins)
+    4. `-internal-isystem /include/wasm32-wasip1` (Musl C standard library)
+    5. `-internal-isystem /include`
+    6. `-internal-isystem /usr/include`
+  - **Zero-Shadowing `#include_next` Invariant**: `libc++` wrapper headers (e.g. `<cctype>`, `<cstring>`, `<cerrno>`) include their C counterparts using `#include_next`. Maintaining `/include/c++/v1` as an empty directory and preventing tar extraction from duplicating `c++/` subdirectories into `/include/c++` or `/usr/include/c++` ensures that `#include_next` passes cleanly through to Musl's C headers without tripping duplicate header guards, preventing unresolved identifiers like `errno`, `toupper`, and `memcpy`.
+- **Driver Simplification (`driver.js`)**:
+  - `executeGccCommand` coordinates command arguments, invokes Clang / LLD through `WasiHost`, and immediately accesses generated `.o`, `.s`, `.i`, or `a.out` binaries directly in `VFS`.
+  - All legacy MemFS unlinking workarounds, 0-byte truncation invariants, and stale-file diffing logic are removed.
+- **Strict Symbol Resolution & Host Import Whitelist**:
+  - Blanket `--allow-undefined` is removed for executable targets.
+  - `wasm-ld` invokes with `--allow-undefined-file=/usr/lib/wasm-host-imports.txt`, whitelisting only the 37 host functions declared in `<graphics.h>` and `<graphics_canvas.h>`.
+  - Any reference to an unlinked function (e.g. omitting `-lraylib`, `-lturtle`, missing multi-file object files, or calling nonexistent C functions) halts immediately at link time with standard linker diagnostics (`wasm-ld: error: <file>.o: undefined symbol: <name>`).
+  - WebAssembly shared objects (`.so`) retain `--allow-undefined` to support dynamic symbol resolution.
+  - Compiler driver parses `--allow-undefined` and `-Wl,--allow-undefined` into linker flags, permitting explicit user overrides.
 
-### 3.3 C/C++ Toolchain & Sysroot
-- **Prebuilt Binaries**: Open-source prebuilt WebAssembly binaries are utilized for Clang, `wasm-ld`, Make, and BusyBox.
-- **Compiler**: Clang / LLVM Wasm build mapped to commands `gcc`, `clang`, `g++`, and `clang++`. In C++ mode or when invoked via `g++` / `clang++`, C++ compilation flags and `libc++` linkage are automatically selected.
-- **Linker**: `wasm-ld` mapped to handle object linking.
-- **Sysroot & Standard Libraries**:
-  - Bundles minimal `wasi-libc` (`libc.a`, `crt1.o`, Musl libc headers under `/usr/include`, static libraries under `/usr/lib`).
-  - Full C++ standard library support (`libc++.a`, `libc++abi.a`, C++ headers under `/usr/include/c++/v1`).
-- **Toolchain MemFS Lifecycle & Ancestor Directory Auto-Creation**:
-  - The toolchain initializes an in-memory virtual filesystem (`MemFS`) for Clang/LLD execution.
-  - Toolchain initialization is pre-warmed on application boot and guarded against re-entrance.
-  - Adding files or directories to MemFS automatically ensures all ancestor parent directory nodes are created sequentially to prevent WebAssembly `unreachable` assertion traps.
-  - Missing-file probes safely return without trapping.
-- **Language Dialects**:
-  - **Pure C Mode**: Automatically injects `-x c -std=c11 -pedantic-errors -Wall -Wextra`. Forbids C++ syntax extensions and disallows `#include <iostream>`, `<vector>`, etc.
-  - **C++ Mode**: Injects `-x c++ -std=c++17 -Wall -Wextra` linking against `libc++`. Preferred wrapper command is `g++`.
-- **Include Paths**: Default configuration includes `-I/workspace/include -I/workspace`. System headers resolve to `/usr/include` and `/usr/include/c++/v1`.
+### 3.3 Runtime & Interactive Standard I/O
+- Target binaries run in `runtime.worker.js` using `WasiHost`.
+- Standard input (`stdin`):
+  - Handled via `SharedArrayBuffer` and `Atomics.wait()` on the worker thread for synchronous `scanf` / `cin` / `getchar` / `fgets`.
+  - Seamless fallback to preloaded buffer for `<` redirection and pipeline chaining (`|`).
+  - Integrated with the host-side `LineEditor` (`src/terminal/line-editor.js`):
+    - When a user binary requests interactive stdin, all terminal keystrokes pass through `RuntimeManager.prototype.handleTerminalInput()`.
+    - Enables full in-line editing (Left/Right arrows, Home/End, Backspace, Delete) and Up/Down arrow history recall for interactive console applications.
+    - Contextual history isolation automatically binds to the running binary name (`argv[0]`, e.g. `'sqlite3'` or `'a.out'`), preventing cross-contamination with shell commands.
+    - `Ctrl-D` (`\x04`): If the input buffer contains uncommitted text, flushes the buffer immediately without a trailing newline; if the buffer is empty, transmits `STATE_EOF` (`-1`) signaling EOF cleanly to `readStdin`.
+    - `Enter` (`\r`, `\n`): Commits the line into history, writes the string with `\n` to `SharedArrayBuffer`, and issues `Atomics.notify()` to resume the worker thread.
+- Real-time VFS sync:
+  - File operations (`fopen`, `<fstream>`, `fwrite`, `remove`, `rename`) directly update `VFS` and emit real-time event notifications (`file_sync`, `file_delete`) to refresh Monaco editor tabs and the File Tree UI.
 
-### 3.4 Build Systems (Dual-Track Mechanism)
-Users can select between two build strategies in the Project Settings UI:
+### 3.4 Decoupled Graphics Subsystems, Turtle Graphics & Direct Sysroot Bundling
+- **`canvas-wasi`**: Pure C direct software framebuffer (`<graphics.h>`), Canvas 2D vector primitives (`<graphics_canvas.h>`), floating/dockable graphics console (`GraphicsWindowUI`), and 512-byte `SharedArrayBuffer` input coordination (`InputCoordinator`).
+- **`raylib-wasi`**: Standalone Raylib 5.5 WASI runtime and WebGL ES 2.0 host bridge (`createRaylibHost`).
+- **Uniform Virtual Headers & Permanent Sysroot Bundling**:
+  - `scripts/download-sysroot.js` auto-generates virtual header JS modules: `src/vfs/turtle-headers.js` and `src/vfs/raylib-headers.js`.
+  - `mountSysroot(vfs)` mounts all graphics headers (`graphics.h`, `graphics_canvas.h`, `turtle.h`, `turtle_backend_canvas_wasi.h`, `turtle_backend_raylib.h`, `raylib.h`, `raymath.h`, `rlgl.h`) permanently under `/usr/include/` on app startup.
+  - `libraylib.a`, `libturtle_raylib.a`, `libturtle.a`, and `libturtle_canvas-wasi.a` are preloaded into `/usr/lib/` and `/lib/wasm32-wasip1/` out of the box, requiring zero network calls or dynamic fetching at runtime.
+  - Project Settings eliminates the `Enable Raylib Graphics Support` checkbox; users specify `-lraylib` or `-lturtle_raylib -lraylib` directly in Linker Flags.
+- **`libturtle`**: Modular educational turtle graphics with Canvas-WASI and Raylib backends.
+  - **Link-Time Backend Resolution**: High-level initialization expands via `#define turtle_begin(ctx) (<backend>_turtle_init(ctx) && turtle_begin_core())` to guarantee link failure if code is linked against the incorrect backend archive.
+  - **Automated Hermetic In-Tree Compilation**: `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and compiles both backends (`canvas-wasi` and `raylib`) for `wasm32-wasi` directly via the in-tree `llvm-box.wasm` toolchain (`WasmToolchain`) and archives them via `buildArchive` (`ar.js`), eliminating host toolchain dependencies.
+- **Zero-Copy Frame Transfer**: Synchronous `transferToImageBitmap()` in Web Worker transferred via `postMessage({ type: 'frame', bitmap }, [bitmap])` to `ImageBitmapRenderingContext`.
 
-1. **Default Track: Shell Script (`build.sh`)**
-   - The UI generates `/workspace/build.sh` reflecting compiler command (`gcc` in Pure C mode, `g++` in C++ mode), compiler flags, source files, and output paths.
-   - Triggering "Build" injects `pushd . && cd /workspace && sh build.sh; popd` to the terminal.
-2. **Alternative Track: Makefile & Incremental Make**
-   - The UI generates a standard `/workspace/Makefile` defining explicit targets (`all`, `clean`, `%.o: %.c` or `%.o: %.cpp`) using `CC = gcc` in Pure C mode and `CXX = g++` in C++ mode.
-   - Incremental Makefile runner evaluates file modification timestamps (`mtime`) to rebuild only stale prerequisites.
-   - Triggering "Build" injects `pushd . && cd /workspace && make; popd` to the terminal.
+### 3.5 Service Worker & Large Asset Delivery Optimization (`coi-serviceworker.js`)
+- **Cross-Origin Isolation**: Injects `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` to enable `SharedArrayBuffer` in modern browsers.
+- **Large Asset Streaming Bypass**:
+  - For large WebAssembly binaries (`llvm-box.wasm` ~56 MB), the Service Worker fetch handler explicitly bypasses `networkResponse.clone()` and `cache.put()`.
+  - **Eliminating Abort Errors**: Buffering and cloning 56 MB streams inside a Service Worker fetch event frequently triggers stream buffer locks, high memory usage, and browser worker keepalive timeouts (30-60s), resulting in `DOMException: The operation was aborted.` (`AbortError`).
+  - Bypassing `CacheStorage` cloning allows the network response to stream directly through to the client with COOP/COEP headers, while persistent caching is handled deterministically by the client-side IndexedDB binary cache.
 
-### 3.5 Runtime & Interactive Standard I/O
-- Target binaries (`.wasm` executables, e.g., `./a.out` or `./bin/app`) run in a dedicated Web Worker instance.
-- **Standard Input (`stdin`) Handling**:
-  - **Interactive Blocking Input**: Handled via `SharedArrayBuffer` and `Atomics.wait()`. When the runtime executes WASI `fd_read` on file descriptor 0, the worker pauses without blocking the browser main UI thread until `xterm.js` receives user input and signals `SharedArrayBuffer` via `Atomics.notify()`.
-  - **Non-Interactive Stream Redirection**: When stdin is redirected from a file (`<`) or pipeline (`|`), input bytes are preloaded into memory and consumed synchronously by `fd_read` without entering `Atomics.wait()`.
-  - **End-of-File Signaling (`Ctrl-D` / `\x04`)**:
-    - Pressing `Ctrl-D` (`\x04`) in `xterm.js` while input is pending flushes existing buffer content or signals `STATE_EOF` (`-1`) to `SharedArrayBuffer`.
-    - `Atomics.notify()` immediately resumes the waiting worker.
-    - WASI `fd_read` sets `*nread = 0` and returns `ESUCCESS` (0), allowing standard C library functions (`scanf`, `getchar`, `fgets`, `cin`) to recognize EOF and terminate input loops cleanly.
-- **Execution Interruption**:
-  - `Ctrl+C` in the terminal or GUI "Stop" button immediately issues worker interruption/termination and resets terminal state.
+### 3.6 Detached Floating Terminal Mode, ANSI VT100 Screen Control & Synchronous Sleep
+- **Detached Floating Terminal Mode**:
+  - Allows detaching the docked bottom terminal into a floating, draggable window with preset dimensions (80x24 standard VT100 geometry, cycling to 100x30 and 120x36).
+  - Title bar dragging with viewport edge boundary clamping.
+  - Sizing badge with interactive click-to-detach and click-to-cycle presets.
+  - Window control actions: dynamic minimize/maximize toggling with proper icons (`_` underscore and `□` square).
+  - Active focus tracking with distinct green glow outline (`box-shadow: 0 0 0 2px #22c55e, 0 16px 40px rgba(0,0,0,0.6)`).
+  - Keyboard shortcut: `Ctrl+Shift+D` (or `Cmd+Shift+D`) to toggle between docked and floating modes.
+- **ANSI VT100 Screen Control & UTF-8 Text Decoding**:
+  - `WasiHost.prototype.readStr` in `src/vfs/wasi-host.js` decodes text streams using `TextDecoder('utf-8')` instead of single-byte concatenation.
+  - Guarantees multi-byte UTF-8 sequences, box-drawing characters (`─`, `│`, `┌`, `┐`, `└`, `┘`, `┼`), and international characters render crisply in `xterm.js`.
+  - Bundled example `08_ansi_terminal.c` demonstrating VT100 screen control, direct cursor positioning (`\033[%d;%dH`), colors, and animated progress bars.
+- **Synchronous Timer Sleeping in WASI (`poll_oneoff`)**:
+  - Implements clock timer subscription parsing (`WASI_EVENTTYPE_CLOCK`) in `WasiHost.prototype.poll_oneoff`.
+  - Converts nanosecond timeouts to millisecond durations and sleeps synchronously via `Atomics.wait()` on `SharedArrayBuffer` when cross-origin isolated.
+  - Powers standard POSIX `nanosleep(&ts, NULL)`, `usleep()`, `sleep()`, and turtle `delay_ms()` accurately without 100% CPU busy looping.
 
-### 3.6 Virtual File System (VFS) & Storage
-- Single Source of Truth shared across Editor, Shell Worker, and Toolchain.
-- **Directory Layout**:
-  - `/workspace`: Root of the user project (Read-Write, persisted in IndexedDB).
-  - `/usr/include`: Read-only sysroot standard C and C++ headers.
-  - `/usr/lib`: Read-only Musl/libc/libc++ static runtime archives (`crt1.o`, `libc.a`, `libc++.a`, `libc++abi.a`, `libm.a`, `libpthread.a`).
-  - `/bin`: Read-only POSIX utilities (`sh`, `ls`, `cat`, `rm`, `mkdir`, `cp`, `mv`, `pwd`, `clear`, `echo`, `pushd`, `popd`, `dirs`).
-  - `/usr/bin`: Read-only toolchain binaries (`gcc`, `clang`, `g++`, `clang++`, `make`, `wasm-ld`).
-- **File System Operations**:
-  - `rename(oldPath, newPath)`: Supports directory target resolution (moving into existing destination folder), atomic replacement when overwriting existing files, and circular directory protection.
-  - `writeFile(path, content)`: Protected against replacing existing directory nodes.
-- **Persistence**:
-  - Synchronized with browser `IndexedDB`. Survives page refreshes.
-- **Import / Export**:
-  - Export: Bundles `/workspace` exclusively into a `.zip` archive downloaded to the client.
-  - Import: Extracts a user `.zip` archive directly into `/workspace`. System files outside `/workspace` cannot be overwritten.
+### 3.7 Collapsible (Slim Rail) & Resizable Workspace Sidebar
+- **Dynamic Horizontal Resizing**:
+  - Draggable vertical divider (`#sidebar-resizer`, 5px) positioned between the sidebar and editor with `col-resize` cursor and active accent highlight.
+  - Dragging dynamically resizes the sidebar between `160px` and `window.innerWidth - 300px` (clamped to max `600px`), immediately triggering `EditorManager.prototype.layout()`.
+  - Double-clicking the resizer handle resets the sidebar to its default `240px` width.
+- **Collapsible Slim Rail**:
+  - Collapsing reduces the sidebar to a `36px` slim vertical rail (`.sidebar.collapsed`) with the toggle button flipping to expand (`»`) and vertical label **`WORKSPACE`** (`writing-mode: vertical-rl; transform: rotate(180deg)`).
+  - Clicking either the toggle button or the vertical strip expands the sidebar back to its previously chosen width.
+  - While collapsed, `#sidebar-resizer` is automatically hidden (`display: none`).
+- **Keyboard Shortcut**: `Ctrl+B` / `Cmd+B` toggles the sidebar between collapsed and expanded states (bound globally and within Monaco editor).
+- **Session Persistence**: Both custom sidebar width (`wasm_c_ide_sidebar_width`) and collapsed state (`wasm_c_ide_sidebar_collapsed`) are persisted in `localStorage`.
 
-### 3.7 Static Hosting, Security Isolation & Offline PWA Capabilities
-- **Cross-Origin Isolation**:
-  - `SharedArrayBuffer` requires:
-    - `Cross-Origin-Opener-Policy: same-origin`
-    - `Cross-Origin-Embedder-Policy: require-corp`
-- **GitHub Pages / Zero-Config Static Server Compatibility & Unified PWA Service Worker**:
-  - Bundles `coi-serviceworker.js` in `public/coi-serviceworker.js` (loaded via `<script src="/coi-serviceworker.js">` in `index.html`) which serves as a unified Service Worker providing both:
-    1. Cross-Origin Isolation header injection (`COOP: same-origin` and `COEP: require-corp`) across static hosting environments.
-    2. `CacheStorage` offline caching engine (Cache-First for App Shell and Wasm toolchain assets, with automatic fallback for navigation).
-- **Progressive Web App (PWA) & Offline Execution**:
-  - Provides `manifest.webmanifest` defining standalone display, theme colors, and icons.
-  - Supports desktop and mobile home screen installation via `#btn-install` and `beforeinstallprompt`.
-  - Enables 100% offline development: when disconnected, cached HTML, JS/CSS bundles, sysroot headers, and Wasm binaries (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar`) execute locally without network access.
+### 3.8 Project Settings Modal & Configurable Run Execution
+- **Decoupled Settings Modal Actions**:
+  - **Save Button**: Persists configuration state (language mode, build system, include directories, compiler warning flags, linker flags, and custom run command) to application state and `localStorage` without modifying existing files in `/workspace`.
+  - **Generate Build Script Button**: Scans source files in `/workspace` and generates or updates `/workspace/build.sh` and `/workspace/Makefile` reflecting configured compiler and linker flags.
+- **Configurable Run Command**:
+  - Adds the **Run Command** field (`#setting-run-cmd`) within the Project Settings modal for user customization of the command launched when clicking the toolbar **Run** button (`#btn-run`).
+  - **Default Value**: `pushd . && cd /workspace && ./a.out; popd` (transparently preserves directory stack while running the target binary in `/workspace`).
+  - **Session Persistence**: The custom run command is saved to `localStorage` under `wasm_c_ide_run_command` across browser sessions.
+  - **Fallback Safeguard**: If left empty, automatically defaults back to `pushd . && cd /workspace && ./a.out; popd` to prevent blank command execution errors.
 
-### 3.8 Milestone 8: Usability Enhancements, Sub-Path Hosting & Production Delivery
+### 3.9 SQLite 3 WASI Embedded Database & CLI Subsystem (`sqlite-wasi`)
+- **Remote Package Integration**:
+  - Direct integration with upstream release package [`breeze833/sqlite-wasi`](https://github.com/breeze833/sqlite-wasi) (`v3.54.1`).
+  - Fetched dynamically on-demand during project setup via `scripts/download-sysroot.js` without manual submodule or git tracking.
+- **Sysroot Mount & Compilation Linkage**:
+  - Standard headers `sqlite3.h` and `sqlite3ext.h` are permanently mounted under `/usr/include/` on startup.
+  - Static library `libsqlite3.a` is mounted under `/usr/lib/` and `/lib/wasm32-wasip1/`.
+  - User programs compile and link cleanly using standard `-lsqlite3` without additional flags or host bridges.
+- **Standalone CLI Binary (`/usr/bin/sqlite3`)**:
+  - `sqlite3.wasm` is mounted directly into `/usr/bin/sqlite3` in the in-memory `VFS`.
+  - Registered in shell commands (`which sqlite3` resolves to `/usr/bin/sqlite3`).
+  - Invoked directly in the xterm terminal: `sqlite3 [database-file] [sql]`.
+  - Seamlessly interoperates with shell pipelines and input/output stream redirections (`<`, `>`, `>>`, `|`).
+  - File operations on database files (`demo.db`) inside `/workspace` synchronize in real-time to the host VFS and File Tree UI.
+  - **Interactive Shell Line-Editing & Arrow Keys Support**:
+    - Standard SQLite `shell.c` falls back to `fgets()` under WASI Preview 1 due to the lack of POSIX `<termios.h>` raw terminal control. `wasm-c-ide` overcomes this by providing transparent host-side line-editing and history recall via `LineEditor`.
+    - Users can press Up/Down arrows to recall previous SQL queries and Left/Right arrows, Home, End, Backspace, and Delete to edit in place without corrupting or overwriting the `sqlite> ` prompt.
 
-#### 3.8.1 Independent Pane Font Zoom & Scaling
-- **Multi-Pane Independence**: Monaco Editor and `xterm.js` terminal maintain isolated font scaling configurations rather than a shared global IDE zoom.
-- **Header Control Bar Integration**:
-  - **Editor**: Zoom controls are positioned on the right side of `.editor-header-bar` (`.pane-zoom-controls`) adjacent to editor tabs.
-  - **Terminal**: Zoom controls are embedded in `.terminal-header` within `.terminal-actions` alongside the clear terminal button (`#btn-clear-term`).
-- **Interactive UI Controls**:
-  - **Zoom In (`+`)**: Buttons `#btn-editor-zoom-in` and `#btn-term-zoom-in` increase font size by 1px.
-  - **Zoom Out (`-`)**: Buttons `#btn-editor-zoom-out` and `#btn-term-zoom-out` decrease font size by 1px.
-  - **Font Size Display & Reset**: Current size is rendered inside `#editor-font-size-label` and `#term-font-size-label` (e.g., `14px`, `13px`). Clicking the label resets the pane to its default font size (14px for Monaco, 13px for xterm.js).
-- **Keyboard Shortcuts**:
-  - **Zoom In**: `Ctrl+=` / `Cmd+=` (including `+` and `NumpadAdd`).
-  - **Zoom Out**: `Ctrl+-` / `Cmd+-` (including `NumpadSubtract`).
-  - **Reset Zoom**: `Ctrl+0` / `Cmd+0`.
-  - Terminal shortcuts are captured via `term.attachCustomKeyEventHandler` to override browser defaults and xterm.js interception.
-- **Clamping Boundaries**: Font sizes are strictly bounded between `9px` (minimum readability) and `36px` (maximum upper bound). Values are rounded to integers.
-- **LocalStorage Persistence**: Font size selections persist across sessions using keys `wasm_ide_editor_font_size` and `wasm_ide_term_font_size`.
-- **Dynamic Geometry Synchronization**: Font changes in terminal dynamically trigger `fitAddon.fit()` and notify listeners; Monaco updates via `editor.updateOptions({ fontSize })`.
-
-#### 3.8.2 Sub-Path Deployment & Relative Asset Resolution
-- **Zero-Config Sub-Path Portability**: The application supports root (`/`) or arbitrary sub-path deployments (e.g., `https://<owner>.github.io/<repo>/` or reverse-proxied paths like `/cpp-ide/`) without code modification.
-- **Base Configuration**: Vite build configuration sets `base: process.env.BASE_URL || './'`.
-- **Relative Resource Addressing**:
-  - Script and stylesheet links in `index.html` resolve relatively (`./src/style.css`, `./src/main.js`).
-  - Web App Manifest specifies `start_url: './'` and `scope: './'`.
-  - Toolchain and Sysroot asset fetches (`clang.wasm`, `lld.wasm`, `memfs.wasm`, `sysroot.tar`) dynamically calculate the root path based on base paths rather than hardcoded `/sysroot/wasm/...`.
-
-#### 3.8.3 Asynchronous Toolchain WebAssembly Instantiation
-- **V8 / Chromium 8MB Main-Thread Limit Mitigation**: Modern browser engines (e.g., Chromium / V8) reject synchronous WebAssembly compilation (`new WebAssembly.Module()` or `new WebAssembly.Instance()`) on the main thread if the buffer exceeds 8MB.
-- **Asynchronous Pipeline**:
-  - Clang (~20MB+), LLD, and MemFS are fetched and instantiated using `WebAssembly.instantiate(buffer, imports)` and `WebAssembly.compile(buf)` asynchronously.
-  - `MemFS.create(memfsBuffer, hostWrite)` and `AppInstance.create(module, memfs, name, ...args)` provide async factory initializers.
-  - Background pre-warming (`toolchain.init()`) begins on application load without freezing UI interactivity.
-
-#### 3.8.4 Production CI/CD Pipeline & Automated Release Packaging
-- **Automated Continuous Integration & Deployment**:
-  - GitHub Actions workflow (`.github/workflows/deploy.yml`) triggers on push to `main`.
-  - Verifies all unit test suites (`npm test`).
-  - Builds the production bundle (`npm run build`).
-  - Deploys static build to GitHub Pages via `actions/deploy-pages`.
-- **Portable Offline Zip Packaging**:
-  - Dedicated script `npm run pack` builds and packages `dist/` into `wasm-c-ide.zip`.
-  - CI workflow uploads the zip archive as a GitHub Actions artifact and publishes it to the repository's **Latest Release** (`softprops/action-gh-release@v2`), allowing users to run the IDE fully offline with any local web server.
-
-### 3.9 Milestone 9: Advanced Shell Pipelines, Stream Redirections & EOF Handling
-
-#### 3.9.1 Pipeline Architecture (`|`)
-- **Sequential Buffer Staging**: Multi-stage pipelines (`cmd1 | cmd2 | cmd3`) are executed sequentially by running stage $k$ to completion, capturing its standard output stream in an in-memory buffer (`Uint8Array` / string), and feeding it as standard input into stage $k+1$.
-- **Cross-Component Composition**: Pipelines seamlessly interleave built-in POSIX utilities and WebAssembly binaries:
-  - `echo "42" | ./a.out` (feeding input directly into a compiled executable)
-  - `cat input.txt | ./a.out` (piping file content to binary standard input)
-  - `./a.out | cat` (piping binary stdout to built-in pager/utility)
-  - `./producer | ./consumer` (chaining two compiled binaries)
-- **Pipeline Exit Status**: The return code of a pipeline is governed by the exit status of its final stage, determining `&&` and `||` branch execution.
-
-#### 3.9.2 Stream Redirections (`<`, `>`, `>>`)
-- **Output Redirection (`>` and `>>`)**:
-  - `> target`: Captures stdout of a built-in or external command and writes it to `target` in the VFS, truncating or creating the file.
-  - `>> target`: Appends stdout to existing file content in the VFS, or creates the file if it does not exist.
-  - VFS file tree UI dynamically re-renders when files in `/workspace` are created or modified via redirection.
-- **Input Redirection (`<`)**:
-  - `< source`: Reads `source` from the VFS and feeds its bytes directly into the command's standard input.
-  - If `source` does not exist in the VFS, command execution aborts immediately with an appropriate error diagnostic (`<source>: No such file or directory`) and non-zero exit code.
-- **Grammar & Quoting Precision**:
-  - Unquoted redirection operators `<`, `>`, and `>>` are extracted during command line parsing without polluting argument arrays.
-  - Redirection operators enclosed within single or double quotes are treated as literal arguments.
-
-#### 3.9.3 Interactive Standard Input Termination (`Ctrl-D` / EOF)
-- **Signal Handling (`\x04`)**:
-  - When the terminal captures `\x04` (`Ctrl-D`) during active `stdin` wait:
-    - If characters exist in `stdinLineBuffer`, the buffer is flushed immediately to the running process without an appended newline.
-    - If `stdinLineBuffer` is empty, `SharedArrayBuffer` control word transitions to `STATE_EOF` (`-1`) followed by `Atomics.notify()`.
-- **WASI Compliance**:
-  - WASI `fd_read` returns `nread = 0` and status `ESUCCESS` (0).
-  - Standard C/C++ interactive loops (`while (scanf(...) == 1)`, `while (cin >> x)`, `getchar() != EOF`) terminate predictably without hanging or UI lockup.
+### 3.10 Unified Terminal Line Editor & Prompt-Safe Stdin Subsystem (`LineEditor`)
+- **Module Location**: `src/terminal/line-editor.js`
+- **Scope & Architectural Role**:
+  - Serves as the single, authoritative terminal line-editing engine for all interactive text input across `wasm-c-ide`.
+  - Mediates between raw `xterm.js` keystrokes and both execution domains:
+    1. **Shell Worker (`shell.worker.js`)**: Interactive POSIX shell prompt (`ide:~$ `) and interactive built-in stdin (`cat`).
+    2. **Runtime Manager (`runtime.js`)**: Interactive standard input for running WebAssembly binaries (`sqlite3`, `scanf`, `fgets`, `cin`).
+- **Prompt-Safe Relative Redrawing Algorithm**:
+  - In CLI applications (such as SQLite's interactive shell `sqlite> `), the process writes its prompt directly to `stdout`. The host does not know the prompt length in advance.
+  - `LineEditor` maintains cursor tracking strictly relative to the user's input line:
+    - **Cursor back-stepping**: When navigating history or clearing text, the editor moves the cursor back by exactly `cursor` columns (`\b.repeat(cursor)`), landing precisely after the application prompt.
+    - **Suffix clearing**: Emits `\x1b[K` to clear from the cursor to the end of the line, leaving the preceding application prompt completely intact.
+    - **Buffer rewriting**: Writes the newly recalled history string or edited buffer, and repositions the cursor.
+- **Keybinding & Navigation Matrix**:
+  - **Horizontal Navigation**: Left Arrow (`\x1b[D`), Right Arrow (`\x1b[C`), Home (`\x1b[H`, `\x1b[1~`, `\x01` / `Ctrl+A`), End (`\x1b[F`, `\x1b[4~`, `\x05` / `Ctrl+E`).
+  - **Text Deletion & Line Manipulation**: Backspace (`\x7f`, `\x08`), Delete (`\x1b[3~`), Kill to end-of-line (`\x0b` / `Ctrl+K`), Clear whole line (`\x15` / `Ctrl+U`).
+  - **History Recall & Scratchpad Preservation**:
+    - Up Arrow (`\x1b[A`): Navigates backward through history. When first moving up from an uncommitted line, saves the current buffer to a scratchpad (`savedScratch`).
+    - Down Arrow (`\x1b[B`): Navigates forward through history. When returning to the bottom of the stack, restores the uncommitted scratchpad.
+  - **Contextual History Isolation**: History stacks are namespaced by context (`'shell'`, `'sqlite3'`, `'default'`). Shell commands (`gcc`, `make`, `ls`) and SQL queries (`SELECT ...;`, `.tables`) remain cleanly segregated.
+- **Signal & Control Key Invariants**:
+  - **`Ctrl-C` (`\x03`)**: Bypasses line buffer insertion and directly triggers process / command interruption via `TerminalManager.prototype.onInterrupt` and `handleStopExecution()`.
+  - **`Ctrl-D` (`\x04`)**:
+    - If the line buffer is non-empty, flushes the partial buffer immediately without a trailing newline.
+    - If the line buffer is empty, signals `STATE_EOF` (`-1`) to `readStdin` to cleanly close interactive CLI tools (e.g. `sqlite3`, `cat`) or prints `exit` at the shell prompt.
+  - **`Tab` (`\t`)**: Passed to pluggable completion hooks (powering file and command completion in the shell worker).
 
 ---
 
-## 4. UI Layout & User Experience
-```
-+---------------------------------------------------------------------------+
-| [Header] App Title | Mode: [Pure C | C++] | Build System: [sh | make]     |
-| [Actions] [💾 Save] [⚙ Compile] [🔨 Build] [▶ Run] [⏹ Stop] | [⚙ Settings] |
-|                                                    [📲 Install PWA (opt)] |
-+-----------------------+---------------------------------------------------+
-| Workspace File Tree   | Editor Tabs: [main.c *] [calc.c]      [- 14px +]  |
-| [📄+] [📁+] [📥] [📤]   +---------------------------------------------------+
-| - src/                | 1 | #include <stdio.h>                            |
-|   - main.c            | 2 | #include "calc.h"                             |
-| - include/            | 3 | int main() { ... }                            |
-|   - calc.h            |                                                   |
-| - build/              +---------------------------------------------------+
-|   - calc.o            | Integrated Terminal (xterm.js)        [- 13px +]  |
-|   - main.o            | ide:~$ pushd . && cd /workspace && gcc ...; popd  |
-| - a.out               | ide:~$ ./a.out                                    |
-| - build.sh / Makefile | Enter number: 42_                                 |
-+-----------------------+---------------------------------------------------+
-```
+## 4. Verification & Testing Checklist
 
-### UI Controls & Ergonomics:
-1. **Sidebar Action Buttons (Icon-Only with Tooltips)**:
-   - **Add File**: Displayed as file-plus icon, with tooltip `New File`.
-   - **Add Folder**: Displayed as folder-plus icon, with tooltip `New Folder`.
-   - **Import Zip**: Displayed as archive upload icon, with tooltip `Import Zip`.
-   - **Export Zip**: Displayed as archive download icon, with tooltip `Export Zip`.
-   - Tooltips are provided via native `title`, `aria-label`, and styled dark-themed CSS tooltips (`data-tooltip`).
-2. **Primary Header Action Buttons (Icon & Text Label)**:
-   - All primary action buttons feature both an SVG icon and a descriptive text label:
-     - **Save**: Floppy disk icon + "Save" (`#btn-save`)
-     - **Compile**: Translation/gear icon + "Compile" (`#btn-compile`)
-     - **Build**: Hammer icon + "Build" (`#btn-build`)
-     - **Run**: Play triangle icon + "Run" (`#btn-run`)
-     - **Stop**: Stop square icon + "Stop" (`#btn-stop`)
-     - **Settings**: Sliders icon + "Settings" (`#btn-settings`)
-3. **Visual Color Hierarchy**:
-   - **Save**: Sky blue / cyan (`#0284c7`)
-   - **Compile**: Violet / purple (`#7c3aed`)
-   - **Build**: Primary blue (`#0e639c`)
-   - **Run**: Success green (`#388a34`)
-   - **Stop**: Danger red (`#c72e2e`)
-4. **Pane Font Zoom Widgets**:
-   - Visual `+` / `-` buttons and clickable font size label displayed in editor tab bar (`.pane-zoom-controls`) and terminal header (`.terminal-actions`).
-   - Clicking size label resets to default size (`14px` for editor, `13px` for terminal).
-5. **Progressive Web App (PWA) Install Prompt**:
-   - In-app install button (`#btn-install`) conditionally rendered in the top header upon receiving browser `beforeinstallprompt` event.
-   - Disappears upon successful installation (`appinstalled` event).
-6. **Draggable Pane Splitter**:
-   - Draggable horizontal separator (`#split-resizer`) between editor and terminal permitting dynamic vertical pane height adjustment.
-
----
-
-## 5. Non-Functional Requirements
-- **Bundle Size Optimization**: Toolchain and assets must be lazy-loaded with clear progress indicators during initial initialization.
-- **Clean Browser Compatibility**: Tested and operable on recent Chromium, Firefox, and Safari (Safari 15.2+ supporting `SharedArrayBuffer`).
-- **No Remote Telemetry**: Strict local client execution; zero remote code telemetry or cloud dependencies.
-- **Sub-Path Hosting Compatibility**: Ready for zero-config sub-directory hosting without hardcoded absolute URLs.
-- **Main-Thread Asynchronous Wasm Compilation**: Zero synchronous instantiation of Wasm modules >8MB on the main thread, ensuring compliance with browser performance constraints.
-- **100% Offline Autonomy**: Full offline PWA execution with Cache-First Service Worker and offline COOP/COEP isolation injection.
-
+| Test Case | Expected Behavior |
+|---|---|
+| **Standard C/C++ Headers Compilation** | Programs including `<cstdio>`, `<cstdlib>`, `<cstring>`, `<cmath>`, `<cctype>`, `<cassert>`, `<iostream>`, `<vector>`, `<string>`, `<algorithm>`, and `<memory>` compile, link, and execute cleanly with `g++` and `clang++` without missing header or unresolved symbol errors. |
+| **Direct VFS Clang Compilation** | `llvm-box.wasm` (`clang`) compiles C source files reading directly from VFS `/workspace` without MemFS. |
+| **Direct VFS LLD Linkage** | `llvm-box.wasm` (`wasm-ld`) links object files and static archives directly from VFS `/lib/wasm32-wasip1` without MemFS. |
+| **Strict Linker Symbol Resolution** | Referencing undefined symbols without linking required libraries causes `wasm-ld` to fail at link time with `undefined symbol: <name>`; whitelisted host imports link without errors. |
+| **Zero-MemFS Asset Download** | `scripts/download-sysroot.js` runs without downloading or referencing `memfs.wasm`. |
+| **Direct Binary Generation** | Compiling `main.c` generates `build/main.o` and `a.out` directly in VFS without copy-out delay. |
+| **Header Probing Performance** | Clang `#include` resolution against 4,300+ sysroot headers executes swiftly via VFS path lookup. |
+| **In-Code Standard File I/O** | `fopen`, `fread`, `fwrite`, `fseek`, `fclose`, and `std::fstream` operate seamlessly via unified `WasiHost`. |
+| **Interactive `scanf` & `Ctrl-D` EOF** | Runtime worker standard input blocks via `SharedArrayBuffer` until Enter; `Ctrl-D` sends EOF cleanly. |
+| **Pipelines & Redirections** | Command pipelines (`|`) and stream redirections (`<`, `>`, `>>`) execute deterministically across stages. |
+| **Static Archiver (`ar rcs`)** | Built-in `ar` creates archives directly in VFS; `wasm-ld` links against them without errors. |
+| **Permanent Sysroot Bundling** | Raylib 5.5, Raylib turtle, and SQLite development files (`raylib.h`, `turtle.h`, `sqlite3.h`, `libraylib.a`, `libturtle.a`, `libsqlite3.a`) mount in sysroot by default. |
+| **Canvas & Raylib Graphics** | Generic framebuffer, 2D vector canvas, and Raylib interactive graphics render at ~60 FPS via zero-copy `ImageBitmap`. |
+| **Turtle Graphics Subsystem** | Both `canvas-wasi` and Raylib turtle backends compile and render progressive animations out-of-the-box. |
+| **SQLite 3 C Compilation & Linking** | Programs including `<sqlite3.h>` compile and link cleanly with `-lsqlite3`, performing transactions with VFS persistence. |
+| **SQLite 3 CLI Execution** | `sqlite3` command executes in terminal against `:memory:` or `/workspace/*.db` with interactive queries and stream redirection. |
+| **Wasm Binary IndexedDB Caching** | First run saves 56MB `ArrayBuffer` to IndexedDB `wasm_modules`; subsequent sessions retrieve from local disk in <100ms with 0 network bytes. |
+| **Cross-Browser DataCloneError Prevention** | Storing raw `ArrayBuffer` in IndexedDB succeeds across Firefox and Chrome without `DataCloneError`. |
+| **Streaming Compilation & Fallback** | `WebAssembly.compileStreaming` compiles chunks concurrently with download; falls back gracefully to `arrayBuffer()`. |
+| **Service Worker Large Asset Delivery** | `llvm-box.wasm` streams directly through Service Worker with COOP/COEP headers without buffer locks or timeout aborts (`The operation was aborted.`). |
+| **Silent Background Pre-Warming** | Background toolchain warmup completes silently without printing to or disrupting the active xterm terminal prompt. |
+| **Detached Floating Terminal Mode** | Floating window snaps to 80x24 standard VT100 dimensions, cycles through presets (100x30, 120x36), supports title dragging with viewport clamping, dynamic minimize/maximize icons (`_` and `□`), and active green glow focus. |
+| **ANSI VT100 & UTF-8 Screen Control** | Programs using ANSI VT100 control sequences and UTF-8 multi-byte characters (box borders, cursor positioning, colors) render crisply in `xterm.js`. |
+| **Synchronous Timer Sleeping** | WASI `poll_oneoff` accurately parses clock events and sleeps synchronously via `Atomics.wait` on `SharedArrayBuffer` without busy looping. |
+| **Collapsible & Resizable Sidebar** | Sidebar freely resizes with smooth col-resize dragging, collapses to 36px slim vertical rail with vertical WORKSPACE label, responds to Ctrl+B, and persists width and collapsed state in localStorage. |
+| **Configurable Run Command** | Project Settings modal configures custom run command with default `pushd . && cd /workspace && ./a.out; popd`, persists in `localStorage`, and injects into xterm on clicking `#btn-run`. |
+| **Unified LineEditor In-Line Navigation** | Left/Right arrows, Home/End, Backspace, Delete, Ctrl+A/E, and Ctrl+K/U operate with accurate cursor positioning without prompt corruption across shell and user binaries. |
+| **Arrow Key History Recall** | Up/Down arrows recall command history and restore uncommitted scratch edits across both shell and runtime. |
+| **Contextual History Isolation** | Shell command history (`gcc`, `ls`) and application query history (`sqlite3`: SQL statements) maintain separate history stacks. |
+| **Interactive SQLite3 Shell Line-Editing** | In `sqlite3` CLI, Up/Down arrows recall previous queries and Left/Right arrows move cursor in place without overwriting or erasing the `sqlite> ` prompt. |
+| **Ctrl-D and Ctrl-C Invariants** | `Ctrl-C` immediately halts running binaries or interrupts the shell, while `Ctrl-D` cleanly terminates interactive sessions (`sqlite3`, `cat`) or sends EOF without input corruption. |

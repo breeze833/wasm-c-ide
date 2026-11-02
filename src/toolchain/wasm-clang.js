@@ -137,6 +137,20 @@ export class WasmToolchain {
                 this.vfs.writeFile(`/lib/wasm32-wasip1/${libName}`, entry.contents, Date.now(), true);
               }
             }
+
+            // Mirror all C headers to /usr/include and /include so students have complete access
+            if (cleanName.startsWith('include/wasm32-wasip1/')) {
+              const sub = cleanName.substring('include/wasm32-wasip1/'.length);
+              if (sub && !sub.startsWith('c++/')) {
+                this.vfs.writeFile(`/usr/include/${sub}`, entry.contents, Date.now(), true);
+                this.vfs.writeFile(`/include/${sub}`, entry.contents, Date.now(), true);
+              }
+            } else if (cleanName.startsWith('include/')) {
+              const sub = cleanName.substring('include/'.length);
+              if (sub && !sub.startsWith('wasm32-') && !sub.startsWith('c++/')) {
+                this.vfs.writeFile(`/usr/include/${sub}`, entry.contents, Date.now(), true);
+              }
+            }
           }
         }
       }
@@ -449,18 +463,28 @@ export class WasmToolchain {
       stageFlag,
       '-disable-free',
       '-isysroot', '/',
-      '-internal-isystem', '/include',
-      '-internal-isystem', '/include/wasm32-wasip1',
-      '-internal-isystem', '/usr/include',
+    ];
+
+    if (mode === 'cpp') {
+      args.push(
+        '-internal-isystem', '/include/wasm32-wasip1/c++/v1',
+        '-internal-isystem', '/include/c++/v1',
+      );
+    }
+
+    args.push(
       '-internal-isystem', '/lib/clang/19/include',
       '-internal-isystem', '/lib/clang/19.1.0/include',
       '-internal-isystem', '/lib/clang/8.0.1/include',
+      '-internal-isystem', '/include/wasm32-wasip1',
+      '-internal-isystem', '/include',
+      '-internal-isystem', '/usr/include',
       '-I', '/workspace/include',
       '-I', '/workspace',
       '-ferror-limit', '19',
       '-fmessage-length=80',
       '-fcolor-diagnostics',
-    ];
+    );
 
     // Filter and map PIC flags
     const processedFlags = [];

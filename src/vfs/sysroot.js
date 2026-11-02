@@ -409,6 +409,193 @@ extern int errno;
 
 #endif /* _ERRNO_H */
 `,
+  'limits.h': `/* Minimal limits.h */
+#ifndef _LIMITS_H
+#define _LIMITS_H
+
+#define CHAR_BIT 8
+#define SCHAR_MIN (-128)
+#define SCHAR_MAX 127
+#define UCHAR_MAX 255
+#define CHAR_MIN (-128)
+#define CHAR_MAX 127
+#define SHRT_MIN (-32768)
+#define SHRT_MAX 32767
+#define USHRT_MAX 65535
+#define INT_MIN (-2147483647 - 1)
+#define INT_MAX 2147483647
+#define UINT_MAX 4294967295U
+#define LONG_MIN (-9223372036854775807L - 1L)
+#define LONG_MAX 9223372036854775807L
+#define ULONG_MAX 18446744073709551615UL
+#define LLONG_MIN (-9223372036854775807LL - 1LL)
+#define LLONG_MAX 9223372036854775807LL
+#define ULLONG_MAX 18446744073709551615ULL
+#define PATH_MAX 4096
+
+#endif /* _LIMITS_H */
+`,
+
+  'float.h': `/* Minimal float.h */
+#ifndef _FLOAT_H
+#define _FLOAT_H
+
+#define FLT_RADIX 2
+#define FLT_MANT_DIG 24
+#define FLT_DIG 6
+#define FLT_ROUNDS 1
+#define FLT_EPSILON 1.19209290e-7F
+#define FLT_MIN 1.17549435e-38F
+#define FLT_MAX 3.40282347e+38F
+
+#define DBL_MANT_DIG 53
+#define DBL_DIG 15
+#define DBL_EPSILON 2.2204460492503131e-16
+#define DBL_MIN 2.2250738585072014e-308
+#define DBL_MAX 1.7976931348623157e+308
+
+#endif /* _FLOAT_H */
+`,
+
+  'inttypes.h': `/* Minimal inttypes.h */
+#ifndef _INTTYPES_H
+#define _INTTYPES_H
+#include <stdint.h>
+
+#define PRId32 "d"
+#define PRIu32 "u"
+#define PRIx32 "x"
+#define PRId64 "lld"
+#define PRIu64 "llu"
+#define PRIx64 "llx"
+#define SCNd32 "d"
+#define SCNu32 "u"
+#define SCNd64 "lld"
+#define SCNu64 "llu"
+
+#endif /* _INTTYPES_H */
+`,
+
+  'fcntl.h': `/* Minimal fcntl.h */
+#ifndef _FCNTL_H
+#define _FCNTL_H
+
+#define O_RDONLY 0
+#define O_WRONLY 1
+#define O_RDWR   2
+#define O_CREAT  0100
+#define O_EXCL   0200
+#define O_TRUNC  01000
+#define O_APPEND 02000
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int open(const char *pathname, int flags, ...);
+int creat(const char *pathname, mode_t mode);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* _FCNTL_H */
+`,
+
+  'sys/stat.h': `/* Minimal sys/stat.h */
+#ifndef _SYS_STAT_H
+#define _SYS_STAT_H
+
+typedef unsigned int mode_t;
+typedef unsigned long ino_t;
+typedef unsigned long dev_t;
+typedef unsigned int nlink_t;
+typedef unsigned int uid_t;
+typedef unsigned int gid_t;
+typedef long off_t;
+typedef long time_t;
+
+struct stat {
+  dev_t st_dev;
+  ino_t st_ino;
+  mode_t st_mode;
+  nlink_t st_nlink;
+  uid_t st_uid;
+  gid_t st_gid;
+  off_t st_size;
+  time_t st_atime;
+  time_t st_mtime;
+  time_t st_ctime;
+};
+
+#define S_IFMT  0170000
+#define S_IFDIR 0040000
+#define S_IFREG 0100000
+
+#define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
+#define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int stat(const char *pathname, struct stat *statbuf);
+int fstat(int fd, struct stat *statbuf);
+int mkdir(const char *pathname, mode_t mode);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* _SYS_STAT_H */
+`,
+
+  'sys/types.h': `/* Minimal sys/types.h */
+#ifndef _SYS_TYPES_H
+#define _SYS_TYPES_H
+
+typedef unsigned long size_t;
+typedef long ssize_t;
+typedef long off_t;
+typedef unsigned int mode_t;
+typedef int pid_t;
+typedef unsigned int uid_t;
+typedef unsigned int gid_t;
+typedef long time_t;
+
+#endif /* _SYS_TYPES_H */
+`,
+
+  'dirent.h': `/* Minimal dirent.h */
+#ifndef _DIRENT_H
+#define _DIRENT_H
+
+typedef struct DIR DIR;
+
+struct dirent {
+  unsigned long d_ino;
+  unsigned char d_type;
+  char d_name[256];
+};
+
+#define DT_UNKNOWN 0
+#define DT_DIR 4
+#define DT_REG 8
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+DIR *opendir(const char *name);
+struct dirent *readdir(DIR *dirp);
+int closedir(DIR *dirp);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* _DIRENT_H */
+`,
 
   'graphics.h': GRAPHICS_H,
   'graphics_canvas.h': GRAPHICS_CANVAS_H,
@@ -425,6 +612,353 @@ extern int errno;
 export { TURTLE_HEADERS, RAYLIB_HEADERS, SQLITE_HEADERS };
 
 export const STANDARD_CPP_HEADERS = {
+  'cstdio': `// Minimal C++ cstdio header
+#ifndef _CSTDIO_
+#define _CSTDIO_
+#include <stdio.h>
+namespace std {
+    using ::FILE;
+    using ::size_t;
+    using ::printf;
+    using ::fprintf;
+    using ::sprintf;
+    using ::snprintf;
+    using ::scanf;
+    using ::sscanf;
+    using ::fscanf;
+    using ::putchar;
+    using ::puts;
+    using ::fputc;
+    using ::fputs;
+    using ::getchar;
+    using ::fgets;
+    using ::fgetc;
+    using ::fopen;
+    using ::fclose;
+    using ::fread;
+    using ::fwrite;
+    using ::fflush;
+    using ::fseek;
+    using ::ftell;
+    using ::feof;
+    using ::ferror;
+    using ::perror;
+    using ::remove;
+    using ::rename;
+}
+#endif
+`,
+
+  'cstdlib': `// Minimal C++ cstdlib header
+#ifndef _CSTDLIB_
+#define _CSTDLIB_
+#include <stdlib.h>
+namespace std {
+    using ::size_t;
+    using ::malloc;
+    using ::calloc;
+    using ::realloc;
+    using ::free;
+    using ::abort;
+    using ::exit;
+    using ::atexit;
+    using ::atoi;
+    using ::atol;
+    using ::atof;
+    using ::strtol;
+    using ::strtoul;
+    using ::strtod;
+    using ::rand;
+    using ::srand;
+    using ::abs;
+    using ::labs;
+    using ::qsort;
+    using ::bsearch;
+}
+#endif
+`,
+
+  'cstring': `// Minimal C++ cstring header
+#ifndef _CSTRING_
+#define _CSTRING_
+#include <string.h>
+namespace std {
+    using ::size_t;
+    using ::memcpy;
+    using ::memmove;
+    using ::memset;
+    using ::memcmp;
+    using ::memchr;
+    using ::strlen;
+    using ::strcpy;
+    using ::strncpy;
+    using ::strcat;
+    using ::strncat;
+    using ::strcmp;
+    using ::strncmp;
+    using ::strchr;
+    using ::strrchr;
+    using ::strstr;
+    using ::strtok;
+    using ::strerror;
+}
+#endif
+`,
+
+  'cmath': `// Minimal C++ cmath header
+#ifndef _CMATH_
+#define _CMATH_
+#include <math.h>
+namespace std {
+    using ::sin;
+    using ::cos;
+    using ::tan;
+    using ::asin;
+    using ::acos;
+    using ::atan;
+    using ::atan2;
+    using ::sinh;
+    using ::cosh;
+    using ::tanh;
+    using ::exp;
+    using ::log;
+    using ::log10;
+    using ::pow;
+    using ::sqrt;
+    using ::ceil;
+    using ::floor;
+    using ::fabs;
+    using ::fmod;
+}
+#endif
+`,
+
+  'cctype': `// Minimal C++ cctype header
+#ifndef _CCTYPE_
+#define _CCTYPE_
+#include <ctype.h>
+namespace std {
+    using ::isalnum;
+    using ::isalpha;
+    using ::iscntrl;
+    using ::isdigit;
+    using ::isgraph;
+    using ::islower;
+    using ::isprint;
+    using ::ispunct;
+    using ::isspace;
+    using ::isupper;
+    using ::isxdigit;
+    using ::tolower;
+    using ::toupper;
+}
+#endif
+`,
+
+  'cstddef': `// Minimal C++ cstddef header
+#ifndef _CSTDDEF_
+#define _CSTDDEF_
+#include <stddef.h>
+namespace std {
+    using ::ptrdiff_t;
+    using ::size_t;
+}
+#endif
+`,
+
+  'cstdint': `// Minimal C++ cstdint header
+#ifndef _CSTDINT_
+#define _CSTDINT_
+#include <stdint.h>
+namespace std {
+    using ::int8_t;
+    using ::int16_t;
+    using ::int32_t;
+    using ::int64_t;
+    using ::uint8_t;
+    using ::uint16_t;
+    using ::uint32_t;
+    using ::uint64_t;
+    using ::intptr_t;
+    using ::uintptr_t;
+}
+#endif
+`,
+
+  'cassert': `// Minimal C++ cassert header
+#ifndef _CASSERT_
+#define _CASSERT_
+#include <assert.h>
+#endif
+`,
+
+  'ctime': `// Minimal C++ ctime header
+#ifndef _CTIME_
+#define _CTIME_
+#include <time.h>
+namespace std {
+    using ::clock_t;
+    using ::time_t;
+    using ::tm;
+    using ::clock;
+    using ::time;
+    using ::difftime;
+    using ::mktime;
+    using ::asctime;
+    using ::ctime;
+    using ::gmtime;
+    using ::localtime;
+    using ::strftime;
+}
+#endif
+`,
+
+  'climits': `// Minimal C++ climits header
+#ifndef _CLIMITS_
+#define _CLIMITS_
+#include <limits.h>
+#endif
+`,
+
+  'cfloat': `// Minimal C++ cfloat header
+#ifndef _CFLOAT_
+#define _CFLOAT_
+#include <float.h>
+#endif
+`,
+
+  'cerrno': `// Minimal C++ cerrno header
+#ifndef _CERRNO_
+#define _CERRNO_
+#include <errno.h>
+#endif
+`,
+
+  'algorithm': `// Minimal C++ algorithm header
+#ifndef _ALGORITHM_
+#define _ALGORITHM_
+#include <utility>
+namespace std {
+    template <typename T>
+    inline const T& min(const T& a, const T& b) {
+        return (b < a) ? b : a;
+    }
+    template <typename T>
+    inline const T& max(const T& a, const T& b) {
+        return (a < b) ? b : a;
+    }
+    template <typename T>
+    inline void swap(T& a, T& b) {
+        T tmp = static_cast<T&&>(a);
+        a = static_cast<T&&>(b);
+        b = static_cast<T&&>(tmp);
+    }
+    template <typename Iter, typename T>
+    inline Iter find(Iter first, Iter last, const T& val) {
+        for (; first != last; ++first) {
+            if (*first == val) return first;
+        }
+        return last;
+    }
+    template <typename Iter>
+    inline void reverse(Iter first, Iter last) {
+        while (first != last && first != --last) {
+            std::swap(*first++, *last);
+        }
+    }
+    template <typename Iter>
+    inline void sort(Iter first, Iter last) {
+        for (Iter i = first; i != last; ++i) {
+            for (Iter j = first; j < last - 1; ++j) {
+                if (*(j + 1) < *j) {
+                    std::swap(*j, *(j + 1));
+                }
+            }
+        }
+    }
+}
+#endif
+`,
+
+  'utility': `// Minimal C++ utility header
+#ifndef _UTILITY_
+#define _UTILITY_
+namespace std {
+    template <typename T>
+    struct remove_reference { typedef T type; };
+    template <typename T>
+    struct remove_reference<T&> { typedef T type; };
+    template <typename T>
+    struct remove_reference<T&&> { typedef T type; };
+
+    template <typename T>
+    constexpr T&& forward(typename std::remove_reference<T>::type& t) noexcept {
+        return static_cast<T&&>(t);
+    }
+    template <typename T>
+    constexpr typename std::remove_reference<T>::type&& move(T&& t) noexcept {
+        return static_cast<typename std::remove_reference<T>::type&&>(t);
+    }
+    template <typename T1, typename T2>
+    struct pair {
+        T1 first;
+        T2 second;
+        pair() : first(), second() {}
+        pair(const T1& a, const T2& b) : first(a), second(b) {}
+    };
+    template <typename T1, typename T2>
+    inline pair<T1, T2> make_pair(T1 a, T2 b) {
+        return pair<T1, T2>(a, b);
+    }
+}
+#endif
+`,
+
+  'memory': `// Minimal C++ memory header
+#ifndef _MEMORY_
+#define _MEMORY_
+#include <utility>
+namespace std {
+    template <typename T>
+    class unique_ptr {
+    private:
+        T* _ptr;
+    public:
+        explicit unique_ptr(T* p = nullptr) : _ptr(p) {}
+        ~unique_ptr() { delete _ptr; }
+        unique_ptr(const unique_ptr&) = delete;
+        unique_ptr& operator=(const unique_ptr&) = delete;
+        unique_ptr(unique_ptr&& other) noexcept : _ptr(other._ptr) { other._ptr = nullptr; }
+        unique_ptr& operator=(unique_ptr&& other) noexcept {
+            if (this != &other) {
+                delete _ptr;
+                _ptr = other._ptr;
+                other._ptr = nullptr;
+            }
+            return *this;
+        }
+        T& operator*() const { return *_ptr; }
+        T* operator->() const { return _ptr; }
+        T* get() const { return _ptr; }
+        explicit operator bool() const { return _ptr != nullptr; }
+        T* release() {
+            T* tmp = _ptr;
+            _ptr = nullptr;
+            return tmp;
+        }
+        void reset(T* p = nullptr) {
+            delete _ptr;
+            _ptr = p;
+        }
+    };
+    template <typename T, typename... Args>
+    inline unique_ptr<T> make_unique(Args&&... args) {
+        return unique_ptr<T>(new T(static_cast<Args&&>(args)...));
+    }
+}
+#endif
+`,
+
   'iostream': `// Minimal C++ iostream header
 #ifndef _IOSTREAM_
 #define _IOSTREAM_

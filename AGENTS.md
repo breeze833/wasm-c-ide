@@ -18,14 +18,16 @@ You are an autonomous senior systems and web engineer implementing the project s
 
 ```
 /
-├── SPEC.md                    # Technical specification & architectural ground truth (v1 baseline)
-├── SPECv2.md                  # Extended technical specification with Raylib 5.5 graphics
-├── SPECv3.md                  # Extended technical specification with LLVM 19 WASI toolchain
-├── SPECv4.md                  # Extended technical specification with decoupled raylib-wasi & in-code file I/O
-├── SPECv5.md                  # Extended technical specification with Zero-MemFS Unified VFS WASI Host
+├── SPEC.md                    # Technical specification & architectural ground truth
 ├── AGENTS.md                  # Agent operating protocols (this file)
-├── KNOWN_ISSUES.md            # Documented toolchain version gaps, limits, and MemFS invariants
 ├── README.md                  # User-facing project documentation & deployment guides
+├── docs/                      # Project documentation and historical specifications
+│   ├── KNOWN_ISSUES.md        # Documented toolchain version gaps, limits, and MemFS invariants
+│   └── archived/              # Historical technical specifications (v1 baseline through v4)
+│       ├── SPECv1.md
+│       ├── SPECv2.md
+│       ├── SPECv3.md
+│       └── SPECv4.md
 ├── examples/                  # Bundled pedagogical single-file C examples & guide
 │   ├── 01_stdio.c             # Standard I/O console menu demo
 │   ├── 02_raylib_interactive.c # Interactive Raylib 5.5 GLES2 graphics demo
@@ -247,7 +249,7 @@ Agents executing this project should proceed milestone-by-milestone:
 
 
 ### Milestone 16: Zero-MemFS Unified VFS WASI Host Architecture
-- Author and enforce `SPECv5.md` as the ground truth architectural specification.
+- Author and enforce `SPEC.md` as the ground truth architectural specification.
 - Eliminate `memfs.wasm` dependency entirely from both compiler toolchain and runtime worker:
   - Remove `memfs.wasm` download, loading, instantiation, and MemFS memory bridging.
   - Implement `src/vfs/wasi-host.js` as the single, canonical, zero-dependency WASI Preview 1 host.
