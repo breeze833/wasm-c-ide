@@ -187,18 +187,40 @@ console.log('--- Running Project Settings Upgrade System Unit Tests ---');
     }
   };
 
-  // Mock ServiceWorker registration via Object.defineProperty
-  Object.defineProperty(globalThis.navigator, 'serviceWorker', {
-    value: {
-      getRegistration: async () => ({
-        update: async () => {
-          swUpdated = true;
-        }
-      })
-    },
-    configurable: true,
-    writable: true
-  });
+  // Mock ServiceWorker registration (handling Node 20 where navigator is undefined, and Node 21+ where it is an object)
+  if (!globalThis.navigator) {
+    globalThis.navigator = {
+      serviceWorker: {
+        getRegistration: async () => ({
+          update: async () => {
+            swUpdated = true;
+          }
+        })
+      }
+    };
+  } else {
+    try {
+      globalThis.navigator.serviceWorker = {
+        getRegistration: async () => ({
+          update: async () => {
+            swUpdated = true;
+          }
+        })
+      };
+    } catch {
+      Object.defineProperty(globalThis.navigator, 'serviceWorker', {
+        value: {
+          getRegistration: async () => ({
+            update: async () => {
+              swUpdated = true;
+            }
+          })
+        },
+        configurable: true,
+        writable: true
+      });
+    }
+  }
 
   // Mock window.location.reload
   globalThis.window = {
@@ -221,7 +243,11 @@ console.log('--- Running Project Settings Upgrade System Unit Tests ---');
   delete globalThis.caches;
   delete globalThis.window;
   delete globalThis.indexedDB;
-  delete globalThis.navigator.serviceWorker;
+  if (globalThis.navigator) {
+    try {
+      delete globalThis.navigator.serviceWorker;
+    } catch {}
+  }
 
   console.log('✓ upgradeSystemFiles correctly purges wasm-cache and CacheStorage and initiates reload');
 }
