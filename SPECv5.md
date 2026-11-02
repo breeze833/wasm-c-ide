@@ -25,6 +25,12 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
   - **`raylib-wasi`**: Standalone Raylib 5.5 port and WebGL ES 2.0 host bridge, providing Wasm imports (`gl`, `raylib`) and zero-Emscripten `PLATFORM_CUSTOM` execution.
 - **Turtle Graphics Subsystem (`libturtle`)**: Modular educational turtle graphics with dual backend support (Canvas-WASI and Raylib backends both permanently bundled into sysroot out-of-the-box).
 - **SQLite 3 Embedded Database & CLI Subsystem (`sqlite-wasi`)**: Precompiled SQLite 3.54.1 WASI Preview 1 static library (`libsqlite3.a`), C headers (`sqlite3.h`, `sqlite3ext.h`), and standalone interactive CLI (`sqlite3.wasm` mounted at `/usr/bin/sqlite3`) bundled permanently into sysroot out-of-the-box, supporting SQL relational databases with real-time VFS persistence.
+- **Unified Terminal Line Editor & Interactive Stdin Subsystem (`LineEditor`)**:
+  - Zero-dependency prompt-safe line editor (`src/terminal/line-editor.js`) that unifies terminal input handling across the shell prompt (`ide:~$ `), interactive shell builtins (`cat`), and running WASI binaries (`sqlite3`, `scanf`, `fgets`).
+  - Supports full in-line cursor movement (Left/Right arrows, Home/End, Ctrl+A/E), text editing (Backspace, Delete, Ctrl+K, Ctrl+U), and Up/Down arrow history recall with uncommitted scratch edit preservation.
+  - Prompt-safe relative cursor redrawing ensures external/process prompts (such as `sqlite> `) are never overwritten or corrupted during history navigation.
+  - Contextual history isolation maintains distinct history rings for shell commands versus application-level queries (e.g. `sqlite3`).
+  - Strict preservation of `Ctrl-C` interrupt, `Ctrl-D` EOF handling, and Tab completion.
 - **Toolchain Startup Acceleration & IndexedDB Binary Persistence**:
   - Eliminates slow remote downloads and compilation freezes on repeated IDE visits.
   - Streaming compilation (`WebAssembly.compileStreaming`) compiles bytecode concurrently as network chunks stream over the wire.
@@ -48,9 +54,14 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 |  +-------------+----------------------------------+------------------+  | canvas-    |  |
 |  |               xterm.js Virtual Terminal & Zoom (+/-)              |  | wasi UI)   |  |
 |  +------------------------------------+------------------------------+  +-----+------+  |
-+---------------------------------------|---------------------------------------|---------+
-                                        | (Pty Stdin / Stdout stream)           | (Zero-copy
-+---------------------------------------v---------------------------------------v--+     ImageBitmap)
+|                                       | (Keystrokes & ANSI Escapes)           |         |
+|                       +---------------v---------------+                       |         |
+|                       |   Unified LineEditor Engine   |                       |         |
+|                       | (History, Cursor Nav, Editing)|                       |         |
+|                       +-------+---------------+-------+                       |         |
++-------------------------------|---------------|-------------------------------|---------+
+                                |               |                               | (Zero-copy
++-------------------------------v---------------v-------------------------------v--+ ImageBitmap)
 |                         Web Worker Execution Sandboxes                           |
 |                                                                                  |
 |  +--------------------------+          +--------------------------------------+  |
@@ -140,9 +151,14 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 ### 3.3 Runtime & Interactive Standard I/O
 - Target binaries run in `runtime.worker.js` using `WasiHost`.
 - Standard input (`stdin`):
-  - Handled via `SharedArrayBuffer` and `Atomics.wait()` for synchronous `scanf` / `cin` / `getchar`.
+  - Handled via `SharedArrayBuffer` and `Atomics.wait()` on the worker thread for synchronous `scanf` / `cin` / `getchar` / `fgets`.
   - Seamless fallback to preloaded buffer for `<` redirection and pipeline chaining (`|`).
-  - `Ctrl-D` transmits `STATE_EOF` (`-1`) signaling EOF cleanly.
+  - Integrated with the host-side `LineEditor` (`src/terminal/line-editor.js`):
+    - When a user binary requests interactive stdin, all terminal keystrokes pass through `RuntimeManager.prototype.handleTerminalInput()`.
+    - Enables full in-line editing (Left/Right arrows, Home/End, Backspace, Delete) and Up/Down arrow history recall for interactive console applications.
+    - Contextual history isolation automatically binds to the running binary name (`argv[0]`, e.g. `'sqlite3'` or `'a.out'`), preventing cross-contamination with shell commands.
+    - `Ctrl-D` (`\x04`): If the input buffer contains uncommitted text, flushes the buffer immediately without a trailing newline; if the buffer is empty, transmits `STATE_EOF` (`-1`) signaling EOF cleanly to `readStdin`.
+    - `Enter` (`\r`, `\n`): Commits the line into history, writes the string with `\n` to `SharedArrayBuffer`, and issues `Atomics.notify()` to resume the worker thread.
 - Real-time VFS sync:
   - File operations (`fopen`, `<fstream>`, `fwrite`, `remove`, `rename`) directly update `VFS` and emit real-time event notifications (`file_sync`, `file_delete`) to refresh Monaco editor tabs and the File Tree UI.
 
@@ -219,6 +235,36 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
   - Invoked directly in the xterm terminal: `sqlite3 [database-file] [sql]`.
   - Seamlessly interoperates with shell pipelines and input/output stream redirections (`<`, `>`, `>>`, `|`).
   - File operations on database files (`demo.db`) inside `/workspace` synchronize in real-time to the host VFS and File Tree UI.
+  - **Interactive Shell Line-Editing & Arrow Keys Support**:
+    - Standard SQLite `shell.c` falls back to `fgets()` under WASI Preview 1 due to the lack of POSIX `<termios.h>` raw terminal control. `wasm-c-ide` overcomes this by providing transparent host-side line-editing and history recall via `LineEditor`.
+    - Users can press Up/Down arrows to recall previous SQL queries and Left/Right arrows, Home, End, Backspace, and Delete to edit in place without corrupting or overwriting the `sqlite> ` prompt.
+
+### 3.10 Unified Terminal Line Editor & Prompt-Safe Stdin Subsystem (`LineEditor`)
+- **Module Location**: `src/terminal/line-editor.js`
+- **Scope & Architectural Role**:
+  - Serves as the single, authoritative terminal line-editing engine for all interactive text input across `wasm-c-ide`.
+  - Mediates between raw `xterm.js` keystrokes and both execution domains:
+    1. **Shell Worker (`shell.worker.js`)**: Interactive POSIX shell prompt (`ide:~$ `) and interactive built-in stdin (`cat`).
+    2. **Runtime Manager (`runtime.js`)**: Interactive standard input for running WebAssembly binaries (`sqlite3`, `scanf`, `fgets`, `cin`).
+- **Prompt-Safe Relative Redrawing Algorithm**:
+  - In CLI applications (such as SQLite's interactive shell `sqlite> `), the process writes its prompt directly to `stdout`. The host does not know the prompt length in advance.
+  - `LineEditor` maintains cursor tracking strictly relative to the user's input line:
+    - **Cursor back-stepping**: When navigating history or clearing text, the editor moves the cursor back by exactly `cursor` columns (`\b.repeat(cursor)`), landing precisely after the application prompt.
+    - **Suffix clearing**: Emits `\x1b[K` to clear from the cursor to the end of the line, leaving the preceding application prompt completely intact.
+    - **Buffer rewriting**: Writes the newly recalled history string or edited buffer, and repositions the cursor.
+- **Keybinding & Navigation Matrix**:
+  - **Horizontal Navigation**: Left Arrow (`\x1b[D`), Right Arrow (`\x1b[C`), Home (`\x1b[H`, `\x1b[1~`, `\x01` / `Ctrl+A`), End (`\x1b[F`, `\x1b[4~`, `\x05` / `Ctrl+E`).
+  - **Text Deletion & Line Manipulation**: Backspace (`\x7f`, `\x08`), Delete (`\x1b[3~`), Kill to end-of-line (`\x0b` / `Ctrl+K`), Clear whole line (`\x15` / `Ctrl+U`).
+  - **History Recall & Scratchpad Preservation**:
+    - Up Arrow (`\x1b[A`): Navigates backward through history. When first moving up from an uncommitted line, saves the current buffer to a scratchpad (`savedScratch`).
+    - Down Arrow (`\x1b[B`): Navigates forward through history. When returning to the bottom of the stack, restores the uncommitted scratchpad.
+  - **Contextual History Isolation**: History stacks are namespaced by context (`'shell'`, `'sqlite3'`, `'default'`). Shell commands (`gcc`, `make`, `ls`) and SQL queries (`SELECT ...;`, `.tables`) remain cleanly segregated.
+- **Signal & Control Key Invariants**:
+  - **`Ctrl-C` (`\x03`)**: Bypasses line buffer insertion and directly triggers process / command interruption via `TerminalManager.prototype.onInterrupt` and `handleStopExecution()`.
+  - **`Ctrl-D` (`\x04`)**:
+    - If the line buffer is non-empty, flushes the partial buffer immediately without a trailing newline.
+    - If the line buffer is empty, signals `STATE_EOF` (`-1`) to `readStdin` to cleanly close interactive CLI tools (e.g. `sqlite3`, `cat`) or prints `exit` at the shell prompt.
+  - **`Tab` (`\t`)**: Passed to pluggable completion hooks (powering file and command completion in the shell worker).
 
 ---
 
@@ -251,3 +297,8 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 | **Synchronous Timer Sleeping** | WASI `poll_oneoff` accurately parses clock events and sleeps synchronously via `Atomics.wait` on `SharedArrayBuffer` without busy looping. |
 | **Collapsible & Resizable Sidebar** | Sidebar freely resizes with smooth col-resize dragging, collapses to 36px slim vertical rail with vertical WORKSPACE label, responds to Ctrl+B, and persists width and collapsed state in localStorage. |
 | **Configurable Run Command** | Project Settings modal configures custom run command with default `pushd . && cd /workspace && ./a.out; popd`, persists in `localStorage`, and injects into xterm on clicking `#btn-run`. |
+| **Unified LineEditor In-Line Navigation** | Left/Right arrows, Home/End, Backspace, Delete, Ctrl+A/E, and Ctrl+K/U operate with accurate cursor positioning without prompt corruption across shell and user binaries. |
+| **Arrow Key History Recall** | Up/Down arrows recall command history and restore uncommitted scratch edits across both shell and runtime. |
+| **Contextual History Isolation** | Shell command history (`gcc`, `ls`) and application query history (`sqlite3`: SQL statements) maintain separate history stacks. |
+| **Interactive SQLite3 Shell Line-Editing** | In `sqlite3` CLI, Up/Down arrows recall previous queries and Left/Right arrows move cursor in place without overwriting or erasing the `sqlite> ` prompt. |
+| **Ctrl-D and Ctrl-C Invariants** | `Ctrl-C` immediately halts running binaries or interrupts the shell, while `Ctrl-D` cleanly terminates interactive sessions (`sqlite3`, `cat`) or sends EOF without input corruption. |

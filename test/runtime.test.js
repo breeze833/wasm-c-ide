@@ -223,7 +223,24 @@ console.log('✓ Process EOF termination state verified');
     assert.strictEqual(rm.stdinLineBuffer, '');
     assert.strictEqual(rm.isWaitingForStdin, false);
 
-    console.log('✓ RuntimeManager stdin_request and handleTerminalInput verified');
+    // Simulate next stdin request: Up Arrow recalls previously committed line 'h'
+    rm.isWaitingForStdin = true;
+    assert.strictEqual(rm.handleTerminalInput('\x1b[A'), true);
+    assert.strictEqual(rm.stdinLineBuffer, 'h');
+
+    // Left Arrow moves cursor back
+    assert.strictEqual(rm.handleTerminalInput('\x1b[D'), true);
+    assert.strictEqual(rm.lineEditor.getCursor(), 0);
+
+    // Type 'a' at start -> 'ah'
+    assert.strictEqual(rm.handleTerminalInput('a'), true);
+    assert.strictEqual(rm.stdinLineBuffer, 'ah');
+
+    // Enter commits 'ah'
+    assert.strictEqual(rm.handleTerminalInput('\r'), true);
+    assert.strictEqual(rm.stdinLineBuffer, '');
+
+    console.log('✓ RuntimeManager stdin_request, handleTerminalInput, and arrow key recall verified');
     console.log('--- ALL RUNTIME TESTS PASSED ---');
   });
 }

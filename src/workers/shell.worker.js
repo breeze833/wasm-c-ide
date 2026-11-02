@@ -1,12 +1,15 @@
 // Web Worker: Interactive Hybrid POSIX Shell
 // Handles command editing, history, tab completion, built-in utilities, and command interception
 
+import { LineEditor } from '../terminal/line-editor.js';
+
 let cwd = '/workspace';
-let lineBuffer = '';
-let cursorPos = 0;
-const history = [];
-let historyIndex = -1;
 let isExecuting = false;
+
+const shellEditor = new LineEditor({
+  write: (str) => write(str),
+  historyContext: 'shell',
+});
 
 // RPC bridge to main thread VFS & Toolchain
 let rpcCounter = 0;
@@ -46,9 +49,7 @@ function getPrompt() {
 }
 
 function showPrompt() {
-  lineBuffer = '';
-  cursorPos = 0;
-  historyIndex = -1;
+  shellEditor.reset();
   write(getPrompt());
 }
 
@@ -791,8 +792,9 @@ function parseCommandChain(line) {
 
 // Autocompletion
 async function handleTabCompletion() {
-  const tokens = parseArgs(lineBuffer);
-  const lastToken = tokens.length > 0 && !lineBuffer.endsWith(' ') ? tokens[tokens.length - 1] : '';
+  const currentLine = shellEditor.getBuffer();
+  const tokens = parseArgs(currentLine);
+  const lastToken = tokens.length > 0 && !currentLine.endsWith(' ') ? tokens[tokens.length - 1] : '';
 
   let searchDir = cwd;
   let prefix = lastToken;
@@ -811,13 +813,14 @@ async function handleTabCompletion() {
     if (matches.length === 1) {
       const match = matches[0];
       const completion = match.name.substring(prefix.length) + (match.isDir ? '/' : ' ');
-      lineBuffer += completion;
-      cursorPos += completion.length;
-      write(completion);
+      shellEditor.feed(completion);
     } else if (matches.length > 1) {
       writeln('');
       writeln(matches.map(m => m.name + (m.isDir ? '/' : '')).join('  '));
-      write(getPrompt() + lineBuffer);
+      write(getPrompt() + shellEditor.getBuffer());
+      if (shellEditor.getCursor() < shellEditor.getBuffer().length) {
+        write('\b'.repeat(shellEditor.getBuffer().length - shellEditor.getCursor()));
+      }
     }
   } catch {}
 }
@@ -1061,19 +1064,25 @@ async function executeCommandLine(commandStr) {
 }
 
 let activeStdinReader = null;
+let stdinEditor = null;
 
 function readInteractiveStdin(onLine) {
   return new Promise((resolve, reject) => {
+    stdinEditor = new LineEditor({
+      write: (s) => self.postMessage({ type: 'term_write', data: s }),
+      historyContext: 'interactive_stdin',
+    });
     activeStdinReader = {
-      currentLine: '',
       allText: '',
       onLine,
       resolve: (val) => {
         activeStdinReader = null;
+        stdinEditor = null;
         resolve(val);
       },
       reject: (err) => {
         activeStdinReader = null;
+        stdinEditor = null;
         reject(err);
       },
     };
@@ -1081,61 +1090,44 @@ function readInteractiveStdin(onLine) {
 }
 
 function handleInteractiveStdinKey(key) {
-  if (!activeStdinReader) return;
+  if (!activeStdinReader || !stdinEditor) return;
 
-  for (let i = 0; i < key.length; i++) {
-    if (!activeStdinReader) return;
-    const ch = key[i];
-
-    // Ctrl+C
-    if (ch === '\x03') {
-      self.postMessage({ type: 'term_write', data: '^C\r\n' });
-      activeStdinReader.reject(new Error('Interrupted'));
-      return;
-    }
-
-    // Ctrl+D (EOF)
-    if (ch === '\x04') {
-      if (activeStdinReader.currentLine.length > 0) {
-        const line = activeStdinReader.currentLine;
-        activeStdinReader.currentLine = '';
-        activeStdinReader.allText += line;
-        if (activeStdinReader.onLine) {
-          activeStdinReader.onLine(line);
-        }
-      } else {
-        activeStdinReader.resolve(activeStdinReader.allText);
-      }
-      return;
-    }
-
-    // Enter
-    if (ch === '\r' || ch === '\n') {
-      self.postMessage({ type: 'term_write', data: '\r\n' });
-      const lineWithNl = activeStdinReader.currentLine + '\n';
-      activeStdinReader.currentLine = '';
-      activeStdinReader.allText += lineWithNl;
-      if (activeStdinReader.onLine) {
-        activeStdinReader.onLine(lineWithNl);
-      }
-      continue;
-    }
-
-    // Backspace
-    if (ch === '\x7f' || ch === '\x08') {
-      if (activeStdinReader.currentLine.length > 0) {
-        activeStdinReader.currentLine = activeStdinReader.currentLine.slice(0, -1);
-        self.postMessage({ type: 'term_write', data: '\b \b' });
-      }
-      continue;
-    }
-
-    // Printable characters
-    if (ch >= ' ') {
-      activeStdinReader.currentLine += ch;
-      self.postMessage({ type: 'term_write', data: ch });
-    }
+  // Ctrl+C
+  if (key === '\x03') {
+    self.postMessage({ type: 'term_write', data: '^C\r\n' });
+    activeStdinReader.reject(new Error('Interrupted'));
+    return;
   }
+
+  // Ctrl+D (EOF)
+  if (key === '\x04') {
+    const curLine = stdinEditor.getBuffer();
+    if (curLine.length > 0) {
+      stdinEditor.reset();
+      activeStdinReader.allText += curLine;
+      if (activeStdinReader.onLine) {
+        activeStdinReader.onLine(curLine);
+      }
+    } else {
+      activeStdinReader.resolve(activeStdinReader.allText);
+    }
+    return;
+  }
+
+  // Enter
+  if (key === '\r' || key === '\n') {
+    self.postMessage({ type: 'term_write', data: '\r\n' });
+    const lineWithNl = stdinEditor.getBuffer() + '\n';
+    stdinEditor.reset();
+    activeStdinReader.allText += lineWithNl;
+    if (activeStdinReader.onLine) {
+      activeStdinReader.onLine(lineWithNl);
+    }
+    return;
+  }
+
+  // Backspace, arrows, delete, home/end, text insertion
+  stdinEditor.feed(key);
 }
 
 // Input key handler
@@ -1150,10 +1142,11 @@ async function handleKey(key) {
   // Enter
   if (key === '\r' || key === '\n') {
     writeln('');
-    const toExecute = lineBuffer.trim();
+    const toExecute = shellEditor.getBuffer().trim();
     if (toExecute.length > 0) {
-      history.push(toExecute);
+      shellEditor.commitHistory(toExecute);
     }
+    shellEditor.reset();
 
     if (toExecute.length > 0) {
       isExecuting = true;
@@ -1177,19 +1170,6 @@ async function handleKey(key) {
     return;
   }
 
-  // Backspace
-  if (key === '\x7f' || key === '\x08') {
-    if (cursorPos > 0) {
-      lineBuffer = lineBuffer.slice(0, cursorPos - 1) + lineBuffer.slice(cursorPos);
-      cursorPos--;
-      write('\b \b');
-      if (cursorPos < lineBuffer.length) {
-        const remaining = lineBuffer.slice(cursorPos);
-        write(remaining + ' ' + '\b'.repeat(remaining.length + 1));
-      }
-    }
-    return;
-  }
 
   // Tab
   if (key === '\t') {
@@ -1206,73 +1186,15 @@ async function handleKey(key) {
 
   // Ctrl+D (EOF on empty prompt)
   if (key === '\x04') {
-    if (lineBuffer.length === 0) {
+    if (shellEditor.getBuffer().length === 0) {
       writeln('exit');
       showPrompt();
     }
     return;
   }
 
-  // Arrow Keys
-  if (key === '\x1b[A') {
-    // Up arrow: history
-    if (history.length > 0) {
-      if (historyIndex === -1) historyIndex = history.length - 1;
-      else if (historyIndex > 0) historyIndex--;
-
-      write('\r\x1b[K' + getPrompt() + history[historyIndex]);
-      lineBuffer = history[historyIndex];
-      cursorPos = lineBuffer.length;
-    }
-    return;
-  }
-
-  if (key === '\x1b[B') {
-    // Down arrow: history
-    if (historyIndex !== -1) {
-      if (historyIndex < history.length - 1) {
-        historyIndex++;
-        write('\r\x1b[K' + getPrompt() + history[historyIndex]);
-        lineBuffer = history[historyIndex];
-        cursorPos = lineBuffer.length;
-      } else {
-        historyIndex = -1;
-        write('\r\x1b[K' + getPrompt());
-        lineBuffer = '';
-        cursorPos = 0;
-      }
-    }
-    return;
-  }
-
-  if (key === '\x1b[D') {
-    // Left arrow
-    if (cursorPos > 0) {
-      cursorPos--;
-      write('\x1b[D');
-    }
-    return;
-  }
-
-  if (key === '\x1b[C') {
-    // Right arrow
-    if (cursorPos < lineBuffer.length) {
-      cursorPos++;
-      write('\x1b[C');
-    }
-    return;
-  }
-
-  // Printable characters
-  if (key.length === 1 && key >= ' ') {
-    lineBuffer = lineBuffer.slice(0, cursorPos) + key + lineBuffer.slice(cursorPos);
-    cursorPos++;
-    write(key);
-    if (cursorPos < lineBuffer.length) {
-      const remaining = lineBuffer.slice(cursorPos);
-      write(remaining + '\b'.repeat(remaining.length));
-    }
-  }
+  // Delegate all arrow keys, history recall, inline editing to shellEditor
+  shellEditor.feed(key);
 }
 
 // Handle messages from main thread

@@ -2,6 +2,7 @@
 // Coordinates runtime.worker.js with SharedArrayBuffer and terminal stdin capture
 
 import { InputCoordinator } from 'canvas-wasi';
+import { LineEditor } from './line-editor.js';
 
 const CONTROL_STATE_IDX = 0;
 const CONTROL_LEN_IDX = 1;
@@ -20,7 +21,10 @@ export class RuntimeManager {
     this.worker = null;
     this.isRunning = false;
     this.isWaitingForStdin = false;
-    this.stdinLineBuffer = '';
+    this.lineEditor = new LineEditor({
+      write: (str) => this.terminal.write(str),
+      historyContext: 'default',
+    });
     this.currentResolve = null;
     this.currentReject = null;
     this.currentOptions = null;
@@ -72,6 +76,20 @@ export class RuntimeManager {
     }
   }
 
+  get stdinLineBuffer() {
+    return this.lineEditor ? this.lineEditor.getBuffer() : '';
+  }
+
+  set stdinLineBuffer(val) {
+    if (this.lineEditor) {
+      if (!val) {
+        this.lineEditor.reset();
+      } else {
+        this.lineEditor.setBuffer(val);
+      }
+    }
+  }
+
   runBinary(wasmBytes, argv = ['./a.out'], options = {}) {
     return new Promise((resolve, reject) => {
       if (this.isRunning) {
@@ -84,7 +102,9 @@ export class RuntimeManager {
 
       this.isRunning = true;
       this.isWaitingForStdin = false;
-      this.stdinLineBuffer = '';
+      const progName = (argv && argv[0]) ? argv[0].split('/').pop().replace(/^\.\//, '') : 'default';
+      this.lineEditor.setHistoryContext(progName || 'default');
+      this.lineEditor.reset();
       let capturedStdout = '';
 
       if (this.sharedInt32) {
@@ -256,13 +276,13 @@ export class RuntimeManager {
 
     // Ctrl-D (EOT: \x04)
     if (key === '\x04') {
-      if (this.stdinLineBuffer.length > 0) {
+      const currentBuf = this.lineEditor.getBuffer();
+      if (currentBuf.length > 0) {
         // Flush line buffer without newline
-        const lineWithoutNewline = this.stdinLineBuffer;
-        this.stdinLineBuffer = '';
+        this.lineEditor.reset();
 
         if (this.sharedInt32 && this.sharedUint8) {
-          const encoded = new TextEncoder().encode(lineWithoutNewline);
+          const encoded = new TextEncoder().encode(currentBuf);
           const toWrite = Math.min(encoded.length, this.sharedBuffer.byteLength - DATA_OFFSET);
 
           this.sharedUint8.set(encoded.subarray(0, toWrite), DATA_OFFSET);
@@ -290,8 +310,10 @@ export class RuntimeManager {
     // Enter
     if (key === '\r' || key === '\n') {
       this.terminal.writeln('');
-      const lineWithNewline = this.stdinLineBuffer + '\n';
-      this.stdinLineBuffer = '';
+      const lineText = this.lineEditor.getBuffer();
+      this.lineEditor.commitHistory(lineText);
+      this.lineEditor.reset();
+      const lineWithNewline = lineText + '\n';
 
       if (this.sharedInt32 && this.sharedUint8) {
         const encoded = new TextEncoder().encode(lineWithNewline);
@@ -310,22 +332,8 @@ export class RuntimeManager {
       return true;
     }
 
-    // Backspace
-    if (key === '\x7f' || key === '\x08') {
-      if (this.stdinLineBuffer.length > 0) {
-        this.stdinLineBuffer = this.stdinLineBuffer.slice(0, -1);
-        this.terminal.write('\b \b');
-      }
-      return true;
-    }
-
-    // Printable key
-    if (key.length === 1 && key >= ' ') {
-      this.stdinLineBuffer += key;
-      this.terminal.write(key);
-      return true;
-    }
-
+    // All other keys: delegate to LineEditor (arrows, backspace, delete, home/end, printable chars)
+    this.lineEditor.feed(key);
     return true;
   }
 
@@ -366,7 +374,7 @@ export class RuntimeManager {
   cleanUp() {
     this.isRunning = false;
     this.isWaitingForStdin = false;
-    this.stdinLineBuffer = '';
+    this.lineEditor.reset();
     if (this.inputCoordinator) {
       this.inputCoordinator.reset();
     }
