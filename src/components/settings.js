@@ -1,6 +1,43 @@
 // Project Settings Panel & Build File Generator
+import { clearWasmCache } from '../toolchain/wasm-cache.js';
 
 export const DEFAULT_RUN_COMMAND = 'pushd . && cd /workspace && ./a.out; popd';
+
+export async function upgradeSystemFiles() {
+  // 1. Clear IndexedDB compiler cache (llvm-box.wasm)
+  try {
+    await clearWasmCache();
+  } catch (err) {
+    console.warn('[Upgrade] Failed to clear wasm cache:', err);
+  }
+
+  // 2. Clear all Service Worker CacheStorage
+  try {
+    if (typeof caches !== 'undefined' && caches.keys) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+  } catch (err) {
+    console.warn('[Upgrade] Failed to clear CacheStorage:', err);
+  }
+
+  // 3. Update Service Worker registration if active
+  try {
+    if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) {
+        await reg.update().catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.warn('[Upgrade] Failed to update Service Worker registration:', err);
+  }
+
+  // 4. Reload page to fetch fresh system assets
+  if (typeof window !== 'undefined' && window.location) {
+    window.location.reload();
+  }
+}
 
 function escapeAttr(str) {
   return String(str ?? '')
@@ -99,10 +136,19 @@ export class SettingsModal {
     }
 
     modalOverlay.innerHTML = `
-      <div class="modal-card">
+      <div class="modal-card" id="modal-card">
         <div class="modal-header">
           <h3>Project & Build Settings</h3>
-          <button id="modal-close-btn" class="modal-close">&times;</button>
+          <div class="modal-header-actions">
+            <button id="modal-upgrade-btn" class="btn-upgrade-system" title="Refresh compiler tools and sysroot files from server">
+              <svg class="btn-icon" width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+                <path d="M8 0.5a.5.5 0 0 1 .5.5v3a.5.5 0 0 1-.5.5H5a.5.5 0 0 1 0-1h2.5V1a.5.5 0 0 1 .5-.5z"/>
+              </svg>
+              <span>Update System</span>
+            </button>
+            <button id="modal-close-btn" class="modal-close" title="Close Settings">&times;</button>
+          </div>
         </div>
         <div class="modal-body">
           <div class="form-group">
@@ -153,6 +199,13 @@ export class SettingsModal {
     modalOverlay.querySelector('#modal-close-btn').addEventListener('click', close);
     modalOverlay.querySelector('#modal-cancel-btn').addEventListener('click', close);
 
+    const btnUpgrade = modalOverlay.querySelector('#modal-upgrade-btn');
+    if (btnUpgrade) {
+      btnUpgrade.addEventListener('click', () => {
+        this.showUpgradeConfirmation(modalOverlay);
+      });
+    }
+
     const btnGenerate = modalOverlay.querySelector('#modal-generate-btn');
     if (btnGenerate) {
       btnGenerate.addEventListener('click', () => {
@@ -177,6 +230,55 @@ export class SettingsModal {
         close();
       });
     }
+  }
+
+  showUpgradeConfirmation(modalOverlay) {
+    const modalCard = modalOverlay.querySelector('.modal-card') || modalOverlay.querySelector('#modal-card') || modalOverlay;
+    if (!modalCard) return;
+
+    let confirmOverlay = modalCard.querySelector('#upgrade-confirm-overlay');
+    if (confirmOverlay) confirmOverlay.remove();
+
+    confirmOverlay = document.createElement('div');
+    confirmOverlay.id = 'upgrade-confirm-overlay';
+    confirmOverlay.className = 'confirm-overlay';
+    confirmOverlay.innerHTML = `
+      <div class="confirm-card">
+        <div class="confirm-header">
+          <svg class="confirm-header-icon" width="18" height="18" viewBox="0 0 16 16" fill="#38bdf8">
+            <path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+            <path d="M8 0.5a.5.5 0 0 1 .5.5v3a.5.5 0 0 1-.5.5H5a.5.5 0 0 1 0-1h2.5V1a.5.5 0 0 1 .5-.5z"/>
+          </svg>
+          <h4>Refresh System Files?</h4>
+        </div>
+        <div class="confirm-body">
+          <p>This will clear cached compiler tools (<code>llvm-box.wasm</code>) and sysroot libraries, and re-download them fresh from the server.</p>
+          <div class="confirm-notice">
+            <span class="confirm-notice-icon">✓</span>
+            <span>Your project files and folders in <strong>/workspace</strong> will <strong>NOT</strong> be affected.</span>
+          </div>
+        </div>
+        <div class="confirm-footer">
+          <button id="confirm-cancel-btn" class="btn">Cancel</button>
+          <button id="confirm-proceed-btn" class="btn btn-primary">Proceed &amp; Reload</button>
+        </div>
+      </div>
+    `;
+
+    modalCard.appendChild(confirmOverlay);
+
+    const closeConfirm = () => {
+      confirmOverlay.remove();
+    };
+
+    confirmOverlay.querySelector('#confirm-cancel-btn').addEventListener('click', closeConfirm);
+
+    const btnProceed = confirmOverlay.querySelector('#confirm-proceed-btn');
+    btnProceed.addEventListener('click', async () => {
+      btnProceed.disabled = true;
+      btnProceed.textContent = 'Refreshing...';
+      await upgradeSystemFiles();
+    });
   }
 
   regenerateBuildFiles() {

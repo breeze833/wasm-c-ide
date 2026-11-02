@@ -233,6 +233,12 @@ This specification defines the architecture and design invariants of `wasm-c-ide
   - **Default Value**: `pushd . && cd /workspace && ./a.out; popd` (transparently preserves directory stack while running the target binary in `/workspace`).
   - **Session Persistence**: The custom run command is saved to `localStorage` under `wasm_c_ide_run_command` across browser sessions.
   - **Fallback Safeguard**: If left empty, automatically defaults back to `pushd . && cd /workspace && ./a.out; popd` to prevent blank command execution errors.
+- **Passive System Upgrade & Toolchain Refresh (`#modal-upgrade-btn`)**:
+  - Adds the **Update System** button (`#modal-upgrade-btn`) inside `.modal-header-actions` in the top-right corner of the Project Settings modal header, visually separated from the footer's **Save** and **Generate Build Script** buttons to eliminate accidental clicks.
+  - **Double-Confirmation Barrier**: Clicking the button opens `#upgrade-confirm-overlay`, requiring explicit user confirmation before any action is taken.
+  - **Selective Cache Purge Invariant (`upgradeSystemFiles()`)**: Purges `wasm-c-ide-wasm-cache` (`clearWasmCache()` wiping `llvm-box.wasm`) and Service Worker `CacheStorage` (`caches.delete(...)` wiping `sysroot.tar.gz` and static archives) and updates Service Worker registrations.
+  - **Workspace Protection Invariant**: Strictly preserves `wasm_c_ide_db` (`workspace_files`) and `localStorage` so user code, directory structure, and preferences are 100% safeguarded against loss or overwriting.
+  - Automatically invokes `window.location.reload()`, streaming fresh compiler tools and libraries from the server upon startup.
 
 ### 3.9 SQLite 3 WASI Embedded Database & CLI Subsystem (`sqlite-wasi`)
 - **Remote Package Integration**:
@@ -316,3 +322,4 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 | **Contextual History Isolation** | Shell command history (`gcc`, `ls`) and application query history (`sqlite3`: SQL statements) maintain separate history stacks. |
 | **Interactive SQLite3 Shell Line-Editing** | In `sqlite3` CLI, Up/Down arrows recall previous queries and Left/Right arrows move cursor in place without overwriting or erasing the `sqlite> ` prompt. |
 | **Ctrl-D and Ctrl-C Invariants** | `Ctrl-C` immediately halts running binaries or interrupts the shell, while `Ctrl-D` cleanly terminates interactive sessions (`sqlite3`, `cat`) or sends EOF without input corruption. |
+| **Passive System Upgrade & Workspace Preservation** | Clicking `#modal-upgrade-btn` in Project Settings header displays confirmation dialog; confirming purges compiler wasm-cache and Service Worker CacheStorage, triggers page reload, and keeps `/workspace` user files intact. |
