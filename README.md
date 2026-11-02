@@ -218,14 +218,15 @@ The repository includes a ready-to-run suite of single-file C programs in the `e
 - **`06_turtle_canvas.c`**: Progressive turtle graphics demo using the default canvas-wasi backend (`<turtle.h>`, `<turtle_backend_canvas_wasi.h>`) drawing a multi-colored animated star spiral with stylized turtle cursor.
 - **`07_turtle_raylib.c`**: Progressive turtle graphics demo using the Raylib backend (`<turtle.h>`, `<turtle_backend_raylib.h>`) drawing a geometric rosette pattern.
 - **`08_ansi_terminal.c`**: Comprehensive ANSI VT100 screen control, cursor positioning, color rendering, and progress animation demo in pure C using UTF-8 box characters and POSIX `nanosleep()` frame timing.
+- **`09_sqlite_database.c`**: Relational database operations in pure C using embedded SQLite 3 (`<sqlite3.h>`), creating tables, inserting with parameterized statements, formatted record queries, aggregations, and inspecting generated databases using the `sqlite3` CLI tool.
 - **`examples/README.md`**: Step-by-step user compilation and running guide for each example.
 
 ### 9. Virtual File System & Storage
 - **In-Memory VFS**: Fast hierarchical tree representation shared across the editor, shell, toolchain, and runtime execution worker.
 - **IndexedDB Persistence**: Automatically persists `/workspace` across browser sessions and page refreshes.
-- **Bidirectional Runtime Synchronization**: Changes made to `/workspace` files via C/C++ `fopen`/`fwrite`/`fputs` or C++ `<fstream>` automatically sync back to VFS in real-time and persist to IndexedDB, updating the file tree and editor tabs.
+- **Bidirectional Runtime Synchronization**: Changes made to `/workspace` files via C/C++ `fopen`/`fwrite`/`fputs`, C++ `<fstream>`, or SQLite 3 `sqlite3_open`/`sqlite3_step` automatically sync back to VFS in real-time and persist to IndexedDB, updating the file tree and editor tabs.
 - **Zip Import & Export**: One-click export of `/workspace` into a standard `.zip` file using JSZip, and direct zip unpacking into the workspace.
-- **Sysroot Protection**: Read-only protection on system root paths (`/usr`, `/bin`), pre-mounting standard C/C++ headers (`<stdio.h>`, `<stdlib.h>`, `<iostream>`, `<fstream>`, etc.), `<graphics.h>`, `<graphics_canvas.h>`, `<turtle.h>`, `<raylib.h>`, and runtime static libraries (`libc.a`, `libturtle.a`, `libraylib.a`, and `libturtle_raylib.a`).
+- **Sysroot Protection**: Read-only protection on system root paths (`/usr`, `/bin`), pre-mounting standard C/C++ headers (`<stdio.h>`, `<stdlib.h>`, `<iostream>`, `<fstream>`, etc.), `<graphics.h>`, `<graphics_canvas.h>`, `<turtle.h>`, `<raylib.h>`, `<sqlite3.h>`, `<sqlite3ext.h>`, runtime static libraries (`libc.a`, `libturtle.a`, `libraylib.a`, `libturtle_raylib.a`, and `libsqlite3.a`), and CLI tools (`/usr/bin/sqlite3`).
 
 ### 10. Progressive Web App (PWA) & Offline Execution
 - **Installable Desktop/Mobile App**: Certified PWA with Web App Manifest (`manifest.webmanifest`), dark theme colors, and icons.
@@ -252,7 +253,7 @@ cd wasm-c-ide
 npm install
 ```
 
-> **Note**: `npm install` triggers a `postinstall` hook that automatically runs `scripts/download-sysroot.js`, downloading the required LLVM 19 WASI single multicall binary (`llvm-box.wasm`, `sysroot.tar.gz`), Raylib 5.5 assets, and prebuilding `libturtle` static libraries (`libturtle.a`, `libturtle_canvas-wasi.a`, `libturtle_raylib.a`) from upstream GitHub releases into `public/sysroot/`. You can also manually trigger this download anytime with `npm run download:sysroot`.
+> **Note**: `npm install` triggers a `postinstall` hook that automatically runs `scripts/download-sysroot.js`, downloading the required LLVM 19 WASI single multicall binary (`llvm-box.wasm`, `sysroot.tar.gz`), Raylib 5.5 assets, SQLite 3 WASI assets (`libsqlite3.a`, `sqlite3.wasm`, `sqlite3.h`), and prebuilding `libturtle` static libraries (`libturtle.a`, `libturtle_canvas-wasi.a`, `libturtle_raylib.a`) from upstream GitHub releases into `public/sysroot/`. You can also manually trigger this download anytime with `npm run download:sysroot`.
 
 ### Development Server
 Start the local Vite development server:

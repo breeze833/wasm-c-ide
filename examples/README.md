@@ -138,3 +138,27 @@ You can copy and paste the code from any of these files into the IDE editor (`wo
   ./a.out
   ```
 
+---
+
+## 9. SQLite 3 Database & CLI Integration
+* **File**: [`09_sqlite_database.c`](./09_sqlite_database.c)
+* **API Used**: SQLite 3 `<sqlite3.h>`
+* **Features**:
+  * Relational database engine embedded directly in WebAssembly
+  * Creates and manages disk-backed database files (`demo.db`) inside `/workspace` with real-time VFS synchronization
+  * Table schema definition with constraints and auto-increment primary keys
+  * Parameterized prepared statements (`sqlite3_prepare_v2`, `sqlite3_bind_*`, `sqlite3_step`) protecting against injection
+  * Formatted record queries and statistical aggregations (`COUNT`, `AVG`, `MAX`, `MIN`)
+  * Direct inspection from xterm using the built-in `sqlite3` CLI utility!
+* **How to Compile & Run**:
+  ```bash
+  gcc 09_sqlite_database.c -lsqlite3 -o a.out
+  ./a.out
+  ```
+* **CLI Inspection**:
+  ```bash
+  sqlite3 demo.db "SELECT * FROM learners;"
+  sqlite3 demo.db ".schema"
+  ```
+
+

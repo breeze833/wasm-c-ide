@@ -2,6 +2,7 @@
 import { GRAPHICS_H, GRAPHICS_CANVAS_H } from 'canvas-wasi/headers';
 import { TURTLE_HEADERS } from './turtle-headers.js';
 import { RAYLIB_HEADERS } from './raylib-headers.js';
+import { SQLITE_HEADERS } from './sqlite-headers.js';
 
 export const STANDARD_C_HEADERS = {
   'stdio.h': `/* Minimal WASI / Musl stdio.h */
@@ -417,9 +418,11 @@ extern int errno;
   'raylib.h': RAYLIB_HEADERS['raylib.h'],
   'raymath.h': RAYLIB_HEADERS['raymath.h'],
   'rlgl.h': RAYLIB_HEADERS['rlgl.h'],
+  'sqlite3.h': SQLITE_HEADERS['sqlite3.h'],
+  'sqlite3ext.h': SQLITE_HEADERS['sqlite3ext.h'],
 };
 
-export { TURTLE_HEADERS, RAYLIB_HEADERS };
+export { TURTLE_HEADERS, RAYLIB_HEADERS, SQLITE_HEADERS };
 
 export const STANDARD_CPP_HEADERS = {
   'iostream': `// Minimal C++ iostream header
@@ -716,6 +719,7 @@ export const STANDARD_LIBS = [
   'libturtle_canvas-wasi.a',
   'libturtle_raylib.a',
   'libraylib.a',
+  'libsqlite3.a',
 ];
 
 export const BIN_COMMANDS = [
@@ -755,6 +759,7 @@ export const USR_BIN_COMMANDS = [
   'strings',
   'readelf',
   'strip',
+  'sqlite3',
 ];
 
 export const WASM_HOST_IMPORTS = [

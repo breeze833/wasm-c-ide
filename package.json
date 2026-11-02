@@ -1,6 +1,6 @@
 {
   "name": "wasm-c-ide",
-  "version": "0.6.9",
+  "version": "0.6.10",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "pack": "vite build && (cd dist && zip -r ../wasm-c-ide.zip .)",
-    "test": "node test/vfs.test.js && node test/shell.test.js && node test/toolchain.test.js && node test/ar.test.js && node test/runtime.test.js && node test/make.test.js && node test/sw.test.js && node test/zoom.test.js && node test/pipeline.test.js && node test/raylib.test.js && node test/graphics.test.js && node test/so.test.js && node test/turtle.test.js && node test/fileio.test.js && node test/detached-terminal.test.js && node test/sidebar.test.js"
+    "test": "node test/vfs.test.js && node test/shell.test.js && node test/toolchain.test.js && node test/ar.test.js && node test/runtime.test.js && node test/make.test.js && node test/sw.test.js && node test/zoom.test.js && node test/pipeline.test.js && node test/raylib.test.js && node test/graphics.test.js && node test/so.test.js && node test/turtle.test.js && node test/fileio.test.js && node test/detached-terminal.test.js && node test/sidebar.test.js && node test/sqlite.test.js"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -21,7 +21,8 @@
     "canvas-wasi": "https://github.com/breeze833/canvas-wasi/releases/download/v0.1.2/canvas-wasi-0.1.2.tgz",
     "jszip": "^3.10.1",
     "monaco-editor": "^0.52.2",
-    "raylib-wasi": "https://github.com/breeze833/raylib-wasi/releases/download/latest/raylib-wasi-5.5.0.tgz"
+    "raylib-wasi": "https://github.com/breeze833/raylib-wasi/releases/download/latest/raylib-wasi-5.5.0.tgz",
+    "sqlite-wasi": "https://github.com/breeze833/sqlite-wasi/releases/download/v3.54.1/sqlite-wasi-3.54.1.tgz"
   },
   "devDependencies": {
     "vite": "^6.2.0"

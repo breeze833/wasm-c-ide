@@ -96,6 +96,8 @@ export class App {
           { url: `${basePath}sysroot/wasm/libturtle.a`, paths: ['/usr/lib/libturtle.a', '/usr/lib/libturtle_canvas-wasi.a'] },
           { url: `${basePath}sysroot/wasm/libraylib.a`, paths: ['/usr/lib/libraylib.a'] },
           { url: `${basePath}sysroot/wasm/libturtle_raylib.a`, paths: ['/usr/lib/libturtle_raylib.a'] },
+          { url: `${basePath}sysroot/wasm/libsqlite3.a`, paths: ['/usr/lib/libsqlite3.a', '/lib/wasm32-wasip1/libsqlite3.a', '/lib/wasm32-wasi/libsqlite3.a'] },
+          { url: `${basePath}sysroot/wasm/sqlite3.wasm`, paths: ['/usr/bin/sqlite3'] },
         ];
         for (const item of preloadLibs) {
           try {
@@ -504,6 +506,10 @@ export class App {
       execPath = cmd.startsWith('/') ? cmd : `${cwd}/${cmd.replace(/^\.\//, '')}`;
     } else if (this.vfs.exists(`${cwd}/${cmd}`)) {
       execPath = `${cwd}/${cmd}`;
+    } else if (this.vfs.exists(`/usr/bin/${cmd}`)) {
+      execPath = `/usr/bin/${cmd}`;
+    } else if (this.vfs.exists(`/bin/${cmd}`)) {
+      execPath = `/bin/${cmd}`;
     }
 
     if (execPath) {

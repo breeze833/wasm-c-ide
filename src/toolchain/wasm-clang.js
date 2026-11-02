@@ -12,7 +12,7 @@ export { ProcExit };
 export class AppInstance {
   constructor(wasiHost, name, ...args) {
     this.argv = [name, ...args];
-    this.environ = { USER: 'student', PWD: '/workspace' };
+    this.environ = { USER: 'student', HOME: '/workspace', PWD: '/workspace' };
     this.wasiHost = wasiHost;
     this.wasiHost.argv = this.argv;
     this.wasiHost.environ = this.environ;
@@ -206,6 +206,30 @@ export class WasmToolchain {
             this.vfs.writeFile('/usr/lib/libturtle_raylib.a', turtleRaylibU8, Date.now(), true);
             this.vfs.writeFile('/lib/wasm32-wasip1/libturtle_raylib.a', turtleRaylibU8, Date.now(), true);
             this.vfs.writeFile('/lib/wasm32-wasi/libturtle_raylib.a', turtleRaylibU8, Date.now(), true);
+          }
+        }
+      } catch {}
+
+      try {
+        const sqliteRes = await fetch(`${this.basePath}/libsqlite3.a`);
+        if (sqliteRes && sqliteRes.ok) {
+          const sqliteBuf = await sqliteRes.arrayBuffer();
+          const sqliteU8 = new Uint8Array(sqliteBuf);
+          if (this.vfs) {
+            this.vfs.writeFile('/usr/lib/libsqlite3.a', sqliteU8, Date.now(), true);
+            this.vfs.writeFile('/lib/wasm32-wasip1/libsqlite3.a', sqliteU8, Date.now(), true);
+            this.vfs.writeFile('/lib/wasm32-wasi/libsqlite3.a', sqliteU8, Date.now(), true);
+          }
+        }
+      } catch {}
+
+      try {
+        const sqliteCliRes = await fetch(`${this.basePath}/sqlite3.wasm`);
+        if (sqliteCliRes && sqliteCliRes.ok) {
+          const sqliteCliBuf = await sqliteCliRes.arrayBuffer();
+          const sqliteCliU8 = new Uint8Array(sqliteCliBuf);
+          if (this.vfs) {
+            this.vfs.writeFile('/usr/bin/sqlite3', sqliteCliU8, Date.now(), true);
           }
         }
       } catch {}

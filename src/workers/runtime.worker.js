@@ -174,7 +174,7 @@ export async function runWasm(wasmBytes, argv, environ, stdinBytes = null, rayli
     vfs: fsMap,
     cwd: '/workspace',
     argv: argv || ['./a.out'],
-    environ: environ || { USER: 'student', PWD: '/workspace' },
+    environ: { USER: 'student', HOME: '/workspace', PWD: '/workspace', ...(environ || {}) },
     preopens: [
       { fd: 3, path: '/workspace', name: '.' },
     ],

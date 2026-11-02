@@ -37,13 +37,18 @@ const CLANG_WASI_TAG = 'v19.1.0';
 const CLANG_WASI_BASE_URL = `https://github.com/breeze833/clang-wasi/releases/download/${CLANG_WASI_TAG}`;
 const RAYLIB_WASI_BASE_URL = 'https://github.com/breeze833/raylib-wasi/releases/download/latest';
 const LIBTURTLE_REPO_URL = 'https://github.com/breeze833/libturtle.git';
+const SQLITE_WASI_TAG = 'v3.54.1';
+const SQLITE_WASI_VERSION = '3.54.1';
+const SQLITE_WASI_BASE_URL = `https://github.com/breeze833/sqlite-wasi/releases/download/${SQLITE_WASI_TAG}`;
 
 const WASM_DIR = path.join(projectRoot, 'public', 'sysroot', 'wasm');
 const RAYLIB_INC_DIR = path.join(projectRoot, 'public', 'sysroot', 'include', 'raylib');
 const TURTLE_INC_DIR = path.join(projectRoot, 'public', 'sysroot', 'include', 'turtle');
+const SQLITE_INC_DIR = path.join(projectRoot, 'public', 'sysroot', 'include', 'sqlite');
 const LIBTURTLE_BUILD_DIR = path.join(projectRoot, 'build', 'libturtle');
 const TURTLE_HEADERS_JS = path.join(projectRoot, 'src', 'vfs', 'turtle-headers.js');
 const RAYLIB_HEADERS_JS = path.join(projectRoot, 'src', 'vfs', 'raylib-headers.js');
+const SQLITE_HEADERS_JS = path.join(projectRoot, 'src', 'vfs', 'sqlite-headers.js');
 
 const WASI_HOST_JS = path.join(projectRoot, 'src', 'vfs', 'wasi-host.js');
 const CLANG_WASI_RAW_URL = 'https://raw.githubusercontent.com/breeze833/clang-wasi/main/src/wasi-host.js';
@@ -56,14 +61,19 @@ const REQUIRED_FILES = [
   path.join(WASM_DIR, 'libturtle.a'),
   path.join(WASM_DIR, 'libturtle_canvas-wasi.a'),
   path.join(WASM_DIR, 'libturtle_raylib.a'),
+  path.join(WASM_DIR, 'libsqlite3.a'),
+  path.join(WASM_DIR, 'sqlite3.wasm'),
   path.join(RAYLIB_INC_DIR, 'raylib.h'),
   path.join(RAYLIB_INC_DIR, 'raymath.h'),
   path.join(RAYLIB_INC_DIR, 'rlgl.h'),
   path.join(TURTLE_INC_DIR, 'turtle.h'),
   path.join(TURTLE_INC_DIR, 'turtle_backend_canvas_wasi.h'),
   path.join(TURTLE_INC_DIR, 'turtle_backend_raylib.h'),
+  path.join(SQLITE_INC_DIR, 'sqlite3.h'),
+  path.join(SQLITE_INC_DIR, 'sqlite3ext.h'),
   TURTLE_HEADERS_JS,
   RAYLIB_HEADERS_JS,
+  SQLITE_HEADERS_JS,
 ];
 
 const force = process.argv.includes('--force');
@@ -304,6 +314,77 @@ async function downloadTurtleAssets() {
   console.log('[sysroot] Installed libturtle_raylib.a');
 }
 
+async function downloadSqliteAssets() {
+  const sqliteFiles = [
+    path.join(WASM_DIR, 'libsqlite3.a'),
+    path.join(WASM_DIR, 'sqlite3.wasm'),
+    path.join(SQLITE_INC_DIR, 'sqlite3.h'),
+    path.join(SQLITE_INC_DIR, 'sqlite3ext.h'),
+  ];
+
+  const needsDownload = force || sqliteFiles.some((f) => !fs.existsSync(f) || fs.statSync(f).size === 0);
+  if (!needsDownload && fs.existsSync(SQLITE_HEADERS_JS) && fs.statSync(SQLITE_HEADERS_JS).size > 0) {
+    console.log('[sysroot] SQLite assets already present, skipping.');
+    return;
+  }
+
+  fs.mkdirSync(SQLITE_INC_DIR, { recursive: true });
+
+  const moduleDistLib = path.join(projectRoot, 'node_modules/sqlite-wasi/lib/libsqlite3.a');
+  const moduleDistBin = path.join(projectRoot, 'node_modules/sqlite-wasi/bin/sqlite3.wasm');
+  const moduleDistInc = path.join(projectRoot, 'node_modules/sqlite-wasi/include');
+
+  if (fs.existsSync(moduleDistLib) && fs.existsSync(moduleDistBin) && fs.existsSync(moduleDistInc)) {
+    fs.copyFileSync(moduleDistLib, path.join(WASM_DIR, 'libsqlite3.a'));
+    fs.copyFileSync(moduleDistBin, path.join(WASM_DIR, 'sqlite3.wasm'));
+    fs.copyFileSync(path.join(moduleDistInc, 'sqlite3.h'), path.join(SQLITE_INC_DIR, 'sqlite3.h'));
+    fs.copyFileSync(path.join(moduleDistInc, 'sqlite3ext.h'), path.join(SQLITE_INC_DIR, 'sqlite3ext.h'));
+    console.log('[sysroot] Copied SQLite assets from node_modules/sqlite-wasi.');
+  } else if (needsDownload) {
+    const url = `${SQLITE_WASI_BASE_URL}/sqlite-wasi-${SQLITE_WASI_VERSION}.tgz`;
+    console.log(`[sysroot] Downloading ${url} ...`);
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
+    }
+
+    const arrayBuf = await res.arrayBuffer();
+    const uncompressed = gunzipSync(Buffer.from(arrayBuf));
+    const tar = new Tar(uncompressed.buffer.slice(uncompressed.byteOffset, uncompressed.byteOffset + uncompressed.byteLength));
+    const entries = tar.getEntries();
+
+    const fileMap = {
+      'package/lib/libsqlite3.a': path.join(WASM_DIR, 'libsqlite3.a'),
+      'package/bin/sqlite3.wasm': path.join(WASM_DIR, 'sqlite3.wasm'),
+      'package/include/sqlite3.h': path.join(SQLITE_INC_DIR, 'sqlite3.h'),
+      'package/include/sqlite3ext.h': path.join(SQLITE_INC_DIR, 'sqlite3ext.h'),
+      'lib/libsqlite3.a': path.join(WASM_DIR, 'libsqlite3.a'),
+      'bin/sqlite3.wasm': path.join(WASM_DIR, 'sqlite3.wasm'),
+      'include/sqlite3.h': path.join(SQLITE_INC_DIR, 'sqlite3.h'),
+      'include/sqlite3ext.h': path.join(SQLITE_INC_DIR, 'sqlite3ext.h'),
+    };
+
+    for (const entry of entries) {
+      if (fileMap[entry.filename] && entry.contents) {
+        const dest = fileMap[entry.filename];
+        const tmpPath = `${dest}.tmp`;
+        fs.writeFileSync(tmpPath, entry.contents);
+        fs.renameSync(tmpPath, dest);
+        console.log(`[sysroot] Extracted ${path.relative(projectRoot, dest)} (${entry.contents.length} bytes)`);
+      }
+    }
+  }
+
+  // Auto-generate src/vfs/sqlite-headers.js
+  const sqliteHeaderContents = {
+    'sqlite3.h': fs.readFileSync(path.join(SQLITE_INC_DIR, 'sqlite3.h'), 'utf-8'),
+    'sqlite3ext.h': fs.readFileSync(path.join(SQLITE_INC_DIR, 'sqlite3ext.h'), 'utf-8'),
+  };
+  const generatedJs = `// Auto-generated by scripts/download-sysroot.js - DO NOT EDIT MANUALLY\nexport const SQLITE_HEADERS = {\n  'sqlite3.h': ${JSON.stringify(sqliteHeaderContents['sqlite3.h'])},\n  'sqlite3ext.h': ${JSON.stringify(sqliteHeaderContents['sqlite3ext.h'])},\n};\n`;
+  fs.writeFileSync(SQLITE_HEADERS_JS, generatedJs);
+  console.log('[sysroot] Generated src/vfs/sqlite-headers.js');
+}
+
 async function main() {
   if (!force && allAssetsPresent()) {
     console.log('[sysroot] All toolchain & sysroot assets are present. Skipping download.');
@@ -313,11 +394,13 @@ async function main() {
   fs.mkdirSync(WASM_DIR, { recursive: true });
   fs.mkdirSync(RAYLIB_INC_DIR, { recursive: true });
   fs.mkdirSync(TURTLE_INC_DIR, { recursive: true });
+  fs.mkdirSync(SQLITE_INC_DIR, { recursive: true });
 
   console.log('[sysroot] Ensuring toolchain and sysroot assets...');
   await downloadClangWasiAssets();
   await downloadRaylibAssets();
   await downloadTurtleAssets();
+  await downloadSqliteAssets();
   console.log('[sysroot] All assets successfully downloaded and ready.');
 }
 

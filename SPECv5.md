@@ -24,6 +24,7 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
   - **`canvas-wasi`**: Pure C direct software framebuffer (`<graphics.h>`), HTML5 Canvas 2D vector primitives (`<graphics_canvas.h>`), floating/dockable graphics console UI (`GraphicsWindowUI`), and shared 512-byte `SharedArrayBuffer` input coordination (`InputCoordinator`).
   - **`raylib-wasi`**: Standalone Raylib 5.5 port and WebGL ES 2.0 host bridge, providing Wasm imports (`gl`, `raylib`) and zero-Emscripten `PLATFORM_CUSTOM` execution.
 - **Turtle Graphics Subsystem (`libturtle`)**: Modular educational turtle graphics with dual backend support (Canvas-WASI and Raylib backends both permanently bundled into sysroot out-of-the-box).
+- **SQLite 3 Embedded Database & CLI Subsystem (`sqlite-wasi`)**: Precompiled SQLite 3.54.1 WASI Preview 1 static library (`libsqlite3.a`), C headers (`sqlite3.h`, `sqlite3ext.h`), and standalone interactive CLI (`sqlite3.wasm` mounted at `/usr/bin/sqlite3`) bundled permanently into sysroot out-of-the-box, supporting SQL relational databases with real-time VFS persistence.
 - **Toolchain Startup Acceleration & IndexedDB Binary Persistence**:
   - Eliminates slow remote downloads and compilation freezes on repeated IDE visits.
   - Streaming compilation (`WebAssembly.compileStreaming`) compiles bytecode concurrently as network chunks stream over the wire.
@@ -204,6 +205,21 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
   - **Session Persistence**: The custom run command is saved to `localStorage` under `wasm_c_ide_run_command` across browser sessions.
   - **Fallback Safeguard**: If left empty, automatically defaults back to `pushd . && cd /workspace && ./a.out; popd` to prevent blank command execution errors.
 
+### 3.9 SQLite 3 WASI Embedded Database & CLI Subsystem (`sqlite-wasi`)
+- **Remote Package Integration**:
+  - Direct integration with upstream release package [`breeze833/sqlite-wasi`](https://github.com/breeze833/sqlite-wasi) (`v3.54.1`).
+  - Fetched dynamically on-demand during project setup via `scripts/download-sysroot.js` without manual submodule or git tracking.
+- **Sysroot Mount & Compilation Linkage**:
+  - Standard headers `sqlite3.h` and `sqlite3ext.h` are permanently mounted under `/usr/include/` on startup.
+  - Static library `libsqlite3.a` is mounted under `/usr/lib/` and `/lib/wasm32-wasip1/`.
+  - User programs compile and link cleanly using standard `-lsqlite3` without additional flags or host bridges.
+- **Standalone CLI Binary (`/usr/bin/sqlite3`)**:
+  - `sqlite3.wasm` is mounted directly into `/usr/bin/sqlite3` in the in-memory `VFS`.
+  - Registered in shell commands (`which sqlite3` resolves to `/usr/bin/sqlite3`).
+  - Invoked directly in the xterm terminal: `sqlite3 [database-file] [sql]`.
+  - Seamlessly interoperates with shell pipelines and input/output stream redirections (`<`, `>`, `>>`, `|`).
+  - File operations on database files (`demo.db`) inside `/workspace` synchronize in real-time to the host VFS and File Tree UI.
+
 ---
 
 ## 4. Verification & Testing Checklist
@@ -220,9 +236,11 @@ SPECv5 extends SPECv4 by completely eliminating `memfs.wasm` from the compilatio
 | **Interactive `scanf` & `Ctrl-D` EOF** | Runtime worker standard input blocks via `SharedArrayBuffer` until Enter; `Ctrl-D` sends EOF cleanly. |
 | **Pipelines & Redirections** | Command pipelines (`|`) and stream redirections (`<`, `>`, `>>`) execute deterministically across stages. |
 | **Static Archiver (`ar rcs`)** | Built-in `ar` creates archives directly in VFS; `wasm-ld` links against them without errors. |
-| **Permanent Sysroot Bundling** | Raylib 5.5 and Raylib turtle development files (`raylib.h`, `raymath.h`, `rlgl.h`, `turtle_backend_raylib.h`, `libraylib.a`, `libturtle_raylib.a`) mount in sysroot by default. |
+| **Permanent Sysroot Bundling** | Raylib 5.5, Raylib turtle, and SQLite development files (`raylib.h`, `turtle.h`, `sqlite3.h`, `libraylib.a`, `libturtle.a`, `libsqlite3.a`) mount in sysroot by default. |
 | **Canvas & Raylib Graphics** | Generic framebuffer, 2D vector canvas, and Raylib interactive graphics render at ~60 FPS via zero-copy `ImageBitmap`. |
 | **Turtle Graphics Subsystem** | Both `canvas-wasi` and Raylib turtle backends compile and render progressive animations out-of-the-box. |
+| **SQLite 3 C Compilation & Linking** | Programs including `<sqlite3.h>` compile and link cleanly with `-lsqlite3`, performing transactions with VFS persistence. |
+| **SQLite 3 CLI Execution** | `sqlite3` command executes in terminal against `:memory:` or `/workspace/*.db` with interactive queries and stream redirection. |
 | **Wasm Binary IndexedDB Caching** | First run saves 56MB `ArrayBuffer` to IndexedDB `wasm_modules`; subsequent sessions retrieve from local disk in <100ms with 0 network bytes. |
 | **Cross-Browser DataCloneError Prevention** | Storing raw `ArrayBuffer` in IndexedDB succeeds across Firefox and Chrome without `DataCloneError`. |
 | **Streaming Compilation & Fallback** | `WebAssembly.compileStreaming` compiles chunks concurrently with download; falls back gracefully to `arrayBuffer()`. |
