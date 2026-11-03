@@ -394,4 +394,5 @@ Before marking any task complete, agents must verify:
 | **Offline PWA Installation** | Application provides valid manifest, registers service worker with COOP/COEP headers, and operates offline. |
 | **Portable Zip Distribution** | `npm run pack` creates a standalone `wasm-c-ide.zip` that runs in any static web server document root. |
 | **Collapsible & Resizable Sidebar** | Sidebar freely resizes with smooth col-resize dragging, collapses to 36px slim vertical rail with vertical WORKSPACE label, responds to Ctrl+B, and persists width and collapsed state in localStorage. |
+| **Startup Loading Indication & Deferred Prompt** | Startup streams informational loading and progress messages into the xterm terminal area during VFS preparation (sysroot fetching, decompression, unpacking, library preloading); input is guarded during boot, and the welcome message and interactive shell prompt appear only after all VFS items are fully populated. |
 

@@ -76,6 +76,7 @@ export class WasmToolchain {
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
+      onProgress('Fetching standard library sysroot archive (sysroot.tar.gz)...');
       const fetchSysroot = async () => {
         try {
           const res = await fetch(`${this.basePath}/sysroot.tar.gz`);
@@ -84,6 +85,7 @@ export class WasmToolchain {
             const u8 = new Uint8Array(buf);
             if (u8.length >= 2 && u8[0] === 0x1f && u8[1] === 0x8b) {
               if (typeof DecompressionStream !== 'undefined') {
+                onProgress('Decompressing sysroot archive (gzip, ~108MB)...');
                 const stream = new Response(u8).body.pipeThrough(new DecompressionStream('gzip'));
                 return await new Response(stream).arrayBuffer();
               }
@@ -111,9 +113,10 @@ export class WasmToolchain {
         this.vfs.mkdir('/lib', true, true);
       }
 
-      onProgress('Unpacking standard library headers and runtime...');
+      onProgress('Parsing sysroot tar archive...');
       const tar = new Tar(sysrootTarBuf);
       const entries = tar.getEntries();
+      onProgress(`Unpacking sysroot headers and runtime (${entries.length} items)...`);
       for (const entry of entries) {
         const cleanName = (entry.filename || '').replace(/^\.?\/+/, '');
         if (!cleanName) continue;
@@ -181,74 +184,70 @@ export class WasmToolchain {
         }
       }
 
-      // Preload default runtime libraries into VFS
-      try {
-        const turtleRes = await fetch(`${this.basePath}/libturtle.a`);
-        if (turtleRes && turtleRes.ok) {
-          const turtleBuf = await turtleRes.arrayBuffer();
-          const turtleU8 = new Uint8Array(turtleBuf);
-          if (this.vfs) {
-            this.vfs.writeFile('/usr/lib/libturtle.a', turtleU8, Date.now(), true);
-            this.vfs.writeFile('/usr/lib/libturtle_canvas-wasi.a', turtleU8, Date.now(), true);
-            this.vfs.writeFile('/lib/wasm32-wasip1/libturtle.a', turtleU8, Date.now(), true);
-            this.vfs.writeFile('/lib/wasm32-wasip1/libturtle_canvas-wasi.a', turtleU8, Date.now(), true);
-            this.vfs.writeFile('/lib/wasm32-wasi/libturtle.a', turtleU8, Date.now(), true);
-            this.vfs.writeFile('/lib/wasm32-wasi/libturtle_canvas-wasi.a', turtleU8, Date.now(), true);
-          }
-        }
-      } catch {}
+      // Preload default runtime libraries into VFS concurrently
+      onProgress('Preloading runtime libraries (libraylib, libturtle, libsqlite3)...');
+      const preloadConfigs = [
+        {
+          file: 'libturtle.a',
+          targets: [
+            '/usr/lib/libturtle.a',
+            '/usr/lib/libturtle_canvas-wasi.a',
+            '/lib/wasm32-wasip1/libturtle.a',
+            '/lib/wasm32-wasip1/libturtle_canvas-wasi.a',
+            '/lib/wasm32-wasi/libturtle.a',
+            '/lib/wasm32-wasi/libturtle_canvas-wasi.a',
+          ],
+        },
+        {
+          file: 'libraylib.a',
+          targets: [
+            '/usr/lib/libraylib.a',
+            '/lib/wasm32-wasip1/libraylib.a',
+            '/lib/wasm32-wasi/libraylib.a',
+          ],
+        },
+        {
+          file: 'libturtle_raylib.a',
+          targets: [
+            '/usr/lib/libturtle_raylib.a',
+            '/lib/wasm32-wasip1/libturtle_raylib.a',
+            '/lib/wasm32-wasi/libturtle_raylib.a',
+          ],
+        },
+        {
+          file: 'libsqlite3.a',
+          targets: [
+            '/usr/lib/libsqlite3.a',
+            '/lib/wasm32-wasip1/libsqlite3.a',
+            '/lib/wasm32-wasi/libsqlite3.a',
+          ],
+        },
+        {
+          file: 'sqlite3.wasm',
+          targets: [
+            '/usr/bin/sqlite3',
+          ],
+        },
+      ];
 
-      try {
-        const raylibRes = await fetch(`${this.basePath}/libraylib.a`);
-        if (raylibRes && raylibRes.ok) {
-          const raylibBuf = await raylibRes.arrayBuffer();
-          const raylibU8 = new Uint8Array(raylibBuf);
-          if (this.vfs) {
-            this.vfs.writeFile('/usr/lib/libraylib.a', raylibU8, Date.now(), true);
-            this.vfs.writeFile('/lib/wasm32-wasip1/libraylib.a', raylibU8, Date.now(), true);
-            this.vfs.writeFile('/lib/wasm32-wasi/libraylib.a', raylibU8, Date.now(), true);
-          }
-        }
-      } catch {}
+      await Promise.all(
+        preloadConfigs.map(async (cfg) => {
+          try {
+            const res = await fetch(`${this.basePath}/${cfg.file}`);
+            if (res && (res.ok || typeof res.ok === 'undefined')) {
+              const buf = await res.arrayBuffer();
+              const u8 = new Uint8Array(buf);
+              if (this.vfs) {
+                for (const target of cfg.targets) {
+                  this.vfs.writeFile(target, u8, Date.now(), true);
+                }
+              }
+            }
+          } catch {}
+        })
+      );
 
-      try {
-        const turtleRaylibRes = await fetch(`${this.basePath}/libturtle_raylib.a`);
-        if (turtleRaylibRes && turtleRaylibRes.ok) {
-          const turtleRaylibBuf = await turtleRaylibRes.arrayBuffer();
-          const turtleRaylibU8 = new Uint8Array(turtleRaylibBuf);
-          if (this.vfs) {
-            this.vfs.writeFile('/usr/lib/libturtle_raylib.a', turtleRaylibU8, Date.now(), true);
-            this.vfs.writeFile('/lib/wasm32-wasip1/libturtle_raylib.a', turtleRaylibU8, Date.now(), true);
-            this.vfs.writeFile('/lib/wasm32-wasi/libturtle_raylib.a', turtleRaylibU8, Date.now(), true);
-          }
-        }
-      } catch {}
-
-      try {
-        const sqliteRes = await fetch(`${this.basePath}/libsqlite3.a`);
-        if (sqliteRes && sqliteRes.ok) {
-          const sqliteBuf = await sqliteRes.arrayBuffer();
-          const sqliteU8 = new Uint8Array(sqliteBuf);
-          if (this.vfs) {
-            this.vfs.writeFile('/usr/lib/libsqlite3.a', sqliteU8, Date.now(), true);
-            this.vfs.writeFile('/lib/wasm32-wasip1/libsqlite3.a', sqliteU8, Date.now(), true);
-            this.vfs.writeFile('/lib/wasm32-wasi/libsqlite3.a', sqliteU8, Date.now(), true);
-          }
-        }
-      } catch {}
-
-      try {
-        const sqliteCliRes = await fetch(`${this.basePath}/sqlite3.wasm`);
-        if (sqliteCliRes && sqliteCliRes.ok) {
-          const sqliteCliBuf = await sqliteCliRes.arrayBuffer();
-          const sqliteCliU8 = new Uint8Array(sqliteCliBuf);
-          if (this.vfs) {
-            this.vfs.writeFile('/usr/bin/sqlite3', sqliteCliU8, Date.now(), true);
-          }
-        }
-      } catch {}
-
-      onProgress('Compiler ready.');
+      onProgress('VFS items populated.');
       this.initialized = true;
     })();
 

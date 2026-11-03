@@ -285,6 +285,23 @@ This specification defines the architecture and design invariants of `wasm-c-ide
     - If the line buffer is empty, signals `STATE_EOF` (`-1`) to `readStdin` to cleanly close interactive CLI tools (e.g. `sqlite3`, `cat`) or prints `exit` at the shell prompt.
   - **`Tab` (`\t`)**: Passed to pluggable completion hooks (powering file and command completion in the shell worker).
 
+### 3.11 Startup Loading Indication & VFS Population Lifecycle
+- **Real-Time Informational Boot Feedback in Xterm**:
+  - `TerminalManager` initializes early during `App.prototype.init()` so the xterm terminal viewport immediately displays streaming boot progress.
+  - Informational startup messages are output sequentially:
+    1. `[System] Initializing WebAssembly C/C++ environment...`
+    2. `[*] Mounting virtual filesystem headers...` (`mountSysroot`)
+    3. `[*] Loading workspace from storage...` (`loadWorkspace`)
+    4. `[*] Preparing C/C++ standard library sysroot...` (`toolchain.init`)
+    5. `[*] Fetching standard library sysroot archive (sysroot.tar.gz)...`
+    6. `[*] Unpacking sysroot headers and runtime (<count> items)...`
+    7. `[*] Preloading runtime libraries (libraylib, libturtle, libsqlite3)...`
+    8. `[✓] System ready.`
+- **Deferred Shell Prompt & Keystroke Guarding**:
+  - The welcome banner (`Welcome to the In-Browser C/C++ Teaching IDE!`) and the interactive shell prompt (`ide:~$ `) are strictly deferred until all VFS items are populated.
+  - The application tracks `this.isReady`: keystrokes and keyboard interrupts entered into the terminal during startup are discarded before VFS population finishes to prevent prompt corruption or commands running on an incomplete sysroot.
+  - Precompiled runtime libraries (`libraylib.a`, `libturtle.a`, `libturtle_raylib.a`, `libsqlite3.a`, `sqlite3.wasm`) are fetched concurrently via `Promise.all` in `WasmToolchain.prototype.init()`, optimizing network throughput on startup and after Passive System Upgrades.
+
 ---
 
 ## 4. Verification & Testing Checklist
@@ -323,3 +340,4 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 | **Interactive SQLite3 Shell Line-Editing** | In `sqlite3` CLI, Up/Down arrows recall previous queries and Left/Right arrows move cursor in place without overwriting or erasing the `sqlite> ` prompt. |
 | **Ctrl-D and Ctrl-C Invariants** | `Ctrl-C` immediately halts running binaries or interrupts the shell, while `Ctrl-D` cleanly terminates interactive sessions (`sqlite3`, `cat`) or sends EOF without input corruption. |
 | **Passive System Upgrade & Workspace Preservation** | Clicking `#modal-upgrade-btn` in Project Settings header displays confirmation dialog; confirming purges compiler wasm-cache and Service Worker CacheStorage, triggers page reload, and keeps `/workspace` user files intact. |
+| **Startup Loading Indication & Deferred Prompt** | Startup streams informational loading and progress messages into the xterm terminal area during VFS preparation (sysroot fetching, decompression, unpacking, library preloading); input is guarded during boot, and the welcome message and interactive shell prompt appear only after all VFS items are fully populated. |

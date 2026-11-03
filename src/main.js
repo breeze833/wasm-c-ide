@@ -71,48 +71,26 @@ export class App {
     this.deferredInstallPrompt = null;
     this.sidebarWidth = 240;
     this.sidebarCollapsed = false;
+    this.isReady = false;
   }
 
   async init() {
     const isIsolated = checkIsolation();
 
+    // 1. Initialize Terminal, Shell Worker & Runtime early so xterm is visible and ready for startup messages
+    this.initTerminalAndShell();
+
+    if (this.terminal) {
+      this.terminal.writeln('\x1b[1;36m[System]\x1b[0m Initializing WebAssembly C/C++ environment...');
+      this.terminal.writeln('\x1b[90m[*] Mounting virtual filesystem headers...\x1b[0m');
+    }
+
     // Mount read-only sysroot headers
     mountSysroot(this.vfs);
 
-    // Asynchronously preload runtime libraries into VFS /usr/lib/
-    (async () => {
-      try {
-        let basePath = './';
-        if (typeof window !== 'undefined' && window.location) {
-          const baseUrl = import.meta.env?.BASE_URL || './';
-          let loc = new URL(window.location.href);
-          if (!loc.pathname.endsWith('/') && !loc.pathname.split('/').pop().includes('.')) {
-            loc.pathname += '/';
-          }
-          basePath = new URL(baseUrl, loc.href).href;
-          if (!basePath.endsWith('/')) basePath += '/';
-        }
-        const preloadLibs = [
-          { url: `${basePath}sysroot/wasm/libturtle.a`, paths: ['/usr/lib/libturtle.a', '/usr/lib/libturtle_canvas-wasi.a'] },
-          { url: `${basePath}sysroot/wasm/libraylib.a`, paths: ['/usr/lib/libraylib.a'] },
-          { url: `${basePath}sysroot/wasm/libturtle_raylib.a`, paths: ['/usr/lib/libturtle_raylib.a'] },
-          { url: `${basePath}sysroot/wasm/libsqlite3.a`, paths: ['/usr/lib/libsqlite3.a', '/lib/wasm32-wasip1/libsqlite3.a', '/lib/wasm32-wasi/libsqlite3.a'] },
-          { url: `${basePath}sysroot/wasm/sqlite3.wasm`, paths: ['/usr/bin/sqlite3'] },
-        ];
-        for (const item of preloadLibs) {
-          try {
-            const res = await fetch(item.url);
-            if (res && res.ok) {
-              const buf = await res.arrayBuffer();
-              const u8 = new Uint8Array(buf);
-              for (const p of item.paths) {
-                this.vfs.writeFile(p, u8, Date.now(), true);
-              }
-            }
-          } catch {}
-        }
-      } catch {}
-    })();
+    if (this.terminal) {
+      this.terminal.writeln('\x1b[90m[*] Loading workspace from storage...\x1b[0m');
+    }
 
     // Load workspace from IndexedDB
     await loadWorkspace(this.vfs);
@@ -148,9 +126,6 @@ export class App {
 
     this.fileTreeUI.render();
 
-    // Initialize Terminal, Shell Worker & Runtime
-    this.initTerminalAndShell();
-
     // Initialize Toolchain
     let wasmBasePath = '/sysroot/wasm';
     if (typeof window !== 'undefined' && window.location) {
@@ -173,10 +148,34 @@ export class App {
       },
     });
 
-    // Warm up compiler in background so sysroot and llvm-box are ready
-    this.toolchain.init().then(() => {
-      return this.toolchain._getLlvmBox({ silent: true });
-    }).catch(err => {
+    // Populate C/C++ sysroot headers and runtime libraries into VFS with progress indication
+    if (this.terminal) {
+      this.terminal.writeln('\x1b[90m[*] Preparing C/C++ standard library sysroot...\x1b[0m');
+    }
+    try {
+      await this.toolchain.init((status) => {
+        if (this.terminal) {
+          this.terminal.writeln(`\x1b[90m[*] ${status}\x1b[0m`);
+        }
+      });
+    } catch (err) {
+      console.warn('Toolchain sysroot setup notice:', err);
+      if (this.terminal) {
+        this.terminal.writeln(`\x1b[33m[!] Sysroot setup notice: ${err.message || err}\x1b[0m`);
+      }
+    }
+
+    // Signal VFS ready, display ready status in terminal, and launch shell prompt
+    if (this.terminal) {
+      this.terminal.writeln('\x1b[1;32m[✓]\x1b[0m System ready.\r\n');
+    }
+    this.isReady = true;
+    if (this.shellWorker) {
+      this.shellWorker.postMessage({ type: 'init', cwd: '/workspace' });
+    }
+
+    // Warm up compiler in background so llvm-box is ready in cache
+    this.toolchain._getLlvmBox({ silent: true }).catch(err => {
       console.warn('Toolchain background pre-initialization notice:', err);
     });
 
@@ -219,11 +218,15 @@ export class App {
     });
   }
 
-  initTerminalAndShell() {
+  initTerminalAndShell(options = {}) {
     const termContainer = document.getElementById('terminal-container');
     this.terminal = new TerminalManager(
       termContainer,
       (inputData) => {
+        // Drop input while system is initializing
+        if (!this.isReady) {
+          return;
+        }
         // If runtime worker is active and waiting for stdin (scanf), route to runtime
         if (this.runtimeManager && this.runtimeManager.handleTerminalInput(inputData)) {
           return;
@@ -234,6 +237,7 @@ export class App {
       },
       () => {
         // Ctrl+C handling: interrupt active runtime process or shell
+        if (!this.isReady) return;
         this.handleStopExecution();
       }
     );
@@ -284,7 +288,10 @@ export class App {
       }
     };
 
-    this.shellWorker.postMessage({ type: 'init', cwd: '/workspace' });
+    if (options.autoInit) {
+      this.isReady = true;
+      this.shellWorker.postMessage({ type: 'init', cwd: '/workspace' });
+    }
 
     const btnClearTerm = document.getElementById('btn-clear-term');
     if (btnClearTerm) {
