@@ -19,9 +19,10 @@ A zero-backend, installation-free, multi-file C/C++ development and learning env
   - [Execution Sandbox, Synchronous Stdin & In-Code File I/O](#5-execution-sandbox-synchronous-stdin--in-code-file-io)
   - [Unified Graphics Canvas, Vector 2D & Game Engine](#6-unified-graphics-canvas-vector-2d--game-engine)
   - [Turtle Graphics Subsystem (libturtle)](#7-turtle-graphics-subsystem-libturtle)
-  - [Interactive Educational Examples Suite](#8-interactive-educational-examples-suite)
-  - [Virtual File System & Storage](#9-virtual-file-system--storage)
-  - [Progressive Web App (PWA) & Offline Execution](#10-progressive-web-app-pwa--offline-execution)
+  - [SQLite 3 Embedded Database & CLI Subsystem (sqlite-wasi)](#8-sqlite-3-embedded-database--cli-subsystem-sqlite-wasi)
+  - [Interactive Educational Examples Suite](#9-interactive-educational-examples-suite)
+  - [Virtual File System & Storage](#10-virtual-file-system--storage)
+  - [Progressive Web App (PWA) & Offline Execution](#11-progressive-web-app-pwa--offline-execution)
 - [Getting Started & Local Development](#getting-started--local-development)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
@@ -86,6 +87,22 @@ This IDE is specifically engineered for **students and systems programming educa
   - **Interactive EOF (`Ctrl-D`)**: Flushes buffer or signals EOF to input loops (`scanf`, `cin`, `getchar`).
   - **Glob Pattern Expansion**: Expands `*` and `?` wildcards against the VFS file tree (e.g., `ls build/*`, `gcc src/*.c`).
   - **Advanced File Operations**: `mv` and `cp` support directory destinations (`mv a.out src/`), multi-source operands (`mv a.c b.c src/`), atomic file replacement, and recursive directory copying (`cp -r src backup/`).
+- **Startup Loading Indication & Deferred Prompt**:
+  - `TerminalManager` initializes early during app bootstrap so the `xterm.js` viewport streams real-time informational status during VFS preparation:
+    - `[System] Initializing WebAssembly C/C++ environment...`
+    - `[*] Mounting virtual filesystem headers...`
+    - `[*] Loading workspace from storage...`
+    - `[*] Preparing C/C++ standard library sysroot...`
+    - `[*] Fetching standard library sysroot archive (sysroot.tar.gz)...`
+    - `[*] Unpacking sysroot headers and runtime (<count> items)...`
+    - `[*] Preloading runtime libraries (libraylib, libturtle, libsqlite3)...`
+    - `[✓] System ready.`
+  - Keystrokes and interrupts are guarded during startup to prevent input corruption, and the welcome banner and interactive shell prompt (`ide:~$ `) appear strictly after all VFS items are populated.
+- **Unified Terminal Line Editor (`LineEditor`)**:
+  - Centralized line-editing subsystem (`src/terminal/line-editor.js`) mediating all interactive text input across the shell and running WebAssembly binaries (`sqlite3`, `scanf`, `fgets`).
+  - **Prompt-Safe Relative Redrawing**: Dynamically repositions cursor relative to user buffer and emits suffix clearing (`\x1b[K`), leaving preceding application prompts (`sqlite> `, `ide:~$ `) completely intact during editing and history traversal.
+  - **In-Line Navigation & History**: Supports Left/Right arrows, Home/End, Backspace, Delete, Ctrl+A/E, and Ctrl+K/U. Up/Down arrows traverse command history while preserving uncommitted scratch edits.
+  - **Contextual History Isolation**: Segregates history stacks by context (`'shell'` vs `'sqlite3'`), keeping bash commands and SQL statements cleanly separated.
 - **Transparent Working Directory Preservation**:
   - UI action buttons inject transparent directory stack commands into the terminal:
     - **Compile**: `pushd . && cd /workspace && gcc -Iinclude -Wall -c src/main.c -o build/main.o; popd`
@@ -127,6 +144,10 @@ This IDE is specifically engineered for **students and systems programming educa
 - **Project Settings Modal**:
   - Decoupled **Save** and **Generate Build Script** buttons: save configuration and toggle sysroots without clobbering existing files in `/workspace`.
   - Configure language mode, include directories, compiler warning flags, default build track, target binary name, linker flags, and custom Run Command (default: `pushd . && cd /workspace && ./a.out; popd`).
+- **Passive System Upgrade**:
+  - Accessible via the **System Upgrade** button in the Project Settings modal header.
+  - Presents a two-stage confirmation dialog explaining that compiler caches and Service Worker caches will be refreshed while keeping user `/workspace` files completely untouched.
+  - Purges the `wasm_cache` IndexedDB and Service Worker `CacheStorage`, then reloads the page to fetch the latest toolchain and runtime assets.
 
 ### 5. Execution Sandbox, Synchronous Stdin & In-Code File I/O
 - **Dedicated Runtime Web Worker**: User executables run in an isolated WebAssembly execution sandbox with complete WASI Preview 1 filesystem emulation.
@@ -208,7 +229,19 @@ This IDE is specifically engineered for **students and systems programming educa
     - Turtle with Raylib: `-lturtle_raylib -lraylib`
     - Standalone Raylib: `-lraylib`
 
-### 8. Interactive Educational Examples Suite
+### 8. SQLite 3 Embedded Database & CLI Subsystem (`sqlite-wasi`)
+- **Embedded C Engine**: Zero-dependency SQLite 3 (v3.49.1) targeting `wasm32-wasip1` integrated from [`breeze833/sqlite-wasi`](https://github.com/breeze833/sqlite-wasi).
+- **Sysroot Mounting & C Linkage**:
+  - Headers (`<sqlite3.h>`, `<sqlite3ext.h>`) and static library `libsqlite3.a` are bundled out of the box in `/usr/include/` and `/usr/lib/`.
+  - User C programs compile and link cleanly with standard `-lsqlite3` without additional flags or host bridges.
+- **Standalone Interactive CLI Tool (`/usr/bin/sqlite3`)**:
+  - `sqlite3.wasm` mounted at `/usr/bin/sqlite3`, executable directly in the terminal against memory databases (`:memory:`) or `/workspace/*.db`.
+  - Full interoperation with shell stream redirection (`<`, `>`, `>>`) and command pipelines (`|`).
+  - Interactive SQL prompt (`sqlite> `) featuring arrow-key in-line navigation, cursor positioning, and query history recall powered by `LineEditor`.
+- **Bidirectional Database Persistence**:
+  - SQLite database files created or modified in `/workspace` synchronize directly to the host VFS in real time and persist to IndexedDB.
+
+### 9. Interactive Educational Examples Suite
 The repository includes a ready-to-run suite of single-file C programs in the `examples/` directory for manual testing and pedagogical demonstration:
 - **`01_stdio.c`**: Interactive console standard I/O (menu navigation, Fibonacci generator, Factorial, Prime tester) configured with unbuffered stdout (`setbuf(stdout, NULL)`) and prompt flushing (`fflush(stdout)`).
 - **`02_raylib_interactive.c`**: Raylib 5.5 GLES2 interactive demo with mouse position tracking, bouncing balls on mouse click, and keyboard-controlled box movement.
@@ -221,14 +254,14 @@ The repository includes a ready-to-run suite of single-file C programs in the `e
 - **`09_sqlite_database.c`**: Relational database operations in pure C using embedded SQLite 3 (`<sqlite3.h>`), creating tables, inserting with parameterized statements, formatted record queries, aggregations, and inspecting generated databases using the `sqlite3` CLI tool.
 - **`examples/README.md`**: Step-by-step user compilation and running guide for each example.
 
-### 9. Virtual File System & Storage
+### 10. Virtual File System & Storage
 - **In-Memory VFS**: Fast hierarchical tree representation shared across the editor, shell, toolchain, and runtime execution worker.
 - **IndexedDB Persistence**: Automatically persists `/workspace` across browser sessions and page refreshes.
 - **Bidirectional Runtime Synchronization**: Changes made to `/workspace` files via C/C++ `fopen`/`fwrite`/`fputs`, C++ `<fstream>`, or SQLite 3 `sqlite3_open`/`sqlite3_step` automatically sync back to VFS in real-time and persist to IndexedDB, updating the file tree and editor tabs.
 - **Zip Import & Export**: One-click export of `/workspace` into a standard `.zip` file using JSZip, and direct zip unpacking into the workspace.
 - **Sysroot Protection**: Read-only protection on system root paths (`/usr`, `/bin`), pre-mounting standard C/C++ headers (`<stdio.h>`, `<stdlib.h>`, `<iostream>`, `<fstream>`, etc.), `<graphics.h>`, `<graphics_canvas.h>`, `<turtle.h>`, `<raylib.h>`, `<sqlite3.h>`, `<sqlite3ext.h>`, runtime static libraries (`libc.a`, `libturtle.a`, `libraylib.a`, `libturtle_raylib.a`, and `libsqlite3.a`), and CLI tools (`/usr/bin/sqlite3`).
 
-### 10. Progressive Web App (PWA) & Offline Execution
+### 11. Progressive Web App (PWA) & Offline Execution
 - **Installable Desktop/Mobile App**: Certified PWA with Web App Manifest (`manifest.webmanifest`), dark theme colors, and icons.
 - **In-App Install Prompt**: Automatically reveals an **Install** button in the header toolbar when the browser detects installability.
 - **100% Offline Capability**:
@@ -264,10 +297,10 @@ npm run dev
 
 Open your browser and navigate to `http://localhost:5173`.
 
-> **Note**: Vite is configured with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` HTTP headers to enable `SharedArrayBuffer` support out of the box during development.
+> **Note**: Vite is configured with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` HTTP headers to enable `SharedArrayBuffer` support out of the box during development. Additionally, the custom `emulate-production-sysroot` Vite plugin serves `/sysroot/wasm/` static assets as raw `application/octet-stream` with immutable caching headers, eliminating local dev server gzip double-handling and matching production streaming behavior.
 
 ### Running Tests
-Execute the full unit test suite (covering VFS, Shell parser, Toolchain driver, Static Archiver, Runtime Atomics, Make engine, PWA Service Worker, Zoom controls, Pipelines & Redirections, Raylib graphics, Generic Graphics / Canvas 2D, Shared Objects, Turtle Graphics, In-Code File I/O, and Detached Terminal / ANSI):
+Execute the full unit test suite (covering all 20 test suites: VFS, Shell parser, Toolchain driver, Static Archiver, Runtime Atomics, Make engine, PWA Service Worker, Zoom controls, Pipelines & Redirections, Raylib graphics, Generic Graphics / Canvas 2D, Shared Objects, Turtle Graphics, In-Code File I/O, Detached Terminal & ANSI, Collapsible & Resizable Sidebar, SQLite 3 WASI, Unified Terminal LineEditor, Project Settings & Passive Upgrade, and Startup Loading Indication):
 
 ```bash
 npm test

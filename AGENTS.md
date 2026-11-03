@@ -37,6 +37,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── 06_turtle_canvas.c     # Turtle graphics animated star spiral (canvas-wasi backend)
 │   ├── 07_turtle_raylib.c     # Turtle graphics geometric rosette (Raylib backend)
 │   ├── 08_ansi_terminal.c     # Comprehensive ANSI VT100 screen control & TUI demo
+│   ├── 09_sqlite_database.c   # Relational database operations in pure C via SQLite 3
 │   └── README.md              # Examples compilation & execution guide
 ├── index.html                 # Main entry point (loads /coi-serviceworker.js)
 ├── package.json               # Development tooling, dependencies, and test scripts
@@ -55,6 +56,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   ├── monaco-setup.js    # Monaco worker environment setup
 │   │   └── tabs.js            # Tab bar manager and dirty mark (*) tracking
 │   ├── terminal/
+│   │   ├── line-editor.js     # Unified terminal line-editing engine with relative prompt-safe cursor redrawing
 │   │   ├── terminal.js        # xterm.js wrapper and command injection bridge
 │   │   └── runtime.js         # Host-side runtime manager and SharedArrayBuffer coordinator
 │   ├── toolchain/
@@ -67,6 +69,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── vfs/
 │   │   ├── archive.js         # JSZip project export and import routines
 │   │   ├── raylib-headers.js  # Auto-generated virtual headers module for Raylib 5.5
+│   │   ├── sqlite-headers.js  # Auto-generated virtual headers module for SQLite 3
 │   │   ├── storage.js         # IndexedDB synchronization and default project seed
 │   │   ├── sysroot.js         # Standard C/C++ sysroot header and binary mount definitions
 │   │   ├── turtle-headers.js  # Auto-generated virtual headers module for libturtle
@@ -80,19 +83,24 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── manifest.webmanifest   # Web App Manifest for PWA installation
 │   ├── icons/                 # PWA application icons (192, 512, svg)
 │   └── sysroot/               # Downloaded on-demand via scripts/download-sysroot.js (git-ignored)
-│       ├── wasm/              # Prebuilt llvm-box.wasm, libraylib.a, libturtle.a, libturtle_raylib.a, sysroot.tar.gz
+│       ├── wasm/              # Prebuilt llvm-box.wasm, libraylib.a, libturtle.a, libturtle_raylib.a, libsqlite3.a, sqlite3.wasm, sysroot.tar.gz
 │       └── include/           # Minimal fallback libc headers, raylib headers & turtle headers
 └── test/
     ├── ar.test.js             # Static archiver creation, extraction, table, and wasm-ld linkage tests
     ├── detached-terminal.test.js # Detached floating terminal mode (80x24), snapping, and ANSI tests
     ├── fileio.test.js         # In-code standard C/C++ file I/O, fopen modes, seeking, and fstream tests
     ├── graphics.test.js       # Generic framebuffer, 2D vector, and pixel manipulation tests
+    ├── line-editor.test.js    # Unified LineEditor cursor navigation, history recall, and prompt safety tests
     ├── make.test.js           # Makefile parsing and incremental build tests
     ├── pipeline.test.js       # Command pipeline (|) and file redirection (<, >, >>) tests
     ├── raylib.test.js         # Raylib graphics compilation, input sync, and canvas UI tests
     ├── runtime.test.js        # SharedArrayBuffer Atomics protocol and Ctrl-D EOF tests
+    ├── settings-upgrade.test.js # Project Settings save/generate decoupling and passive upgrade tests
     ├── shell.test.js          # Shell argument parsing, globs, pushd/popd, mv/cp, and direct scripts
+    ├── sidebar.test.js        # Collapsible slim rail, horizontal resizer, and shortcut tests
     ├── so.test.js             # WebAssembly shared object (.so) compilation, linking, and runtime execution tests
+    ├── sqlite.test.js         # SQLite 3 C library compilation, linking, CLI execution, and VFS tests
+    ├── startup.test.js        # Startup loading indication, VFS population lifecycle, and prompt tests
     ├── sw.test.js             # Service Worker, PWA manifest, and offline COOP/COEP tests
     ├── toolchain.test.js      # Toolchain driver, MemFS directory, unlink guardrails, and libc tests
     ├── turtle.test.js         # Turtle graphics compilation, backend switching, and asset unmounting tests
@@ -335,6 +343,69 @@ Agents executing this project should proceed milestone-by-milestone:
 - Implement session persistence: stores custom width (`wasm_c_ide_sidebar_width`) and collapsed state (`wasm_c_ide_sidebar_collapsed`) in `localStorage`.
 - Add comprehensive automated test suite in `test/sidebar.test.js`.
 
+### Milestone 22: Project Settings Decoupling & Configurable Run Execution
+- Decouple **Save** (state & sysroot mounting) and **Generate Build Script** (`build.sh` & `Makefile` generation) in the Project Settings modal.
+- Implement custom Run Command input (`#setting-run-cmd`) persisting across sessions in `localStorage` (`wasm_c_ide_run_cmd`).
+- Default Run Command: `pushd . && cd /workspace && ./a.out; popd`.
+- Clicking the toolbar **Run** button (`#btn-run`) injects the configured command into the active terminal session, preserving directory stack semantics even on runtime errors.
+- Unit test coverage in `test/settings-upgrade.test.js`.
+
+### Milestone 23: Passive System Upgrade & Double-Confirmation Toolchain Refresh
+- Add **System Upgrade** button (`#modal-upgrade-btn`) in the Project Settings modal header.
+- Implement two-stage confirmation modal overlay (`#upgrade-confirm-overlay`):
+  - Informs the user of upgrade implications (purging cached compiler modules and Service Worker caches).
+  - Explicitly highlights that user workspace files (`/workspace`) remain completely intact.
+- Implement selective cache purge in `SettingsModal.prototype.performSystemUpgrade()`:
+  - Deletes `wasm_cache` IndexedDB database (purging `llvm-box.wasm`).
+  - Iterates and unregisters active Service Worker registrations.
+  - Clears Service Worker `CacheStorage` keys (`caches.delete`).
+  - Triggers hard page reload (`window.location.reload()`) to refetch the latest toolchain and assets from production.
+- Unit test coverage in `test/settings-upgrade.test.js`.
+
+### Milestone 24: SQLite 3 WASI Embedded Database & CLI Subsystem (`sqlite-wasi`)
+- Integrate zero-dependency embedded relational database engine SQLite 3 (version 3.49.1) targeting `wasm32-wasip1` from [`breeze833/sqlite-wasi`](https://github.com/breeze833/sqlite-wasi).
+- Bundled sysroot headers & static library:
+  - Dynamically fetch or mount `/usr/include/sqlite3.h` and `/usr/include/sqlite3ext.h`.
+  - Auto-generate `src/vfs/sqlite-headers.js` in `scripts/download-sysroot.js`.
+  - Mount precompiled static library `libsqlite3.a` in `/usr/lib/` and `/lib/wasm32-wasip1/`.
+  - User programs compile and link cleanly using standard `-lsqlite3` without additional flags or host bridges.
+- Standalone CLI binary (`/usr/bin/sqlite3`):
+  - Mount `sqlite3.wasm` into `/usr/bin/sqlite3` in the in-memory `VFS`.
+  - Register in shell commands (`which sqlite3` resolves to `/usr/bin/sqlite3`).
+  - Interoperate with shell pipelines and input/output stream redirections (`<`, `>`, `>>`, `|`).
+  - Live bidirectional synchronization of database files (`*.db`) to host VFS and FileTree.
+  - Interactive SQL shell supporting arrow key line-editing and query history via `LineEditor`.
+- Bundled example program: `examples/09_sqlite_database.c`.
+- Automated test coverage in `test/sqlite.test.js`.
+
+### Milestone 25: Unified Terminal Line Editor & Prompt-Safe Stdin Subsystem (`LineEditor`)
+- Implement `src/terminal/line-editor.js` as the single authoritative terminal line-editing engine for both `shell.worker.js` and `runtime.js`.
+- Prompt-safe relative redrawing algorithm:
+  - Cursor tracking strictly relative to the input line buffer.
+  - Cursor back-stepping (`\b.repeat(cursor)`) and suffix clearing (`\x1b[K`) preserving preceding application prompts (`sqlite> `, `ide:~$ `).
+- Keybindings & navigation:
+  - Horizontal navigation: Left/Right arrows, Home/End, Ctrl+A/E.
+  - Text deletion: Backspace, Delete, Ctrl+K (kill to line end), Ctrl+U (clear line).
+  - History recall: Up/Down arrows with uncommitted edit scratchpad preservation (`savedScratch`).
+  - Contextual history isolation: segregated history stacks by namespace (`'shell'`, `'sqlite3'`, `'default'`).
+- Signal & control invariants:
+  - `Ctrl-C` (`\x03`) immediately bypasses input buffer and triggers process/command interruption.
+  - `Ctrl-D` (`\x04`) flushes partial buffer if non-empty, or signals `STATE_EOF` (`-1`) to close interactive sessions cleanly.
+- Unit test coverage in `test/line-editor.test.js`.
+
+### Milestone 26: Startup Loading Indication, VFS Population Lifecycle & Dev Server Production Emulation
+- Real-time informational boot feedback in `xterm.js`:
+  - Early `TerminalManager` initialization during `App.prototype.init()` to stream boot progress into viewport.
+  - Sequential startup log messages: environment initialization, VFS headers mounting, workspace loading, sysroot preparation, tarball fetching, decompression and unpacking progress, runtime library preloading, and system ready.
+- Deferred shell prompt and keystroke guarding:
+  - `this.isReady` guards terminal input and keyboard interrupts before VFS population finishes.
+  - Welcome banner and shell prompt (`ide:~$ `) are strictly deferred until all VFS items are fully populated.
+  - Concurrent runtime library preloading via `Promise.all` in `WasmToolchain.prototype.init()`.
+- Local dev server production emulation (`emulate-production-sysroot`):
+  - Custom Vite plugin in `vite.config.js` serving `/sysroot/wasm/` as `application/octet-stream` without `Content-Encoding: gzip`.
+  - Adds immutable caching headers matching production server behavior, eliminating duplicate decompressions and manual testing delays.
+- Unit test coverage in `test/startup.test.js`.
+
 ---
 
 ## 4. Verification & Testing Checklist
@@ -372,7 +443,7 @@ Before marking any task complete, agents must verify:
 | **Font Zoom Persistence** | Reloading page preserves configured font size for editor and terminal via localStorage. |
 | **Sub-Path Asset Resolution** | Serving application under a sub-path resolves all assets without broken root `/` requests. |
 | **Async Wasm Loading (8MB Limit)** | Clang (~20MB+) compiles and instantiates asynchronously without triggering main-thread synchronous size errors. |
-| **Permanent Sysroot Bundling** | Raylib 5.5 and Raylib turtle development files (`raylib.h`, `raymath.h`, `rlgl.h`, `turtle_backend_raylib.h`, `libraylib.a`, `libturtle_raylib.a`) mount in sysroot by default. |
+| **Permanent Sysroot Bundling** | Raylib 5.5, Raylib turtle, and SQLite development files (`raylib.h`, `raymath.h`, `rlgl.h`, `turtle_backend_raylib.h`, `sqlite3.h`, `libraylib.a`, `libturtle_raylib.a`, `libsqlite3.a`) mount in sysroot by default. |
 | **Raylib Compilation & Linking** | Programs using `InitWindow` and drawing primitives link with `-lraylib` and run in runtime worker out-of-the-box. |
 | **Generic Framebuffer Compilation** | Programs using `<graphics.h>` compile with standard Pure C mode without external link flags. |
 | **Generic Framebuffer Rendering** | Passing pixel buffers to `graphics_present` transfers `ImageBitmap` frames to `#graphics-canvas`. |
@@ -383,16 +454,25 @@ Before marking any task complete, agents must verify:
 | **Background Activity Indicator** | Presenting frames while window is minimized/hidden activates green pulsating dot on `[🎮 Canvas]` button. |
 | **Dual-Channel Input Coordination** | Mouse movement, clicks, and keys synchronize via `SharedArrayBuffer` with message fallback and `DataView` byte safety. |
 | **Settings Action Decoupling** | Clicking Save updates state without modifying `/workspace`; Generate Build Script creates build files with user Linker Flags. |
+| **Configurable Run Command** | Project Settings modal configures custom run command with default `pushd . && cd /workspace && ./a.out; popd`, persists in `localStorage`, and injects into xterm on clicking `#btn-run`. |
 | **MemFS Recompilation Invariant** | Deleting an object file (`build/calc.o`) or deleted source file purges MemFS without ghost files; re-running `make` re-compiles and relinks without corrupted object headers. |
-| **Example Programs Suite** | `01_stdio.c`, `02_raylib_interactive.c`, `03_framebuffer_graphics.c`, `04_canvas_vector.c`, `05_canvas_pixels.c`, `06_turtle_canvas.c`, `07_turtle_raylib.c`, and `08_ansi_terminal.c` compile and run without error. |
+| **Example Programs Suite** | `01_stdio.c`, `02_raylib_interactive.c`, `03_framebuffer_graphics.c`, `04_canvas_vector.c`, `05_canvas_pixels.c`, `06_turtle_canvas.c`, `07_turtle_raylib.c`, `08_ansi_terminal.c`, and `09_sqlite_database.c` compile and run without error. |
 | **Canvas Turtle Graphics (`-lturtle`)** | Programs using `<turtle.h>` and `<turtle_backend_canvas_wasi.h>` compile by default and animate with `turtle_delay()`. |
 | **Raylib Turtle Graphics (`-lturtle_raylib -lraylib`)** | Linking with `-lturtle_raylib -lraylib` compiles and renders in Raylib mode out of the box. |
 | **Turtle Link-Time Backend Resolution** | Programs link against matching backend archive via `turtle_begin(ctx)` macro and fail link-time resolution if mismatched. |
+| **SQLite 3 C Compilation & Linking** | Programs including `<sqlite3.h>` compile and link cleanly with `-lsqlite3`, performing transactions with VFS persistence. |
+| **SQLite 3 CLI Execution** | `sqlite3` command executes in terminal against `:memory:` or `/workspace/*.db` with interactive queries and stream redirection. |
 | **Detached Floating Terminal Mode** | Floating window snaps to 80x24 standard VT100 dimensions, cycles through presets (100x30, 120x36), supports title dragging with viewport clamping, dynamic minimize/maximize icons (`_` and `□`), and active green glow focus. |
 | **ANSI VT100 & UTF-8 Screen Control** | Programs using ANSI VT100 control sequences and UTF-8 multi-byte characters (box borders, cursor positioning, colors) render crisply in `xterm.js`. |
 | **Synchronous Timer Sleeping** | WASI `poll_oneoff` accurately parses clock events and sleeps synchronously via `Atomics.wait` on `SharedArrayBuffer` without busy looping. |
+| **Collapsible & Resizable Sidebar** | Sidebar freely resizes with smooth col-resize dragging, collapses to 36px slim vertical rail with vertical WORKSPACE label, responds to Ctrl+B, and persists width and collapsed state in localStorage. |
+| **Unified LineEditor In-Line Navigation** | Left/Right arrows, Home/End, Backspace, Delete, Ctrl+A/E, and Ctrl+K/U operate with accurate cursor positioning without prompt corruption across shell and user binaries. |
+| **Arrow Key History Recall** | Up/Down arrows recall command history and restore uncommitted scratch edits across both shell and runtime. |
+| **Contextual History Isolation** | Shell command history (`gcc`, `ls`) and application query history (`sqlite3`: SQL statements) maintain separate history stacks. |
+| **Interactive SQLite3 Shell Line-Editing** | In `sqlite3` CLI, Up/Down arrows recall previous queries and Left/Right arrows move cursor in place without overwriting or erasing the `sqlite> ` prompt. |
+| **Ctrl-D and Ctrl-C Invariants** | `Ctrl-C` immediately halts running binaries or interrupts the shell, while `Ctrl-D` cleanly terminates interactive sessions (`sqlite3`, `cat`) or sends EOF without input corruption. |
+| **Passive System Upgrade & Workspace Preservation** | Clicking `#modal-upgrade-btn` in Project Settings header displays confirmation dialog; confirming purges compiler wasm-cache and Service Worker CacheStorage, triggers page reload, and keeps `/workspace` user files intact. |
+| **Startup Loading Indication & Deferred Prompt** | Startup streams informational loading and progress messages into the xterm terminal area during VFS preparation (sysroot fetching, decompression, unpacking, library preloading); input is guarded during boot, and the welcome message and interactive shell prompt appear only after all VFS items are fully populated. |
 | **Offline PWA Installation** | Application provides valid manifest, registers service worker with COOP/COEP headers, and operates offline. |
 | **Portable Zip Distribution** | `npm run pack` creates a standalone `wasm-c-ide.zip` that runs in any static web server document root. |
-| **Collapsible & Resizable Sidebar** | Sidebar freely resizes with smooth col-resize dragging, collapses to 36px slim vertical rail with vertical WORKSPACE label, responds to Ctrl+B, and persists width and collapsed state in localStorage. |
-| **Startup Loading Indication & Deferred Prompt** | Startup streams informational loading and progress messages into the xterm terminal area during VFS preparation (sysroot fetching, decompression, unpacking, library preloading); input is guarded during boot, and the welcome message and interactive shell prompt appear only after all VFS items are fully populated. |
 

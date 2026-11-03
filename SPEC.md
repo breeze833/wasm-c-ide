@@ -301,6 +301,9 @@ This specification defines the architecture and design invariants of `wasm-c-ide
   - The welcome banner (`Welcome to the In-Browser C/C++ Teaching IDE!`) and the interactive shell prompt (`ide:~$ `) are strictly deferred until all VFS items are populated.
   - The application tracks `this.isReady`: keystrokes and keyboard interrupts entered into the terminal during startup are discarded before VFS population finishes to prevent prompt corruption or commands running on an incomplete sysroot.
   - Precompiled runtime libraries (`libraylib.a`, `libturtle.a`, `libturtle_raylib.a`, `libsqlite3.a`, `sqlite3.wasm`) are fetched concurrently via `Promise.all` in `WasmToolchain.prototype.init()`, optimizing network throughput on startup and after Passive System Upgrades.
+- **Local Development Server Production Emulation (`emulate-production-sysroot`)**:
+  - Vite's default development server compresses static files and attaches `Content-Encoding: gzip` on `.tar.gz` files while serving them with `Cache-Control: no-cache`, causing browser-side decompressive double-handling and slow re-fetching during local manual testing.
+  - The custom `emulate-production-sysroot` Vite plugin intercepts `/sysroot/wasm/` requests in both `server` and `preview` modes, streams files as raw binary `application/octet-stream` without `Content-Encoding: gzip`, and sets `Cache-Control: public, max-age=31536000, immutable` alongside CORS and COOP/COEP headers, matching production caching and streaming behavior.
 
 ---
 
