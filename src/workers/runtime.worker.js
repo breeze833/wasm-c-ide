@@ -229,7 +229,7 @@ export async function runWasm(wasmBytes, argv, environ, stdinBytes = null, rayli
 
   const module = await WebAssembly.compile(wasmBytes);
   const importsList = WebAssembly.Module.imports(module);
-  const hasRaylib = importsList.some(i => i.module === 'raylib' || i.module === 'gl');
+  const hasRaylib = importsList.some(i => i.module === 'raylib' || i.module === 'gl' || i.module === 'audio');
 
   const importObject = {
     wasi_snapshot_preview1: wasi,
@@ -290,10 +290,23 @@ export async function runWasm(wasmBytes, argv, environ, stdinBytes = null, rayli
       onClose: () => {
         self.postMessage({ type: 'graphics_close' });
       },
+      onAudioMessage: (audioMsg, transfer) => {
+        if (transfer && transfer.length) {
+          self.postMessage(audioMsg, transfer);
+        } else {
+          self.postMessage(audioMsg);
+        }
+      },
     });
 
     const raylibImports = raylibHost.getImports();
     importObject.gl = new Proxy(raylibImports.gl, {
+      get(t, p) {
+        if (p in t) return t[p];
+        return () => 0;
+      }
+    });
+    importObject.audio = new Proxy(raylibImports.audio || {}, {
       get(t, p) {
         if (p in t) return t[p];
         return () => 0;
@@ -328,6 +341,7 @@ export async function runWasm(wasmBytes, argv, environ, stdinBytes = null, rayli
   } else if (hasRaylib) {
     importObject.gl = new Proxy({}, { get: () => () => 0 });
     importObject.raylib = new Proxy({}, { get: () => () => 0 });
+    importObject.audio = new Proxy({}, { get: () => () => 0 });
   }
 
   const instance = await WebAssembly.instantiate(module, importObject);

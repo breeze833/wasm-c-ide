@@ -161,4 +161,32 @@ You can copy and paste the code from any of these files into the IDE editor (`wo
   sqlite3 demo.db ".schema"
   ```
 
+---
+
+## 10. Interactive Raylib GUI, Animation & Audio Synthesizer
+* **File**: [`10_raylib_gui_audio.c`](./10_raylib_gui_audio.c)
+* **API Used**: Raylib 5.5 `<raylib.h>`, Raylib Immediate-Mode GUI `<raygui.h>`
+* **Features**:
+  * **Immediate-Mode GUI**: Complete desktop-style UI widgets (`GuiGroupBox`, `GuiButton`, `GuiSlider`, `GuiCheckBox`, `GuiLabel`) rendered directly by Raylib.
+  * **Procedural Web Audio**: Real-time procedural audio synthesis without external files (`InitAudioDevice`, `LoadSoundFromWave`, `PlaySound`, `SetSoundVolume`, `SetSoundPitch`):
+    * Harmonic Chime (4-tone major chord with exponential decay)
+    * Sci-Fi Laser (frequency-modulated downward chirp)
+    * Pop / Kick (resonant bass punch)
+    * Synth Lead (vibrato melodic lead tone)
+  * **Dynamic Visualizer Animation**:
+    * 16-band reactive frequency equalizer spectrum with falling peak gravity meters
+    * Orbital particle ring revolving around the core in a multi-frequency Lissajous rosette
+    * Audio-driven expanding shockwave ripples and pulsating glowing core
+  * **Theme & Parameter Controls**:
+    * Real-time sliders for master volume (0%–100%), pitch multiplier (0.5x–2.0x), and animation speed (0.5x–3.0x)
+    * Dynamic color themes: Cyan Pulse, Sunset Amber, and Emerald Glow
+    * Keyboard shortcuts (`1`, `2`, `3`, `4`) and mouse click interaction on the center core
+* **Prerequisite**:
+  * Ensure `-lraylib` is passed during linking (mounted permanently in sysroot).
+* **How to Compile & Run**:
+  ```bash
+  gcc 10_raylib_gui_audio.c -lraylib -o a.out
+  ./a.out
+  ```
+
 

@@ -35,6 +35,7 @@ A zero-backend, installation-free, multi-file C/C++ development and learning env
   - [Caddy](#caddy)
   - [Cloudflare Pages / Vercel](#cloudflare-pages--vercel)
   - [Cross-Origin Isolation & Security Requirements](#cross-origin-isolation--security-requirements)
+- [Documentation & Technical Guides](#documentation--technical-guides)
 - [License](#license)
 
 ---
@@ -176,10 +177,12 @@ This IDE is specifically engineered for **students and systems programming educa
   - Direct C bridge to the browser's native `OffscreenCanvas` 2D context (`CanvasRenderingContext2D`).
   - Vector primitives: `canvas_fill_rect`, `canvas_stroke_rect`, `canvas_clear_rect`, `canvas_arc`, `canvas_begin_path`, `canvas_fill`, `canvas_stroke`, `canvas_set_fill_style`, `canvas_set_stroke_style`, `canvas_fill_text`, `canvas_set_font`, `canvas_save`, `canvas_restore`, `canvas_rotate`, `canvas_scale`, `canvas_present`.
   - Pixel manipulation & framebuffer interop: `canvas_get_pixels`, `canvas_put_pixels`, `canvas_get_image_data`, `canvas_put_image_data`, `canvas_get_pixel`, `canvas_set_pixel` for direct pixel-level reading, writing, and 2D image processing filter implementation.
-- **Bundled Raylib 5.5 Game Engine (`raylib-wasi`)**:
-  - Full-featured 2D/3D GLES2/WebGL game engine integration decoupled into the standalone package [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) without Emscripten, compiled natively with LLVM 19.
-  - Standard C headers (`<raylib.h>`, `<raymath.h>`, `<rlgl.h>`) and static library archive (`libraylib.a`) are mounted permanently into the sysroot by default.
-  - Zero ad-hoc host dispatchers: WebGL ES 2.0 state machine, handle tables, and Wasm runtime imports (`gl`, `raylib`) are imported directly from `raylib-wasi`.
+- **Bundled Raylib 5.5 Game Engine, GUI & Web Audio (`raylib-wasi`)**:
+  - Full-featured 2D/3D GLES2/WebGL game engine, immediate-mode GUI (`raygui.h`), and pure WASI Web Audio subsystem decoupled into the standalone package [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) without Emscripten, compiled natively with LLVM 19.
+  - Standard C headers (`<raylib.h>`, `<raymath.h>`, `<rlgl.h>`, `<raygui.h>`) and static library archive (`libraylib.a`) are mounted permanently into the sysroot by default.
+  - **Web Audio Subsystem**: Pure WASI audio decoders and playback (`InitAudioDevice`, `Sound`, `Wave`, `Music`, `AudioStream`) without POSIX threads, bridged to browser `AudioContext` via `createAudioReceiver` and runtime worker proxying.
+  - **Immediate-Mode GUI**: Built-in `raygui.h` support for desktop-style UI widgets (buttons, sliders, toggles, text boxes) compiled natively in C.
+  - Zero ad-hoc host dispatchers: WebGL ES 2.0 state machine, handle tables, audio receiver, and Wasm runtime imports (`gl`, `raylib`) are imported directly from `raylib-wasi`.
   - Shares the 512-byte `SharedArrayBuffer` `InputCoordinator` and floating/dockable `GraphicsWindowUI` with `canvas-wasi`.
   - Compiles and links out-of-the-box using standard `-lraylib` linker flag.
 - **Synchronous Zero-Copy Frame Delivery**:
@@ -252,6 +255,7 @@ The repository includes a ready-to-run suite of single-file C programs in the `e
 - **`07_turtle_raylib.c`**: Progressive turtle graphics demo using the Raylib backend (`<turtle.h>`, `<turtle_backend_raylib.h>`) drawing a geometric rosette pattern.
 - **`08_ansi_terminal.c`**: Comprehensive ANSI VT100 screen control, cursor positioning, color rendering, and progress animation demo in pure C using UTF-8 box characters and POSIX `nanosleep()` frame timing.
 - **`09_sqlite_database.c`**: Relational database operations in pure C using embedded SQLite 3 (`<sqlite3.h>`), creating tables, inserting with parameterized statements, formatted record queries, aggregations, and inspecting generated databases using the `sqlite3` CLI tool.
+- **`10_raylib_gui_audio.c`**: Comprehensive Raylib 5.5 demo integrating immediate-mode GUI (`raygui.h`), procedural Web Audio synthesis (`InitAudioDevice`, `LoadSoundFromWave`, `PlaySound`), 16-band frequency equalizer animation with falling peak caps, and interactive shockwave ripples.
 - **`examples/README.md`**: Step-by-step user compilation and running guide for each example.
 
 ### 10. Virtual File System & Storage
@@ -445,6 +449,16 @@ Add a `_headers` file to `public/` (or configure in dashboard):
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
 ```
+
+---
+
+## Documentation & Technical Guides
+
+- [**`SPEC.md`**](./SPEC.md): Technical specification and architectural ground truth defining the unified VFS host, toolchain integration, and windowing system.
+- [**`docs/KNOWN_ISSUES.md`**](./docs/KNOWN_ISSUES.md): Documented version gaps, limits, and runtime constraints.
+- [**`docs/SINGLE_THREAD_FRAME_PACING.md`**](./docs/SINGLE_THREAD_FRAME_PACING.md): Case study on single-threaded WebAssembly graphics, progressive animation pacing, and mathematical derivation of frame cadence metrics.
+- [**`AGENTS.md`**](./AGENTS.md): Autonomous agent engineering guidelines, milestone tracking, and verification checklists.
+- [**`examples/README.md`**](./examples/README.md): Comprehensive compilation and execution guide for all 10 bundled educational examples.
 
 ---
 

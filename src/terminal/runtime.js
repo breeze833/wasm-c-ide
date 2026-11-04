@@ -2,6 +2,7 @@
 // Coordinates runtime.worker.js with SharedArrayBuffer and terminal stdin capture
 
 import { InputCoordinator } from 'canvas-wasi';
+import { createAudioReceiver } from 'raylib-wasi';
 import { LineEditor } from './line-editor.js';
 
 const CONTROL_STATE_IDX = 0;
@@ -18,6 +19,7 @@ export class RuntimeManager {
   constructor(terminal, options = {}) {
     this.terminal = terminal;
     this.graphicsWindow = options.graphicsWindow || null;
+    this.audioReceiver = typeof createAudioReceiver === 'function' ? createAudioReceiver() : null;
     this.worker = null;
     this.isRunning = false;
     this.isWaitingForStdin = false;
@@ -159,6 +161,10 @@ export class RuntimeManager {
         } else if (msg.type === 'graphics_close') {
           if (this.graphicsWindow) {
             this.graphicsWindow.close();
+          }
+        } else if (msg.type && msg.type.startsWith('audio_')) {
+          if (this.audioReceiver) {
+            this.audioReceiver.handleMessage(msg);
           }
         } else if (msg.type === 'file_sync') {
           if (options.vfs && msg.path && msg.data) {
@@ -378,6 +384,11 @@ export class RuntimeManager {
     if (this.inputCoordinator) {
       this.inputCoordinator.reset();
     }
+    if (this.audioReceiver && typeof this.audioReceiver.handleMessage === 'function') {
+      try {
+        this.audioReceiver.handleMessage({ type: 'audio_close' });
+      } catch (_) {}
+    }
     if (this.graphicsWindow && typeof this.graphicsWindow.clearActivity === 'function') {
       this.graphicsWindow.clearActivity();
     }
@@ -385,5 +396,12 @@ export class RuntimeManager {
       this.worker.terminate();
       this.worker = null;
     }
+  }
+
+  unlockAudio() {
+    if (this.audioReceiver && typeof this.audioReceiver.resume === 'function') {
+      return this.audioReceiver.resume();
+    }
+    return Promise.resolve();
   }
 }

@@ -25,7 +25,7 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 - **Strict Standard Link-Time Symbol Resolution**: The linker enforces standard resolution of undefined symbols, immediately reporting missing libraries or unlinked object files as standard `wasm-ld: error: undefined symbol: <name>` diagnostics rather than deferring failures to opaque runtime crashes (exit code 1). Authorized host imports (`canvas-wasi`) are strictly whitelisted via `--allow-undefined-file=/usr/lib/wasm-host-imports.txt`.
 - **Decoupled Dual-Module Graphics Subsystems**:
   - **`canvas-wasi`**: Pure C direct software framebuffer (`<graphics.h>`), HTML5 Canvas 2D vector primitives (`<graphics_canvas.h>`), floating/dockable graphics console UI (`GraphicsWindowUI`), and shared 512-byte `SharedArrayBuffer` input coordination (`InputCoordinator`).
-  - **`raylib-wasi`**: Standalone Raylib 5.5 port and WebGL ES 2.0 host bridge, providing Wasm imports (`gl`, `raylib`) and zero-Emscripten `PLATFORM_CUSTOM` execution.
+  - **`raylib-wasi`**: Standalone Raylib 5.5 port, WebGL ES 2.0 host bridge, and pure WASI Web Audio subsystem, providing Wasm imports (`gl`, `raylib`) and zero-Emscripten `PLATFORM_CUSTOM` execution. Includes `raylib.h`, `raymath.h`, `rlgl.h`, and `raygui.h`.
 - **Turtle Graphics Subsystem (`libturtle`)**: Modular educational turtle graphics with dual backend support (Canvas-WASI and Raylib backends both permanently bundled into sysroot out-of-the-box).
 - **SQLite 3 Embedded Database & CLI Subsystem (`sqlite-wasi`)**: Precompiled SQLite 3.54.1 WASI Preview 1 static library (`libsqlite3.a`), C headers (`sqlite3.h`, `sqlite3ext.h`), and standalone interactive CLI (`sqlite3.wasm` mounted at `/usr/bin/sqlite3`) bundled permanently into sysroot out-of-the-box, supporting SQL relational databases with real-time VFS persistence.
 - **Unified Terminal Line Editor & Interactive Stdin Subsystem (`LineEditor`)**:
@@ -177,12 +177,13 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 
 ### 3.4 Decoupled Graphics Subsystems, Turtle Graphics & Direct Sysroot Bundling
 - **`canvas-wasi`**: Pure C direct software framebuffer (`<graphics.h>`), Canvas 2D vector primitives (`<graphics_canvas.h>`), floating/dockable graphics console (`GraphicsWindowUI`), and 512-byte `SharedArrayBuffer` input coordination (`InputCoordinator`).
-- **`raylib-wasi`**: Standalone Raylib 5.5 WASI runtime and WebGL ES 2.0 host bridge (`createRaylibHost`).
+- **`raylib-wasi`**: Standalone Raylib 5.5 WASI runtime, WebGL ES 2.0 host bridge, and pure WASI Web Audio subsystem (`createRaylibHost`, `createAudioReceiver`).
 - **Uniform Virtual Headers & Permanent Sysroot Bundling**:
   - `scripts/download-sysroot.js` auto-generates virtual header JS modules: `src/vfs/turtle-headers.js` and `src/vfs/raylib-headers.js`.
-  - `mountSysroot(vfs)` mounts all graphics headers (`graphics.h`, `graphics_canvas.h`, `turtle.h`, `turtle_backend_canvas_wasi.h`, `turtle_backend_raylib.h`, `raylib.h`, `raymath.h`, `rlgl.h`) permanently under `/usr/include/` on app startup.
+  - `mountSysroot(vfs)` mounts all graphics and GUI headers (`graphics.h`, `graphics_canvas.h`, `turtle.h`, `turtle_backend_canvas_wasi.h`, `turtle_backend_raylib.h`, `raylib.h`, `raymath.h`, `rlgl.h`, `raygui.h`) permanently under `/usr/include/` on app startup.
   - `libraylib.a`, `libturtle_raylib.a`, `libturtle.a`, and `libturtle_canvas-wasi.a` are preloaded into `/usr/lib/` and `/lib/wasm32-wasip1/` out of the box, requiring zero network calls or dynamic fetching at runtime.
   - Project Settings eliminates the `Enable Raylib Graphics Support` checkbox; users specify `-lraylib` or `-lturtle_raylib -lraylib` directly in Linker Flags.
+- **Web Audio Subsystem & Main-Thread Proxying**: Pure WASI audio decoders and playback (`InitAudioDevice`, `Sound`, `Wave`, `Music`, `AudioStream`) executed without POSIX threads. The runtime worker proxies audio messages (`audio_init`, `audio_play`, `audio_stream_feed`, etc.) to the main thread `createAudioReceiver`, which manages browser `AudioContext` lifecycle and audio output.
 - **`libturtle`**: Modular educational turtle graphics with Canvas-WASI and Raylib backends.
   - **Link-Time Backend Resolution**: High-level initialization expands via `#define turtle_begin(ctx) (<backend>_turtle_init(ctx) && turtle_begin_core())` to guarantee link failure if code is linked against the incorrect backend archive.
   - **Automated Hermetic In-Tree Compilation**: `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and compiles both backends (`canvas-wasi` and `raylib`) for `wasm32-wasi` directly via the in-tree `llvm-box.wasm` toolchain (`WasmToolchain`) and archives them via `buildArchive` (`ar.js`), eliminating host toolchain dependencies.

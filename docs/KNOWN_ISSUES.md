@@ -105,6 +105,15 @@ The WASI Preview 1 specification (`wasm32-wasip1`) is fundamentally a single-pro
 - **No Process Forking**: Syscalls such as `fork()`, `execve()`, `waitpid()`, and POSIX signal handling do not exist in WASI Preview 1 and cannot run client-side in the browser.
 - **Stubbed Threading**: `pthread_create`, `pthread_join`, and C++ `std::thread` cannot spawn operating system threads. The sysroot provides a minimal stub `libpthread.a` satisfying symbol resolution for single-threaded binaries.
 
+### Graphics Rendering & Frame Pacing Limitation
+A critical architectural consequence of this single-threaded model is that **graphics rendering, user program logic, and pacing delays share a single execution thread**:
+1. **No Asynchronous Display Loop**: Unlike multi-threaded desktop game engines where an independent render thread or display compositor continues flipping buffers at 60 Hz regardless of logic stalls, WebAssembly graphics engines (such as `raylib-wasi`) execute synchronously. A frame is only presented and counted towards the application's FPS when `EndDrawing()` is explicitly called.
+2. **Coupled Execution and Delay Serialization**: Any CPU computation (`turtle_forward`), trigonometric calculations, or intentional sleeps (`turtle_delay`, `usleep`, `nanosleep`) directly block the entire thread and postpone subsequent frame presentation.
+3. **Dual-Pacing Conflicts with Non-Aligned Delays**: When animation delays do not align with the display frame period (such as requesting a 25ms delay when targeting 60 FPS / 16.67ms), the interaction between Raylib's internal frame limiter and user-space pacing loops causes frame cadence jitter, alternating between 1-frame and 2-frame iterations and producing unexpected metrics such as ~47 FPS.
+
+> [!NOTE]
+> For a comprehensive architectural and mathematical case study analyzing the 25ms progressive animation delay in Raylib turtle graphics and the derivation of the ~47 FPS metric, see [docs/SINGLE_THREAD_FRAME_PACING.md](./SINGLE_THREAD_FRAME_PACING.md).
+
 ### Process Lifecycle & Runaway Loop Interruption
 Process lifecycle and cancellation are handled out-of-band by the host `RuntimeManager`:
 - An infinite loop (e.g. `while(1);`) will not freeze the browser UI thread because user code executes inside a dedicated Web Worker.

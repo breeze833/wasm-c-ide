@@ -22,7 +22,8 @@ You are an autonomous senior systems and web engineer implementing the project s
 ├── AGENTS.md                  # Agent operating protocols (this file)
 ├── README.md                  # User-facing project documentation & deployment guides
 ├── docs/                      # Project documentation and historical specifications
-│   ├── KNOWN_ISSUES.md        # Documented toolchain version gaps, limits, and MemFS invariants
+│   ├── KNOWN_ISSUES.md        # Documented toolchain version gaps, limits, and single-threaded frame pacing
+│   ├── SINGLE_THREAD_FRAME_PACING.md # Case study on single-threaded WebAssembly graphics & progressive delays
 │   └── archived/              # Historical technical specifications (v1 baseline through v4)
 │       ├── SPECv1.md
 │       ├── SPECv2.md
@@ -38,6 +39,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── 07_turtle_raylib.c     # Turtle graphics geometric rosette (Raylib backend)
 │   ├── 08_ansi_terminal.c     # Comprehensive ANSI VT100 screen control & TUI demo
 │   ├── 09_sqlite_database.c   # Relational database operations in pure C via SQLite 3
+│   ├── 10_raylib_gui_audio.c  # Interactive Raylib immediate-mode GUI, animation & Web Audio synthesizer
 │   └── README.md              # Examples compilation & execution guide
 ├── index.html                 # Main entry point (loads /coi-serviceworker.js)
 ├── package.json               # Development tooling, dependencies, and test scripts
@@ -232,8 +234,9 @@ Agents executing this project should proceed milestone-by-milestone:
 ### Milestone 14: Raylib Module Decoupling (`raylib-wasi`) & Architecture Unification
 - Modularize Raylib 5.5 host runtime into external package [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi).
 - Remove ad-hoc `src/toolchain/raylib-host.js` from `wasm-c-ide`.
-- Delegate WebGL ES 2.0 state machine, handle tables, and Wasm runtime imports (`gl`, `raylib`) directly to `raylib-wasi`.
-- Mount Raylib standard C headers (`raylib.h`, `raymath.h`, `rlgl.h`) into VFS and sysroot via `scripts/download-sysroot.js` / module dist.
+- Delegate WebGL ES 2.0 state machine, handle tables, Web Audio bridge, and Wasm runtime imports (`gl`, `raylib`) directly to `raylib-wasi`.
+- Integrate Web Audio subsystem: pure WASI audio decoders and playback proxying (`createAudioReceiver`) from worker to main thread `AudioContext`.
+- Mount Raylib standard C and GUI headers (`raylib.h`, `raymath.h`, `rlgl.h`, `raygui.h`) into VFS and sysroot via `scripts/download-sysroot.js` / module dist.
 - Enforce strict zero-binary and zero-upstream-header Git repository policies: `libraylib.a` is fetched on demand via GitHub Releases.
 - Align `InputCoordinator` between `canvas-wasi` and `raylib-wasi` over the shared 512-byte `SharedArrayBuffer` layout.
 
@@ -326,8 +329,8 @@ Agents executing this project should proceed milestone-by-milestone:
   - Convert nanosecond timeouts to millisecond durations and sleep synchronously via `Atomics.wait()` on `SharedArrayBuffer` when cross-origin isolated.
   - Powers standard POSIX `nanosleep(&ts, NULL)`, `usleep()`, `sleep()`, and turtle `delay_ms()` accurately without 100% CPU busy looping.
 - **Permanent Sysroot Bundling & Settings Simplification**:
-  - Auto-generate `src/vfs/raylib-headers.js` from `raylib.h`, `raymath.h`, `rlgl.h` in `scripts/download-sysroot.js`.
-  - Mount Raylib and Raylib-turtle headers (`raylib.h`, `raymath.h`, `rlgl.h`, `turtle_backend_raylib.h`) permanently in `/usr/include/` during `mountSysroot(vfs)`.
+  - Auto-generate `src/vfs/raylib-headers.js` from `raylib.h`, `raymath.h`, `rlgl.h`, `raygui.h` in `scripts/download-sysroot.js`.
+  - Mount Raylib and Raylib-turtle headers (`raylib.h`, `raymath.h`, `rlgl.h`, `raygui.h`, `turtle_backend_raylib.h`) permanently in `/usr/include/` during `mountSysroot(vfs)`.
   - Mount and preload `libraylib.a` and `libturtle_raylib.a` in `/usr/lib/` and `/lib/wasm32-wasip1/` out of the box.
   - Remove `#setting-raylib` checkbox from Project Settings; users explicitly specify linker flags (`-lraylib`, `-lturtle_raylib -lraylib`).
 
@@ -406,6 +409,22 @@ Agents executing this project should proceed milestone-by-milestone:
   - Adds immutable caching headers matching production server behavior, eliminating duplicate decompressions and manual testing delays.
 - Unit test coverage in `test/startup.test.js`.
 
+### Milestone 27: Raylib 5.5 Web Audio, Immediate-Mode GUI (`raygui.h`) & Single-Threaded Pacing Documentation
+- Raylib 5.5 Ecosystem Integration:
+  - Header files: `<raylib.h>`, `<raymath.h>`, `<rlgl.h>`, and `<raygui.h>` mounted permanently into `/usr/include/` via default VFS sysroot.
+  - Runtime static library `libraylib.a` bundled in sysroot and linked out-of-the-box with `-lraylib`.
+- Pure WASI Web Audio Subsystem:
+  - Raylib audio decoders and procedural wave synthesis running in runtime worker without POSIX threads.
+  - Proxying worker audio messages to host `createAudioReceiver` (`src/terminal/runtime.js`), bridging to browser `AudioContext`.
+  - Automatic audio unlock on user gesture and clean teardown on process exit.
+- Immediate-Mode GUI (`raygui.h`):
+  - In-tree support for `raygui.h` (`#define RAYGUI_IMPLEMENTATION`) with immediate-mode widgets (buttons, sliders, toggles, checkboxes, group boxes).
+- Pedagogical Example:
+  - Bundled `examples/10_raylib_gui_audio.c` demonstrating immediate-mode UI, procedural Web Audio synthesis, 16-band frequency equalizer, orbital particles, and reactive shockwaves.
+- Architectural Documentation & Single-Threaded Frame Pacing:
+  - Documented WebAssembly single-threaded display loop constraints in `docs/KNOWN_ISSUES.md`.
+  - Authored comprehensive case study `docs/SINGLE_THREAD_FRAME_PACING.md` detailing the mechanics and mathematics of progressive animation delays (e.g. `turtle_delay(25.0)`) and the alternating 1-frame/2-frame cadence resulting in ~47 FPS.
+
 ---
 
 ## 4. Verification & Testing Checklist
@@ -443,7 +462,7 @@ Before marking any task complete, agents must verify:
 | **Font Zoom Persistence** | Reloading page preserves configured font size for editor and terminal via localStorage. |
 | **Sub-Path Asset Resolution** | Serving application under a sub-path resolves all assets without broken root `/` requests. |
 | **Async Wasm Loading (8MB Limit)** | Clang (~20MB+) compiles and instantiates asynchronously without triggering main-thread synchronous size errors. |
-| **Permanent Sysroot Bundling** | Raylib 5.5, Raylib turtle, and SQLite development files (`raylib.h`, `raymath.h`, `rlgl.h`, `turtle_backend_raylib.h`, `sqlite3.h`, `libraylib.a`, `libturtle_raylib.a`, `libsqlite3.a`) mount in sysroot by default. |
+| **Permanent Sysroot Bundling** | Raylib 5.5, Raylib turtle, and SQLite development files (`raylib.h`, `raymath.h`, `rlgl.h`, `raygui.h`, `turtle_backend_raylib.h`, `sqlite3.h`, `libraylib.a`, `libturtle_raylib.a`, `libsqlite3.a`) mount in sysroot by default. |
 | **Raylib Compilation & Linking** | Programs using `InitWindow` and drawing primitives link with `-lraylib` and run in runtime worker out-of-the-box. |
 | **Generic Framebuffer Compilation** | Programs using `<graphics.h>` compile with standard Pure C mode without external link flags. |
 | **Generic Framebuffer Rendering** | Passing pixel buffers to `graphics_present` transfers `ImageBitmap` frames to `#graphics-canvas`. |
@@ -456,7 +475,7 @@ Before marking any task complete, agents must verify:
 | **Settings Action Decoupling** | Clicking Save updates state without modifying `/workspace`; Generate Build Script creates build files with user Linker Flags. |
 | **Configurable Run Command** | Project Settings modal configures custom run command with default `pushd . && cd /workspace && ./a.out; popd`, persists in `localStorage`, and injects into xterm on clicking `#btn-run`. |
 | **MemFS Recompilation Invariant** | Deleting an object file (`build/calc.o`) or deleted source file purges MemFS without ghost files; re-running `make` re-compiles and relinks without corrupted object headers. |
-| **Example Programs Suite** | `01_stdio.c`, `02_raylib_interactive.c`, `03_framebuffer_graphics.c`, `04_canvas_vector.c`, `05_canvas_pixels.c`, `06_turtle_canvas.c`, `07_turtle_raylib.c`, `08_ansi_terminal.c`, and `09_sqlite_database.c` compile and run without error. |
+| **Example Programs Suite** | `01_stdio.c`, `02_raylib_interactive.c`, `03_framebuffer_graphics.c`, `04_canvas_vector.c`, `05_canvas_pixels.c`, `06_turtle_canvas.c`, `07_turtle_raylib.c`, `08_ansi_terminal.c`, `09_sqlite_database.c`, and `10_raylib_gui_audio.c` compile and run without error. |
 | **Canvas Turtle Graphics (`-lturtle`)** | Programs using `<turtle.h>` and `<turtle_backend_canvas_wasi.h>` compile by default and animate with `turtle_delay()`. |
 | **Raylib Turtle Graphics (`-lturtle_raylib -lraylib`)** | Linking with `-lturtle_raylib -lraylib` compiles and renders in Raylib mode out of the box. |
 | **Turtle Link-Time Backend Resolution** | Programs link against matching backend archive via `turtle_begin(ctx)` macro and fail link-time resolution if mismatched. |

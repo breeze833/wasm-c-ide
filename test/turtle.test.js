@@ -7,7 +7,7 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import { VFS } from '../src/vfs/vfs.js';
-import { mountSysroot, mountRaylibSysroot, unmountRaylibSysroot, TURTLE_HEADERS } from '../src/vfs/sysroot.js';
+import { mountSysroot, TURTLE_HEADERS } from '../src/vfs/sysroot.js';
 import { SettingsModal } from '../src/components/settings.js';
 import { WasmToolchain } from '../src/toolchain/wasm-clang.js';
 import { executeGccCommand } from '../src/toolchain/driver.js';
@@ -54,25 +54,6 @@ assert.strictEqual(turtleHContent.includes('turtle_delay'), true);
 assert.strictEqual(turtleHContent.includes('turtle_end'), true);
 console.log('✓ VFS default sysroot mounting with canvas-wasi and raylib turtle backends verified');
 
-// Test 3: Raylib turtle backend backward-compatible mount & unmount lifecycle
-const dummyRaylibHeaders = {
-  'raylib.h': '/* raylib.h */',
-  'raymath.h': '/* raymath.h */',
-  'rlgl.h': '/* rlgl.h */',
-  'turtle_backend_raylib.h': '/* turtle_backend_raylib.h */',
-};
-const dummyRaylibLib = new Uint8Array([1, 2, 3, 4]);
-const dummyTurtleRaylibLib = new Uint8Array([5, 6, 7, 8]);
-
-mountRaylibSysroot(vfs, dummyRaylibHeaders, dummyRaylibLib, {}, dummyTurtleRaylibLib);
-assert.strictEqual(vfs.exists('/usr/include/turtle_backend_raylib.h'), true);
-assert.strictEqual(vfs.exists('/usr/lib/libturtle_raylib.a'), true);
-assert.deepStrictEqual(vfs.readFile('/usr/lib/libturtle_raylib.a', false), dummyTurtleRaylibLib);
-
-unmountRaylibSysroot(vfs);
-assert.strictEqual(vfs.exists('/usr/include/turtle_backend_raylib.h'), false);
-assert.strictEqual(vfs.exists('/usr/lib/libturtle_raylib.a'), false);
-console.log('✓ Raylib turtle backend dynamic mount and unmount verified');
 
 // Test 4: Project Settings build.sh & Makefile generation with manual turtle linker flags
 const settingsVfs = new VFS();
@@ -188,14 +169,5 @@ const raylibImportModules = new Set(raylibImports.map(i => i.module));
 assert.strictEqual(raylibImportModules.has('gl'), true, 'Must import gl namespace');
 assert.strictEqual(raylibImportModules.has('raylib'), true, 'Must import raylib namespace');
 console.log('✓ End-to-end WasmToolchain compilation & linking with -lturtle_raylib -lraylib verified');
-
-// Test 7: Unmounting Raylib purges turtle_backend_raylib.h and libturtle_raylib.a from VFS
-unmountRaylibSysroot(compileVfs, tc);
-assert.strictEqual(compileVfs.exists('/usr/include/turtle_backend_raylib.h'), false);
-assert.strictEqual(compileVfs.exists('/usr/lib/libturtle_raylib.a'), false);
-
-const failRaylibComp = await tc.compile('workspace/turtle_raylib.c', 'workspace/fail.o', 'c', ['-I/include', '-I/workspace']);
-assert.notStrictEqual(failRaylibComp, 0, 'Compilation must fail after unmounting Raylib turtle backend');
-console.log('✓ Unmounting Raylib purges turtle raylib assets and blocks compilation verified');
 
 console.log('--- ALL TURTLE GRAPHICS TESTS PASSED ---');

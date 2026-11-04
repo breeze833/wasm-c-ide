@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import { VFS } from '../src/vfs/vfs.js';
-import { mountSysroot, mountRaylibSysroot, unmountRaylibSysroot, RAYLIB_HEADERS } from '../src/vfs/sysroot.js';
+import { mountSysroot, RAYLIB_HEADERS } from '../src/vfs/sysroot.js';
 import { SettingsModal } from '../src/components/settings.js';
 import { createRaylibHost } from 'raylib-wasi';
 import { InputCoordinator } from 'canvas-wasi';
@@ -19,6 +19,7 @@ assert.strictEqual(libraylibBytes.subarray(0, 8).toString(), '!<arch>\n', 'libra
 assert.strictEqual(fs.existsSync('public/sysroot/include/raylib/raylib.h'), true);
 assert.strictEqual(fs.existsSync('public/sysroot/include/raylib/raymath.h'), true);
 assert.strictEqual(fs.existsSync('public/sysroot/include/raylib/rlgl.h'), true);
+assert.strictEqual(fs.existsSync('public/sysroot/include/raylib/raygui.h'), true, 'raygui.h must exist');
 console.log('✓ Precompiled libraylib.a archive and headers verified');
 
 // Test 2: VFS default mounting of Raylib in sysroot
@@ -27,28 +28,13 @@ mountSysroot(defaultVfs);
 assert.strictEqual(defaultVfs.exists('/usr/include/raylib.h'), true, 'raylib.h must be mounted by default in sysroot');
 assert.strictEqual(defaultVfs.exists('/usr/include/raymath.h'), true, 'raymath.h must be mounted by default in sysroot');
 assert.strictEqual(defaultVfs.exists('/usr/include/rlgl.h'), true, 'rlgl.h must be mounted by default in sysroot');
+assert.strictEqual(defaultVfs.exists('/usr/include/raygui.h'), true, 'raygui.h must be mounted by default in sysroot');
 assert.strictEqual(defaultVfs.exists('/usr/lib/libraylib.a'), true, 'libraylib.a must be mounted by default in sysroot');
 assert.strictEqual(typeof RAYLIB_HEADERS['raylib.h'], 'string');
+assert.strictEqual(typeof RAYLIB_HEADERS['raygui.h'], 'string');
 assert.strictEqual(defaultVfs.readFile('/usr/include/raylib.h', true), RAYLIB_HEADERS['raylib.h']);
-
-// Backward-compatible mountRaylibSysroot & unmountRaylibSysroot test
-const customVfs = new VFS();
-const dummyHeaders = {
-  'raylib.h': '/* custom raylib.h */',
-  'raymath.h': '/* custom raymath.h */',
-  'rlgl.h': '/* custom rlgl.h */',
-};
-const dummyLib = new Uint8Array([1, 2, 3, 4]);
-
-mountRaylibSysroot(customVfs, dummyHeaders, dummyLib);
-assert.strictEqual(customVfs.exists('/usr/include/raylib.h'), true);
-assert.strictEqual(customVfs.readFile('/usr/include/raylib.h', true), '/* custom raylib.h */');
-assert.deepStrictEqual(customVfs.readFile('/usr/lib/libraylib.a', false), dummyLib);
-
-unmountRaylibSysroot(customVfs);
-assert.strictEqual(customVfs.exists('/usr/include/raylib.h'), false);
-assert.strictEqual(customVfs.exists('/usr/lib/libraylib.a'), false);
-console.log('✓ VFS default sysroot mounting and backward-compatible mount/unmount verified');
+assert.strictEqual(defaultVfs.readFile('/usr/include/raygui.h', true), RAYLIB_HEADERS['raygui.h']);
+console.log('✓ VFS default sysroot mounting and raygui.h inclusion verified');
 
 // Test 3: Project Settings modal generates build.sh & Makefile with manual linkerFlags and does not auto-add flags
 const settingsVfs = new VFS();
@@ -149,6 +135,7 @@ await tc.init();
 compileVfs.writeFile('/usr/include/raylib.h', fs.readFileSync('public/sysroot/include/raylib/raylib.h'), Date.now(), true);
 compileVfs.writeFile('/usr/include/raymath.h', fs.readFileSync('public/sysroot/include/raylib/raymath.h'), Date.now(), true);
 compileVfs.writeFile('/usr/include/rlgl.h', fs.readFileSync('public/sysroot/include/raylib/rlgl.h'), Date.now(), true);
+compileVfs.writeFile('/usr/include/raygui.h', fs.readFileSync('public/sysroot/include/raylib/raygui.h'), Date.now(), true);
 compileVfs.writeFile('/lib/wasm32-wasi/libraylib.a', fs.readFileSync('public/sysroot/wasm/libraylib.a'), Date.now(), true);
 compileVfs.writeFile('/usr/lib/libraylib.a', fs.readFileSync('public/sysroot/wasm/libraylib.a'), Date.now(), true);
 
@@ -197,15 +184,85 @@ assert.strictEqual(moduleNames.has('gl'), true, 'Must import gl namespace');
 assert.strictEqual(moduleNames.has('raylib'), true, 'Must import raylib namespace');
 console.log('✓ End-to-end WasmToolchain compilation & linking with -lraylib verified');
 
-// Test 5b: Unmounting Raylib sysroot purges files from VFS
-unmountRaylibSysroot(compileVfs, tc);
-assert.strictEqual(compileVfs.exists('/usr/include/raylib.h'), false);
-assert.strictEqual(compileVfs.exists('/usr/lib/libraylib.a'), false);
+// Test 5b: End-to-end WasmToolchain compilation & linking with raygui.h
+const guiSource = `
+#define RAYGUI_IMPLEMENTATION
+#include "raylib.h"
+#include "raygui.h"
 
-// Verify subsequent compilation of raylib code now fails because raylib.h is gone
-const failCompCode = await tc.compile('workspace/main.c', 'workspace/main2.o', 'c', ['-I/include', '-I/workspace']);
-assert.notStrictEqual(failCompCode, 0, 'Compilation must fail when raylib is unmounted');
-console.log('✓ unmountRaylibSysroot VFS clearance and compilation failure verified');
+int main(void) {
+    InitWindow(400, 200, "Raygui Test");
+    (void)GuiButton((Rectangle){ 20, 20, 100, 30 }, "Test Button");
+    CloseWindow();
+    return 0;
+}
+`;
+compileVfs.writeFile('/workspace/gui.c', guiSource);
+const guiCompCode = await tc.compile('workspace/gui.c', 'workspace/gui.o', 'c', ['-I/include', '-I/workspace']);
+assert.strictEqual(guiCompCode, 0, 'Compilation of raygui source file must succeed');
+
+const guiLinkCode = await tc.link(['workspace/gui.o'], 'workspace/gui.wasm', ['-lraylib']);
+assert.strictEqual(guiLinkCode, 0, 'Linking raygui app with -lraylib must succeed');
+console.log('✓ End-to-end WasmToolchain compilation & linking with raygui.h verified');
+
+// Test 5c: End-to-end compilation & linking with Raylib Audio API
+const audioSource = `
+#include "raylib.h"
+#include <stdio.h>
+
+int main(void) {
+    InitAudioDevice();
+    bool ready = IsAudioDeviceReady();
+    SetMasterVolume(0.8f);
+    float vol = GetMasterVolume();
+    CloseAudioDevice();
+    printf("Audio ready: %d, vol: %.2f\\n", ready, vol);
+    return 0;
+}
+`;
+compileVfs.writeFile('/workspace/audio.c', audioSource);
+const audioCompCode = await tc.compile('workspace/audio.c', 'workspace/audio.o', 'c', ['-I/include', '-I/workspace']);
+assert.strictEqual(audioCompCode, 0, 'Compilation of Raylib Audio source file must succeed');
+
+const audioLinkCode = await tc.link(['workspace/audio.o'], 'workspace/audio.wasm', ['-lraylib']);
+assert.strictEqual(audioLinkCode, 0, 'Linking Raylib Audio app with -lraylib must succeed');
+
+const audioWasmBytes = compileVfs.readFile('/workspace/audio.wasm', false);
+assert.notStrictEqual(audioWasmBytes, null);
+const audioModule = new WebAssembly.Module(audioWasmBytes);
+const audioImports = new Set(WebAssembly.Module.imports(audioModule).map(i => i.module));
+assert.strictEqual(audioImports.has('raylib'), true, 'Audio functions must import from raylib namespace');
+console.log('✓ End-to-end WasmToolchain compilation & linking with Raylib Audio verified');
+
+// Test 5d: Verify createAudioReceiver and RuntimeManager audio receiver handling
+const { createAudioReceiver } = await import('raylib-wasi');
+assert.strictEqual(typeof createAudioReceiver, 'function');
+const receiver = createAudioReceiver();
+assert.ok(receiver);
+assert.strictEqual(typeof receiver.handleMessage, 'function');
+assert.strictEqual(typeof receiver.resume, 'function');
+
+receiver.handleMessage({ type: 'audio_init' });
+receiver.handleMessage({ type: 'audio_master_volume', volume: 0.8 });
+receiver.handleMessage({ type: 'audio_close' });
+console.log('✓ createAudioReceiver lifecycle and message dispatching verified');
+
+// Test 5e: End-to-end compilation & linking of examples/10_raylib_gui_audio.c
+const example10Code = fs.readFileSync('examples/10_raylib_gui_audio.c', 'utf-8');
+compileVfs.writeFile('/workspace/10_raylib_gui_audio.c', example10Code);
+const ex10CompCode = await tc.compile('workspace/10_raylib_gui_audio.c', 'workspace/10_raylib_gui_audio.o', 'c', ['-I/usr/include', '-I/include/wasm32-wasip1']);
+assert.strictEqual(ex10CompCode, 0, 'Compilation of 10_raylib_gui_audio.c must succeed');
+
+const ex10LinkCode = await tc.link(['workspace/10_raylib_gui_audio.o'], 'workspace/10_raylib_gui_audio.wasm', ['-lraylib']);
+assert.strictEqual(ex10LinkCode, 0, 'Linking 10_raylib_gui_audio.c with -lraylib must succeed');
+
+const ex10WasmBytes = compileVfs.readFile('/workspace/10_raylib_gui_audio.wasm', false);
+assert.notStrictEqual(ex10WasmBytes, null);
+const ex10Module = new WebAssembly.Module(ex10WasmBytes);
+const ex10Imports = new Set(WebAssembly.Module.imports(ex10Module).map(i => i.module));
+assert.strictEqual(ex10Imports.has('gl'), true, 'Must import gl namespace');
+assert.strictEqual(ex10Imports.has('raylib'), true, 'Must import raylib namespace');
+console.log('✓ End-to-end WasmToolchain compilation & linking of examples/10_raylib_gui_audio.c verified');
 
 // Test 6: Verification of WASI runtime imports including path_open and env.getcwd
 let stdoutOutput = '';

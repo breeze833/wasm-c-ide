@@ -605,6 +605,7 @@ int closedir(DIR *dirp);
   'raylib.h': RAYLIB_HEADERS['raylib.h'],
   'raymath.h': RAYLIB_HEADERS['raymath.h'],
   'rlgl.h': RAYLIB_HEADERS['rlgl.h'],
+  'raygui.h': RAYLIB_HEADERS['raygui.h'],
   'sqlite3.h': SQLITE_HEADERS['sqlite3.h'],
   'sqlite3ext.h': SQLITE_HEADERS['sqlite3ext.h'],
 };
@@ -1369,56 +1370,6 @@ export function mountSysroot(vfs) {
   // Mount /usr/bin toolchain executables
   for (const cmd of USR_BIN_COMMANDS) {
     vfs.writeFile(`/usr/bin/${cmd}`, `#!/bin/sh\n# Toolchain binary: ${cmd}\n`, Date.now(), true);
-  }
-}
-
-export function mountRaylibSysroot(vfs, headers = {}, libBuffer = null, turtleHeaders = {}, turtleRaylibLib = null) {
-  if (headers['raylib.h']) {
-    vfs.writeFile('/usr/include/raylib.h', headers['raylib.h'], Date.now(), true);
-  }
-  if (headers['raymath.h']) {
-    vfs.writeFile('/usr/include/raymath.h', headers['raymath.h'], Date.now(), true);
-  }
-  if (headers['rlgl.h']) {
-    vfs.writeFile('/usr/include/rlgl.h', headers['rlgl.h'], Date.now(), true);
-  }
-  if (libBuffer) {
-    vfs.writeFile('/usr/lib/libraylib.a', libBuffer, Date.now(), true);
-  }
-
-  // Mount Raylib backend for turtle graphics
-  const raylibTurtleHeader = headers['turtle_backend_raylib.h'] || turtleHeaders['turtle_backend_raylib.h'] || TURTLE_HEADERS['turtle_backend_raylib.h'];
-  if (raylibTurtleHeader) {
-    vfs.writeFile('/usr/include/turtle_backend_raylib.h', raylibTurtleHeader, Date.now(), true);
-  }
-  const raylibTurtleLibBuffer = turtleRaylibLib || headers['libturtle_raylib.a'];
-  if (raylibTurtleLibBuffer) {
-    vfs.writeFile('/usr/lib/libturtle_raylib.a', raylibTurtleLibBuffer, Date.now(), true);
-  }
-}
-
-export function unmountRaylibSysroot(vfs, toolchain = null) {
-  if (vfs.exists('/usr/include/raylib.h')) vfs.remove('/usr/include/raylib.h', false, true);
-  if (vfs.exists('/usr/include/raymath.h')) vfs.remove('/usr/include/raymath.h', false, true);
-  if (vfs.exists('/usr/include/rlgl.h')) vfs.remove('/usr/include/rlgl.h', false, true);
-  if (vfs.exists('/usr/lib/libraylib.a')) vfs.remove('/usr/lib/libraylib.a', false, true);
-
-  // Unmount Raylib turtle backend
-  if (vfs.exists('/usr/include/turtle_backend_raylib.h')) vfs.remove('/usr/include/turtle_backend_raylib.h', false, true);
-  if (vfs.exists('/usr/lib/libturtle_raylib.a')) vfs.remove('/usr/lib/libturtle_raylib.a', false, true);
-
-  if (toolchain && typeof toolchain.removeFile === 'function') {
-    toolchain.removeFile('include/raylib.h');
-    toolchain.removeFile('include/raymath.h');
-    toolchain.removeFile('include/rlgl.h');
-    toolchain.removeFile('usr/lib/libraylib.a');
-    toolchain.removeFile('lib/wasm32-wasi/libraylib.a');
-    toolchain.removeFile('lib/wasm32-wasip1/libraylib.a');
-
-    toolchain.removeFile('include/turtle_backend_raylib.h');
-    toolchain.removeFile('usr/lib/libturtle_raylib.a');
-    toolchain.removeFile('lib/wasm32-wasi/libturtle_raylib.a');
-    toolchain.removeFile('lib/wasm32-wasip1/libturtle_raylib.a');
   }
 }
 
