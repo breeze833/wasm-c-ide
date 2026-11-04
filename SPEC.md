@@ -24,7 +24,7 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 - **Pedagogical Discipline**: Enforce strict standard C mode (`-std=c11 -pedantic-errors`), disallow automatic saving to cultivate deliberate save habits, and route all GUI actions into visible shell terminal commands.
 - **Strict Standard Link-Time Symbol Resolution**: The linker enforces standard resolution of undefined symbols, immediately reporting missing libraries or unlinked object files as standard `wasm-ld: error: undefined symbol: <name>` diagnostics rather than deferring failures to opaque runtime crashes (exit code 1). Authorized host imports (`canvas-wasi`) are strictly whitelisted via `--allow-undefined-file=/usr/lib/wasm-host-imports.txt`.
 - **Decoupled Dual-Module Graphics Subsystems**:
-  - **`canvas-wasi`**: Pure C direct software framebuffer (`<graphics.h>`), HTML5 Canvas 2D vector primitives (`<graphics_canvas.h>`), floating/dockable graphics console UI (`GraphicsWindowUI`), and shared 512-byte `SharedArrayBuffer` input coordination (`InputCoordinator`).
+  - **`canvas-wasi`**: Pure C direct software framebuffer (`<graphics.h>`), HTML5 Canvas 2D vector primitives (`<graphics_canvas.h>`), floating/dockable graphics console UI (`GraphicsWindowUI`), and shared 512-byte `SharedArrayBuffer` input coordination (`InputCoordinator`), powered by `canvas-window`.
   - **`raylib-wasi`**: Standalone Raylib 5.5 port, WebGL ES 2.0 host bridge, and pure WASI Web Audio subsystem, providing Wasm imports (`gl`, `raylib`) and zero-Emscripten `PLATFORM_CUSTOM` execution. Includes `raylib.h`, `raymath.h`, `rlgl.h`, and `raygui.h`.
 - **Turtle Graphics Subsystem (`libturtle`)**: Modular educational turtle graphics with dual backend support (Canvas-WASI and Raylib backends both permanently bundled into sysroot out-of-the-box).
 - **SQLite 3 Embedded Database & CLI Subsystem (`sqlite-wasi`)**: Precompiled SQLite 3.54.1 WASI Preview 1 static library (`libsqlite3.a`), C headers (`sqlite3.h`, `sqlite3ext.h`), and standalone interactive CLI (`sqlite3.wasm` mounted at `/usr/bin/sqlite3`) bundled permanently into sysroot out-of-the-box, supporting SQL relational databases with real-time VFS persistence.
@@ -176,7 +176,7 @@ This specification defines the architecture and design invariants of `wasm-c-ide
   - File operations (`fopen`, `<fstream>`, `fwrite`, `remove`, `rename`) directly update `VFS` and emit real-time event notifications (`file_sync`, `file_delete`) to refresh Monaco editor tabs and the File Tree UI.
 
 ### 3.4 Decoupled Graphics Subsystems, Turtle Graphics & Direct Sysroot Bundling
-- **`canvas-wasi`**: Pure C direct software framebuffer (`<graphics.h>`), Canvas 2D vector primitives (`<graphics_canvas.h>`), floating/dockable graphics console (`GraphicsWindowUI`), and 512-byte `SharedArrayBuffer` input coordination (`InputCoordinator`).
+- **`canvas-wasi`**: Pure C direct software framebuffer (`<graphics.h>`), Canvas 2D vector primitives (`<graphics_canvas.h>`), floating/dockable graphics console (`GraphicsWindowUI`), and 512-byte `SharedArrayBuffer` input coordination (`InputCoordinator`), powered by `canvas-window`.
 - **`raylib-wasi`**: Standalone Raylib 5.5 WASI runtime, WebGL ES 2.0 host bridge, and pure WASI Web Audio subsystem (`createRaylibHost`, `createAudioReceiver`).
 - **Uniform Virtual Headers & Permanent Sysroot Bundling**:
   - `scripts/download-sysroot.js` auto-generates virtual header JS modules: `src/vfs/turtle-headers.js` and `src/vfs/raylib-headers.js`.

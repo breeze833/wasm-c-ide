@@ -425,6 +425,16 @@ Agents executing this project should proceed milestone-by-milestone:
   - Documented WebAssembly single-threaded display loop constraints in `docs/KNOWN_ISSUES.md`.
   - Authored comprehensive case study `docs/SINGLE_THREAD_FRAME_PACING.md` detailing the mechanics and mathematics of progressive animation delays (e.g. `turtle_delay(25.0)`) and the alternating 1-frame/2-frame cadence resulting in ~47 FPS.
 
+### Milestone 28: Canvas-WASI v0.1.3 Integration & Canvas-Window Delegation
+- Upgrade `canvas-wasi` dependency to `v0.1.3`:
+  - Delegates floating draggable windowing, pop-out detached window (`window.open`), dock-back restoration, and input coordination to `canvas-window`.
+  - Re-exports `CanvasWindow`, `GraphicsWindowUI`, `InputCoordinator`, and protocol constants directly from `canvas-window`.
+  - Ensures clean HTTPS resolution for `canvas-window` in `package-lock.json` for reliable CI environments.
+- Sysroot asset download resiliency:
+  - Updates `scripts/download-sysroot.js` to verify presence of `raygui.h` in `localDist` before selecting it, falling back to `node_modules/raylib-wasi/dist`.
+- Test suite alignment:
+  - Updates `test/graphics.test.js` to assert default title `'Canvas Display'` matching `canvas-window`.
+
 ---
 
 ## 4. Verification & Testing Checklist

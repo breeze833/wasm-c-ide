@@ -164,7 +164,7 @@ async function downloadRaylibAssets() {
     : path.resolve(projectRoot, '../raylib-wasi/dist');
   const moduleDist = path.join(projectRoot, 'node_modules/raylib-wasi/dist');
 
-  const sourceDist = (fs.existsSync(path.join(localDist, 'lib/libraylib.a')) && fs.existsSync(path.join(localDist, 'include')))
+  const sourceDist = (fs.existsSync(path.join(localDist, 'lib/libraylib.a')) && fs.existsSync(path.join(localDist, 'include')) && fs.existsSync(path.join(localDist, 'include/raygui.h')))
     ? localDist
     : (fs.existsSync(path.join(moduleDist, 'lib/libraylib.a')) && fs.existsSync(path.join(moduleDist, 'include')))
       ? moduleDist

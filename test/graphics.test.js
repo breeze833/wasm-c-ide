@@ -88,7 +88,7 @@ globalThis.document = {
 const { GraphicsWindowUI } = await import('canvas-wasi');
 const win = new GraphicsWindowUI();
 assert.strictEqual(win.container.innerHTML.includes('id="graphics-canvas"'), true, 'Container must include canvas with id="graphics-canvas"');
-assert.strictEqual(win.title, 'Graphics Display', 'Default title must be Graphics Display');
+assert.strictEqual(win.title, 'Canvas Display', 'Default title must be Canvas Display');
 
 // Verify canvas element exists and context initialized
 assert.notStrictEqual(win.canvas, null);
