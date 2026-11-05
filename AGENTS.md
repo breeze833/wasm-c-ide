@@ -22,6 +22,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 ├── AGENTS.md                  # Agent operating protocols (this file)
 ├── README.md                  # User-facing project documentation & deployment guides
 ├── docs/                      # Project documentation and historical specifications
+│   ├── DEDICATED_COMPILER_WORKER.md # Case study on off-thread compilation worker & tri-worker architecture
 │   ├── KNOWN_ISSUES.md        # Documented toolchain version gaps, limits, and single-threaded frame pacing
 │   ├── SINGLE_THREAD_FRAME_PACING.md # Case study on single-threaded WebAssembly graphics & progressive delays
 │   └── archived/              # Historical technical specifications (v1 baseline through v4)
@@ -63,6 +64,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   └── runtime.js         # Host-side runtime manager and SharedArrayBuffer coordinator
 │   ├── toolchain/
 │   │   ├── ar.js              # POSIX ar static library archiver and wasm object symbol extractor
+│   │   ├── compiler-client.js # Host-side manager and differential VFS sync for compiler worker
 │   │   ├── driver.js          # gcc / clang command parser and execution coordinator
 │   │   ├── make.js            # Incremental Makefile runner evaluating mtimes
 │   │   ├── tar.js             # Sysroot tarball extractor
@@ -78,6 +80,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   ├── vfs.js             # In-memory virtual filesystem with path normalization
 │   │   └── wasi-host.js       # Unified WASI Preview 1 host (downloaded from clang-wasi, gitignored)
 │   └── workers/
+│       ├── compiler.worker.js # Dedicated Web Worker executing Clang, LLD, ar, and make
 │       ├── runtime.worker.js  # WASI host executing user binaries with Atomics stdin & OffscreenCanvas
 │       └── shell.worker.js    # Interactive POSIX shell worker (pushd/popd, globs, mv/cp, direct scripts)
 ├── public/
@@ -89,6 +92,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │       └── include/           # Minimal fallback libc headers, raylib headers & turtle headers
 └── test/
     ├── ar.test.js             # Static archiver creation, extraction, table, and wasm-ld linkage tests
+    ├── compiler-worker.test.js # Dedicated compiler worker, CompilerClient, and off-thread execution tests
     ├── detached-terminal.test.js # Detached floating terminal mode (80x24), snapping, and ANSI tests
     ├── fileio.test.js         # In-code standard C/C++ file I/O, fopen modes, seeking, and fstream tests
     ├── graphics.test.js       # Generic framebuffer, 2D vector, and pixel manipulation tests
@@ -434,6 +438,20 @@ Agents executing this project should proceed milestone-by-milestone:
   - Updates `scripts/download-sysroot.js` to verify presence of `raygui.h` in `localDist` before selecting it, falling back to `node_modules/raylib-wasi/dist`.
 - Test suite alignment:
   - Updates `test/graphics.test.js` to assert default title `'Canvas Display'` matching `canvas-window`.
+
+### Milestone 29: Dedicated Compiler Web Worker & Off-Thread Toolchain Execution
+- Architect dedicated, persistent `compiler.worker.js` and client manager `compiler-client.js`:
+  - Offloads LLVM Clang, LLD linker, archiver (`ar`), and build engine (`make`) from main browser thread to background Web Worker.
+  - Eliminates main-thread UI freezing during compilation of large source files (e.g. `examples/10_raylib_gui_audio.c` with `raygui.h`).
+  - Keeps Monaco editor, toolbar buttons, and floating windows at 60 FPS responsiveness during long builds.
+- Instant `Ctrl+C` / Stop Process Termination:
+  - Supports immediate cancellation of in-flight builds via `worker.terminate()`, returning cleanly to shell prompt and re-spawning a replacement compiler worker in background.
+- Real-Time Diagnostic Streaming:
+  - Streams compiler stdout and stderr diagnostics incrementally to `xterm.js` via `postMessage({ type: 'stdout', id, data })`.
+- Differential `/workspace` Synchronization:
+  - Synchronizes modified user files into worker before compilation and applies generated artifacts (`a.out`, `*.o`, `*.a`) back to master VFS upon completion.
+- Comprehensive Architectural Documentation:
+  - Authored case study `docs/DEDICATED_COMPILER_WORKER.md` detailing the threading model, root causes of UI freezing, and comparative analysis of worker designs.
 
 ---
 

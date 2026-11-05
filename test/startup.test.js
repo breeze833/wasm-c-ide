@@ -2,6 +2,7 @@
 import assert from 'node:assert';
 import fs from 'node:fs';
 import { VFS } from '../src/vfs/vfs.js';
+import { mountSysrootUtilities } from '../src/vfs/sysroot.js';
 import { WasmToolchain } from '../src/toolchain/wasm-clang.js';
 
 console.log('--- Running Startup Loading & VFS Indication Unit Tests ---');
@@ -42,13 +43,16 @@ console.log('--- Running Startup Loading & VFS Indication Unit Tests ---');
     assert.ok(progressLogs.some(msg => msg.includes('Preloading runtime libraries') || msg.includes('libraylib')), 'Progress must log preloading libraries');
     assert.ok(progressLogs.some(msg => msg.includes('VFS items populated')), 'Progress must log VFS populated');
 
-    // Verify VFS items are fully populated
+    // Verify toolchain VFS items are fully populated
     assert.strictEqual(vfs.exists('/usr/include/stdio.h'), true, 'Standard header stdio.h must exist');
     assert.strictEqual(vfs.exists('/usr/lib/libc.a'), true, 'Runtime libc.a must exist');
     assert.strictEqual(vfs.exists('/usr/lib/libturtle.a'), true, 'libturtle.a must be preloaded');
     assert.strictEqual(vfs.exists('/usr/lib/libraylib.a'), true, 'libraylib.a must be preloaded');
     assert.strictEqual(vfs.exists('/usr/lib/libsqlite3.a'), true, 'libsqlite3.a must be preloaded');
-    assert.strictEqual(vfs.exists('/usr/bin/sqlite3'), true, 'sqlite3.wasm CLI must be preloaded');
+
+    // Mount user utilities separately
+    await mountSysrootUtilities(vfs, 'public/sysroot/wasm');
+    assert.strictEqual(vfs.exists('/usr/bin/sqlite3'), true, 'sqlite3.wasm CLI must be mounted via mountSysrootUtilities');
 
     console.log('✓ WasmToolchain.prototype.init reports progress messages and populates all VFS items');
   } finally {

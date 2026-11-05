@@ -135,6 +135,10 @@ This IDE is specifically engineered for **students and systems programming educa
   - Position-Independent Code: `-fPIC` and `-fpic` flags compile code with position-independent relocation records.
   - Shared library creation: `gcc -shared -fPIC src/math.c -o build/libmath.so` (and `g++ -shared -fPIC ...` for C++) generates standard WebAssembly dynamic libraries with `dylink.0` custom sections.
 - **Zero-MemFS Direct VFS Architecture**: `memfs.wasm` is completely eliminated. Sourced directly from [`clang-wasi`](https://github.com/breeze833/clang-wasi), the unified `WasiHost` (`src/vfs/wasi-host.js`, fetched on-demand via `scripts/download-sysroot.js`) directly bridges `llvm-box.wasm` (`clang`, `wasm-ld`, `llvm-ar`) and runtime binaries (`a.out`) to the application `VFS`, eliminating double-buffering, memory limits, and intermediate file copying.
+- **Dedicated Compiler Web Worker (`compiler.worker.js`)**:
+  - Clang, LLD linker, archiver (`ar`), and `make` execute off the main browser thread in a dedicated, persistent Web Worker managed by `CompilerClient` (`src/toolchain/compiler-client.js`).
+  - **Zero UI Freezing**: Large header expansions (such as `raygui.h` in `examples/10_raylib_gui_audio.c`) run entirely in the background without blocking Monaco Editor typing, xterm.js rendering, or floating window interactions.
+  - **Streaming Diagnostics & Instant Cancellation**: Compiler stderr/stdout streams in real-time to the terminal. Pressing `Ctrl+C` or clicking Stop terminates the worker immediately, cleanly aborting stuck builds without leaving corrupted state.
 
 ### 4. Dual Build Systems (Shell Script & Makefile)
 - **Track 1: Shell Script (`build.sh`)**:

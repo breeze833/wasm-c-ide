@@ -2,13 +2,14 @@
 
 import { VFS } from './vfs/vfs.js';
 import { loadWorkspace, setupAutoSync } from './vfs/storage.js';
-import { mountSysroot } from './vfs/sysroot.js';
+import { mountSysroot, mountSysrootUtilities } from './vfs/sysroot.js';
 import { EditorManager } from './editor/editor.js';
 import { TabsUI } from './editor/tabs.js';
 import { FileTreeUI } from './components/filetree.js';
 import { showToast } from './components/toast.js';
 import { TerminalManager } from './terminal/terminal.js';
 import { RuntimeManager } from './terminal/runtime.js';
+import { CompilerClient } from './toolchain/compiler-client.js';
 import { WasmToolchain } from './toolchain/wasm-clang.js';
 import { executeGccCommand, executeToolCommand, executeLdCommand } from './toolchain/driver.js';
 import { executeArCommand } from './toolchain/ar.js';
@@ -138,7 +139,7 @@ export class App {
       wasmBasePath = new URL('sysroot/wasm', resolvedBase).pathname.replace(/\/+$/, '');
     }
 
-    this.toolchain = new WasmToolchain({
+    this.toolchain = new CompilerClient({
       basePath: wasmBasePath,
       vfs: this.vfs,
       hostWrite: (str) => {
@@ -158,6 +159,7 @@ export class App {
           this.terminal.writeln(`\x1b[90m[*] ${status}\x1b[0m`);
         }
       });
+      await mountSysrootUtilities(this.vfs, wasmBasePath);
     } catch (err) {
       console.warn('Toolchain sysroot setup notice:', err);
       if (this.terminal) {
@@ -363,14 +365,19 @@ export class App {
       }
     };
 
-    if (cmd === 'gcc' || cmd === 'clang' || cmd === 'g++' || cmd === 'clang++' || cmd === 'clang-cpp') {
+    const isToolchainCmd = (
+      cmd === 'gcc' || cmd === 'clang' || cmd === 'g++' || cmd === 'clang++' || cmd === 'clang-cpp' ||
+      cmd === 'ld' || cmd === 'lld' || cmd === 'wasm-ld' || cmd === 'ld.lld' ||
+      ['ar', 'ranlib', 'nm', 'objdump', 'size', 'c++filt', 'cxxfilt', 'strings', 'readelf', 'strip'].includes(cmd) ||
+      cmd === 'make'
+    );
+
+    if (isToolchainCmd) {
       const effectiveMode = (cmd === 'g++' || cmd === 'clang++') ? 'cpp' : this.mode;
-      const exitCode = await executeGccCommand({
+      const exitCode = await this.toolchain.executeCommand({
         cmd,
         args,
-        cwd,
-        vfs: this.vfs,
-        toolchain: this.toolchain,
+        cwd: cwd || '/workspace',
         mode: effectiveMode,
         write: writeFn,
       });
@@ -383,126 +390,6 @@ export class App {
       }
       if (exitCode !== 0) {
         throw new Error(`Process terminated with exit code ${exitCode}`);
-      }
-      return true;
-    }
-
-    if (cmd === 'ld' || cmd === 'lld' || cmd === 'wasm-ld' || cmd === 'ld.lld') {
-      const exitCode = await executeLdCommand({
-        cmd,
-        args,
-        cwd: cwd || '/workspace',
-        vfs: this.vfs,
-        toolchain: this.toolchain,
-        write: writeFn,
-      });
-
-      if (this.fileTreeUI) this.fileTreeUI.render();
-      await flushStdoutRedirect();
-
-      if (captureStdout) {
-        return { exitCode, stdout: capturedStdout };
-      }
-      if (exitCode !== 0) {
-        throw new Error(`Process terminated with exit code ${exitCode}`);
-      }
-      return true;
-    }
-
-    if (['ar', 'ranlib', 'nm', 'objdump', 'size', 'c++filt', 'cxxfilt', 'strings', 'readelf', 'strip'].includes(cmd)) {
-      const toolMap = {
-        'c++filt': 'cxxfilt',
-        'readelf': 'readobj',
-      };
-      const activeTool = toolMap[cmd] || cmd;
-      const exitCode = await executeToolCommand({
-        cmd: activeTool,
-        args,
-        cwd: cwd || '/workspace',
-        vfs: this.vfs,
-        toolchain: this.toolchain,
-        write: writeFn,
-      });
-
-      if (this.fileTreeUI) this.fileTreeUI.render();
-      await flushStdoutRedirect();
-
-      if (captureStdout) {
-        return { exitCode, stdout: capturedStdout };
-      }
-      if (exitCode !== 0) {
-        throw new Error(`Process terminated with exit code ${exitCode}`);
-      }
-      return true;
-    }
-
-    if (cmd === 'make') {
-      const exitCode = await runMake({
-        targetName: args[0] || 'all',
-        vfs: this.vfs,
-        write: (str) => writeFn(str.replace(/\r?\n/g, '\r\n')),
-        executeCommand: async (cmdLine) => {
-          const trimmed = cmdLine.trim();
-          if (!trimmed) return;
-
-          if (trimmed.startsWith('rm ')) {
-            const rmParts = trimmed.split(/\s+/).slice(1);
-            const rmTargets = rmParts.filter(p => !p.startsWith('-'));
-            for (const t of rmTargets) {
-              const norm = `/workspace/${t}`;
-              if (this.vfs.exists(norm)) this.vfs.remove(norm, true);
-            }
-            if (this.fileTreeUI) this.fileTreeUI.render();
-          } else if (trimmed.startsWith('mkdir ')) {
-            const dir = trimmed.split(/\s+/).pop();
-            this.vfs.mkdir(`/workspace/${dir}`, true);
-            if (this.fileTreeUI) this.fileTreeUI.render();
-          } else if (
-            trimmed.startsWith('gcc ') ||
-            trimmed.startsWith('clang ') ||
-            trimmed.startsWith('g++ ') ||
-            trimmed.startsWith('clang++ ') ||
-            trimmed.startsWith('$(CC)') ||
-            trimmed.startsWith('$(CXX)')
-          ) {
-            const subArgs = trimmed.split(/\s+/);
-            const subCmd = subArgs.shift();
-            const subMode = (subCmd === 'g++' || subCmd === 'clang++' || subCmd === '$(CXX)') ? 'cpp' : this.mode;
-            const exitCode = await executeGccCommand({
-              cmd: subCmd,
-              args: subArgs,
-              cwd: cwd || '/workspace',
-              vfs: this.vfs,
-              toolchain: this.toolchain,
-              mode: subMode,
-              write: writeFn,
-            });
-            if (this.fileTreeUI) this.fileTreeUI.render();
-            return exitCode;
-          } else if (trimmed.startsWith('ar ') || trimmed.startsWith('$(AR)')) {
-            const subArgs = trimmed.split(/\s+/);
-            subArgs.shift();
-            const exitCode = await executeArCommand({
-              args: subArgs,
-              cwd: cwd || '/workspace',
-              vfs: this.vfs,
-              toolchain: this.toolchain,
-              write: writeFn,
-            });
-            if (this.fileTreeUI) this.fileTreeUI.render();
-            return exitCode;
-          }
-        },
-      });
-
-      if (this.fileTreeUI) this.fileTreeUI.render();
-      await flushStdoutRedirect();
-
-      if (captureStdout) {
-        return { exitCode, stdout: capturedStdout };
-      }
-      if (exitCode !== 0) {
-        throw new Error(`make: exit code ${exitCode}`);
       }
       return true;
     }
@@ -524,7 +411,33 @@ export class App {
         throw new Error(`${cmd}: no such file or directory`);
       }
 
-      const wasmBytes = this.vfs.readFile(execPath, false);
+      let wasmBytes = this.vfs.readFile(execPath, false);
+      if (
+        !wasmBytes ||
+        wasmBytes.length < 4 ||
+        wasmBytes[0] !== 0x00 ||
+        wasmBytes[1] !== 0x61 ||
+        wasmBytes[2] !== 0x73 ||
+        wasmBytes[3] !== 0x6d
+      ) {
+        // On-demand fetch fallback for prebuilt binaries like sqlite3
+        if (cmd === 'sqlite3' || execPath.endsWith('/sqlite3')) {
+          try {
+            const basePath = (this.toolchain && this.toolchain.basePath) ||
+              (typeof window !== 'undefined' ? `${window.location.origin}/sysroot/wasm` : '/sysroot/wasm');
+            const res = await fetch(`${basePath}/sqlite3.wasm`);
+            if (res && (res.ok || typeof res.ok === 'undefined')) {
+              const buf = await res.arrayBuffer();
+              const u8 = new Uint8Array(buf);
+              this.vfs.writeFile(execPath, u8, Date.now(), true);
+              wasmBytes = u8;
+            }
+          } catch (err) {
+            console.warn('Failed to fetch sqlite3.wasm on demand:', err);
+          }
+        }
+      }
+
       if (
         !wasmBytes ||
         wasmBytes.length < 4 ||
@@ -718,6 +631,9 @@ export class App {
   handleStopExecution() {
     if (this.runtimeManager && this.runtimeManager.isRunning) {
       this.runtimeManager.kill();
+    }
+    if (this.toolchain && typeof this.toolchain.kill === 'function') {
+      this.toolchain.kill();
     }
     if (this.graphicsWindow && this.graphicsWindow.isOpen()) {
       this.graphicsWindow.close();

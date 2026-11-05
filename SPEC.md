@@ -161,6 +161,26 @@ This specification defines the architecture and design invariants of `wasm-c-ide
   - WebAssembly shared objects (`.so`) retain `--allow-undefined` to support dynamic symbol resolution.
   - Compiler driver parses `--allow-undefined` and `-Wl,--allow-undefined` into linker flags, permitting explicit user overrides.
 
+### 3.2.1 Dedicated Compiler Web Worker (`compiler.worker.js` & `compiler-client.js`)
+- **Off-Thread Toolchain Execution**:
+  - The LLVM Clang compiler (`clang`, `clang++`), LLD linker (`wasm-ld`), archiver (`ar`), and build engine (`make`) run entirely inside a dedicated background Web Worker (`src/workers/compiler.worker.js`), managed on the main thread via `CompilerClient` (`src/toolchain/compiler-client.js`).
+  - Completely eliminates main-thread CPU starvation and UI freezes during large file compilation (such as `raygui.h` in `examples/10_raylib_gui_audio.c`).
+  - Maintains 60 FPS responsiveness across Monaco editor tabs, floating canvas and terminal windows, and toolbar buttons during long compilations.
+- **Persistent Pre-Warmed Worker**:
+  - Unlike ephemeral user execution workers, `compiler.worker.js` remains persistent across build commands.
+  - Fetches and decompresses `sysroot.tar.gz` and preloads static runtime archives (`libraylib.a`, `libturtle.a`, `libsqlite3.a`) into its internal VFS once during application bootstrap.
+  - Pre-warms and retains the 30 MB `llvm-box.wasm` binary in memory via IndexedDB `wasm-cache.js`, achieving zero-instantiation compilation latency on all builds.
+- **Incremental & Streaming Diagnostics**:
+  - Compiler diagnostics, warnings, and verbose toolchain output stream in real-time from the compiler worker to the main thread via `postMessage({ type: 'stdout', id, data })`, updating `xterm.js` incrementally without batch buffering.
+- **Instant `Ctrl+C` Abort Guarantee**:
+  - When the user presses `Ctrl+C` or clicks the UI Stop button during compilation, the host immediately invokes `worker.terminate()`.
+  - Aborts in-flight compilations instantaneously without waiting for Wasm execution loops to yield, returning cleanly to the shell prompt and re-spawning a replacement compiler worker in the background.
+- **Differential `/workspace` VFS Synchronization**:
+  - Prior to compilation, the host transmits only modified or newly created files in `/workspace` to the compiler worker.
+  - On build completion, the compiler worker transmits newly created artifacts (`*.o`, `a.out`, `*.a`) and deleted files back to the host, updating the master `VFS` and triggering `FileTreeUI` refreshes.
+- **Node.js Environment Fallback**:
+  - `CompilerClient` transparently detects Node.js environments (such as unit test suites) and executes `WasmToolchain` in-process, preserving full test suite compatibility.
+
 ### 3.3 Runtime & Interactive Standard I/O
 - Target binaries run in `runtime.worker.js` using `WasiHost`.
 - Standard input (`stdin`):
@@ -301,7 +321,7 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 - **Deferred Shell Prompt & Keystroke Guarding**:
   - The welcome banner (`Welcome to the In-Browser C/C++ Teaching IDE!`) and the interactive shell prompt (`ide:~$ `) are strictly deferred until all VFS items are populated.
   - The application tracks `this.isReady`: keystrokes and keyboard interrupts entered into the terminal during startup are discarded before VFS population finishes to prevent prompt corruption or commands running on an incomplete sysroot.
-  - Precompiled runtime libraries (`libraylib.a`, `libturtle.a`, `libturtle_raylib.a`, `libsqlite3.a`, `sqlite3.wasm`) are fetched concurrently via `Promise.all` in `WasmToolchain.prototype.init()`, optimizing network throughput on startup and after Passive System Upgrades.
+  - Precompiled runtime libraries (`libraylib.a`, `libturtle.a`, `libturtle_raylib.a`, `libsqlite3.a`) are fetched concurrently via `Promise.all` in `WasmToolchain.prototype.init()`, while prebuilt standalone CLI utilities (`sqlite3.wasm`) are mounted directly onto master `VFS` via `mountSysrootUtilities()`, keeping the compiler worker free of user program binaries.
 - **Local Development Server Production Emulation (`emulate-production-sysroot`)**:
   - Vite's default development server compresses static files and attaches `Content-Encoding: gzip` on `.tar.gz` files while serving them with `Cache-Control: no-cache`, causing browser-side decompressive double-handling and slow re-fetching during local manual testing.
   - The custom `emulate-production-sysroot` Vite plugin intercepts `/sysroot/wasm/` requests in both `server` and `preview` modes, streams files as raw binary `application/octet-stream` without `Content-Encoding: gzip`, and sets `Cache-Control: public, max-age=31536000, immutable` alongside CORS and COOP/COEP headers, matching production caching and streaming behavior.

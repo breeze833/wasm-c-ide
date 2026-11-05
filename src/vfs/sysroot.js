@@ -1373,3 +1373,32 @@ export function mountSysroot(vfs) {
   }
 }
 
+export const SYSROOT_UTILITIES = [
+  {
+    name: 'sqlite3',
+    file: 'sqlite3.wasm',
+    target: '/usr/bin/sqlite3',
+  },
+];
+
+/**
+ * Mount prebuilt standalone utility executables (e.g. sqlite3.wasm) onto the master VFS.
+ * These are user-facing CLI programs, separate from the compiler toolchain worker.
+ */
+export async function mountSysrootUtilities(vfs, basePath = '/sysroot/wasm') {
+  await Promise.all(
+    SYSROOT_UTILITIES.map(async (util) => {
+      try {
+        const res = await fetch(`${basePath}/${util.file}`);
+        if (res && (res.ok || typeof res.ok === 'undefined')) {
+          const buf = await res.arrayBuffer();
+          vfs.writeFile(util.target, new Uint8Array(buf), Date.now(), true);
+        }
+      } catch (err) {
+        console.warn(`Failed to mount sysroot utility ${util.name}:`, err);
+      }
+    })
+  );
+}
+
+

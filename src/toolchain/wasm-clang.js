@@ -222,12 +222,6 @@ export class WasmToolchain {
             '/lib/wasm32-wasi/libsqlite3.a',
           ],
         },
-        {
-          file: 'sqlite3.wasm',
-          targets: [
-            '/usr/bin/sqlite3',
-          ],
-        },
       ];
 
       await Promise.all(
