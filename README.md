@@ -237,7 +237,7 @@ This IDE is specifically engineered for **students and systems programming educa
     - Standalone Raylib: `-lraylib`
 
 ### 8. SQLite 3 Embedded Database & CLI Subsystem (`sqlite-wasi`)
-- **Embedded C Engine**: Zero-dependency SQLite 3 (v3.49.1) targeting `wasm32-wasip1` integrated from [`breeze833/sqlite-wasi`](https://github.com/breeze833/sqlite-wasi).
+- **Embedded C Engine**: Zero-dependency SQLite 3 (v3.54.1) targeting `wasm32-wasip1` integrated from [`breeze833/sqlite-wasi`](https://github.com/breeze833/sqlite-wasi).
 - **Sysroot Mounting & C Linkage**:
   - Headers (`<sqlite3.h>`, `<sqlite3ext.h>`) and static library `libsqlite3.a` are bundled out of the box in `/usr/include/` and `/usr/lib/`.
   - User C programs compile and link cleanly with standard `-lsqlite3` without additional flags or host bridges.

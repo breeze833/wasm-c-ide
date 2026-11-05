@@ -370,7 +370,7 @@ Agents executing this project should proceed milestone-by-milestone:
 - Unit test coverage in `test/settings-upgrade.test.js`.
 
 ### Milestone 24: SQLite 3 WASI Embedded Database & CLI Subsystem (`sqlite-wasi`)
-- Integrate zero-dependency embedded relational database engine SQLite 3 (version 3.49.1) targeting `wasm32-wasip1` from [`breeze833/sqlite-wasi`](https://github.com/breeze833/sqlite-wasi).
+- Integrate zero-dependency embedded relational database engine SQLite 3 (version 3.54.1) targeting `wasm32-wasip1` from [`breeze833/sqlite-wasi`](https://github.com/breeze833/sqlite-wasi).
 - Bundled sysroot headers & static library:
   - Dynamically fetch or mount `/usr/include/sqlite3.h` and `/usr/include/sqlite3ext.h`.
   - Auto-generate `src/vfs/sqlite-headers.js` in `scripts/download-sysroot.js`.
