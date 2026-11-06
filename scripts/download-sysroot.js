@@ -40,6 +40,7 @@ const LIBTURTLE_REPO_URL = 'https://github.com/breeze833/libturtle.git';
 const SQLITE_WASI_TAG = 'v3.54.1';
 const SQLITE_WASI_VERSION = '3.54.1';
 const SQLITE_WASI_BASE_URL = `https://github.com/breeze833/sqlite-wasi/releases/download/${SQLITE_WASI_TAG}`;
+const BUSYBOX_WASI_BASE_URL = 'https://github.com/breeze833/busybox-wasi/releases/download/latest';
 
 const WASM_DIR = path.join(projectRoot, 'public', 'sysroot', 'wasm');
 const RAYLIB_INC_DIR = path.join(projectRoot, 'public', 'sysroot', 'include', 'raylib');
@@ -63,6 +64,7 @@ const REQUIRED_FILES = [
   path.join(WASM_DIR, 'libturtle_raylib.a'),
   path.join(WASM_DIR, 'libsqlite3.a'),
   path.join(WASM_DIR, 'sqlite3.wasm'),
+  path.join(WASM_DIR, 'busybox.wasm'),
   path.join(RAYLIB_INC_DIR, 'raylib.h'),
   path.join(RAYLIB_INC_DIR, 'raymath.h'),
   path.join(RAYLIB_INC_DIR, 'rlgl.h'),
@@ -408,6 +410,24 @@ async function downloadSqliteAssets() {
   console.log('[sysroot] Generated src/vfs/sqlite-headers.js');
 }
 
+async function downloadBusyboxAssets() {
+  const destPath = path.join(WASM_DIR, 'busybox.wasm');
+  if (!force && fs.existsSync(destPath) && fs.statSync(destPath).size > 0) {
+    console.log('[sysroot] busybox.wasm already present, skipping.');
+    return;
+  }
+
+  const siblingPath = path.resolve(projectRoot, '..', 'busybox-wasi', 'bin', 'busybox.wasm');
+  if (fs.existsSync(siblingPath) && fs.statSync(siblingPath).size > 0) {
+    fs.copyFileSync(siblingPath, destPath);
+    console.log('[sysroot] Copied busybox.wasm from sibling repo busybox-wasi.');
+    return;
+  }
+
+  const url = `${BUSYBOX_WASI_BASE_URL}/busybox.wasm`;
+  await downloadToFile(url, destPath);
+}
+
 async function main() {
   if (!force && allAssetsPresent()) {
     console.log('[sysroot] All toolchain & sysroot assets are present. Skipping download.');
@@ -424,6 +444,7 @@ async function main() {
   await downloadRaylibAssets();
   await downloadTurtleAssets();
   await downloadSqliteAssets();
+  await downloadBusyboxAssets();
   console.log('[sysroot] All assets successfully downloaded and ready.');
 }
 

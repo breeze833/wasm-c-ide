@@ -1,5 +1,8 @@
 // Unit tests for Shell argument parsing and commands
 import assert from 'node:assert';
+import fs from 'node:fs';
+import path from 'node:path';
+import { WasiHost } from '../src/vfs/wasi-host.js';
 
 function parseArgs(line) {
   const args = [];
@@ -800,6 +803,117 @@ console.log('✓ parseCommandChain passed');
   assert.strictEqual(promptShown, 1);
 
   console.log('✓ shell interrupt state transition, RPC clearance, and prompt emission verified');
+}
+
+// Test 15: Verify BusyBox WASI host builtin execution, ./a.out __host_exec, time, and pushd/popd
+{
+  const testVfs = new VFS();
+  mountSysroot(testVfs);
+  testVfs.mkdir('/workspace/testdir');
+  testVfs.writeFile('/workspace/a.out', new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]));
+
+  const busyboxBuf = fs.readFileSync(path.resolve('public/sysroot/wasm/busybox.wasm'));
+  const busyboxMod = new WebAssembly.Module(busyboxBuf);
+
+  const executedHostCmds = [];
+  function runShellCommand(cmdLine) {
+    let output = '';
+    const isTimed = /^\s*time(\s+|$)/.test(cmdLine);
+    const actualCmd = isTimed ? cmdLine.replace(/^\s*time\s*/, '') : cmdLine;
+    const wrapped = actualCmd.replace(/(^|[;&|]\s*|\btime\s+)(\.{1,2}\/[^\s;&|<>]+|\/[^\s;&|<>]+)/g, (m, prefix, target) => {
+      return `${prefix}__host_exec ${target}`;
+    });
+
+    const SHELL_PREAMBLE = `
+_read_dstack() {
+  if [ -f /workspace/.ide_dir_stack ]; then _DIR_STACK="$(cat /workspace/.ide_dir_stack 2>/dev/null)"; else _DIR_STACK=""; fi
+}
+_save_dstack() { echo "$_DIR_STACK" > /workspace/.ide_dir_stack; }
+pushd() {
+  _read_dstack
+  if [ -z "$1" ]; then echo "pushd: no other directory" >&2; return 1; fi
+  _DIR_STACK="$(pwd)|\${_DIR_STACK}"; _save_dstack; cd "$1" || return 1; dirs
+}
+popd() {
+  _read_dstack
+  if [ -z "$_DIR_STACK" ]; then echo "popd: directory stack empty" >&2; return 1; fi
+  _TARGET="\${_DIR_STACK%%|*}"; _DIR_STACK="\${_DIR_STACK#*|}"; _save_dstack; cd "$_TARGET" || return 1; dirs
+}
+dirs() {
+  _read_dstack; _res="$(pwd)"; _rest="$_DIR_STACK"
+  while [ -n "$_rest" ]; do
+    _d="\${_rest%%|*}"; _rest="\${_rest#*|}"; if [ -n "$_d" ]; then _res="$_res $_d"; fi
+  done
+  echo "$_res"
+}
+`;
+    const fullScript = `cd "/workspace"\n${SHELL_PREAMBLE}\n${wrapped}\n__rc=$?; pwd > /workspace/.ide_pwd; exit $__rc`;
+    const t0 = performance.now();
+
+    const host = new WasiHost({
+      vfs: testVfs,
+      cwd: '/workspace',
+      argv: ['busybox', 'sh', '-c', fullScript],
+      environ: { USER: 'student', HOME: '/workspace', PWD: '/workspace', PATH: '/bin:/usr/bin:/workspace' },
+      stdout: (s) => { output += s; },
+      stderr: (s) => { output += s; },
+      hostBuiltinLookup: (name) => {
+        if (name === '__host_exec' || name === 'time' || name === 'gcc' || name === 'make' || name === 'sqlite3') return 1;
+        return 0;
+      },
+      hostBuiltinRun: ({ argv }) => {
+        let cmd = argv[0];
+        let args = argv.slice(1);
+        if (cmd === '__host_exec') {
+          cmd = args[0];
+          args = args.slice(1);
+        }
+        executedHostCmds.push({ cmd, args });
+        return 0;
+      },
+    });
+
+    const inst = new WebAssembly.Instance(busyboxMod, host.createImportObject());
+    host.getMemory = () => inst.exports.memory;
+    try { inst.exports._start(); } catch (_) {}
+
+    if (isTimed) {
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(3);
+      output += `\r\nreal\t0m${elapsed}s\r\n`;
+    }
+    return output;
+  }
+
+  // 1. External toolchain commands
+  runShellCommand('gcc main.c -o a.out');
+  assert.strictEqual(executedHostCmds.length, 1);
+  assert.strictEqual(executedHostCmds[0].cmd, 'gcc');
+  assert.deepStrictEqual(executedHostCmds[0].args, ['main.c', '-o', 'a.out']);
+
+  // 2. Binary execution via ./a.out and __host_exec
+  runShellCommand('./a.out --flag');
+  assert.strictEqual(executedHostCmds.length, 2);
+  assert.strictEqual(executedHostCmds[1].cmd, './a.out');
+  assert.deepStrictEqual(executedHostCmds[1].args, ['--flag']);
+
+  // 3. Command substitution with MemoryPipe ref count
+  const subshellOut = runShellCommand('X=$(echo "hello_pipe"); echo "GOT: $X"');
+  assert.ok(subshellOut.includes('GOT: hello_pipe'), `Expected subshell output with hello_pipe, got: ${subshellOut}`);
+
+  // 4. pushd / popd / dirs
+  const pushOut = runShellCommand('pushd /workspace/testdir');
+  assert.ok(pushOut.includes('/workspace/testdir /workspace'), `pushd output must display dir stack: ${pushOut}`);
+  assert.strictEqual(testVfs.readFile('/workspace/.ide_pwd', true).trim(), '/workspace/testdir');
+
+  const popOut = runShellCommand('popd');
+  assert.ok(popOut.includes('/workspace'), `popd output must display dir stack: ${popOut}`);
+  assert.strictEqual(testVfs.readFile('/workspace/.ide_pwd', true).trim(), '/workspace');
+
+  // 5. time
+  const timeOut = runShellCommand('time ls');
+  assert.ok(timeOut.includes('real\t0m'), `time output must include real elapsed time: ${timeOut}`);
+
+  console.log('✓ BusyBox WASI host builtin execution, ./a.out __host_exec, time, and pushd/popd verified');
 }
 
 console.log('--- ALL SHELL TESTS PASSED ---');

@@ -173,7 +173,20 @@ export class App {
     }
     this.isReady = true;
     if (this.shellWorker) {
-      this.shellWorker.postMessage({ type: 'init', cwd: '/workspace' });
+      const initialFiles = {};
+      const allFiles = this.vfs.getAllFiles('/workspace');
+      for (const f of allFiles) {
+        if (!f.isDir) {
+          initialFiles[f.path] = f.content;
+        }
+      }
+      this.shellWorker.postMessage({
+        type: 'init',
+        cwd: '/workspace',
+        sharedBuffer: this.shellSharedBuffer,
+        files: initialFiles,
+        basePath: wasmBasePath,
+      });
     }
 
     // Warm up compiler in background so llvm-box is ready in cache
@@ -269,6 +282,15 @@ export class App {
     });
     this.runtimeManager.setGraphicsWindow(this.graphicsWindow);
 
+    // Setup SharedArrayBuffer for synchronous host process execution in shell worker
+    if (typeof SharedArrayBuffer !== 'undefined') {
+      this.shellSharedBuffer = new SharedArrayBuffer(1024);
+      this.shellSharedInt32 = new Int32Array(this.shellSharedBuffer);
+    } else {
+      this.shellSharedBuffer = null;
+      this.shellSharedInt32 = null;
+    }
+
     // Instantiate Shell Worker as ES Module worker
     this.shellWorker = new Worker(
       new URL('./workers/shell.worker.js', import.meta.url),
@@ -284,15 +306,102 @@ export class App {
         return;
       }
 
-      // Handle VFS RPC requests from shell worker
+      if (msg.type === 'vfs_sync') {
+        const { changedFiles, deletedFiles } = msg;
+        if (changedFiles) {
+          for (const [p, u8] of Object.entries(changedFiles)) {
+            this.vfs.writeFile(p, u8, Date.now(), true);
+          }
+        }
+        if (deletedFiles) {
+          for (const p of deletedFiles) {
+            try { this.vfs.remove(p, true, true); } catch (_) {}
+          }
+        }
+        if (this.fileTreeUI) this.fileTreeUI.render();
+        return;
+      }
+
+      if (msg.type === 'cwd_changed') {
+        this.cwd = msg.cwd;
+        return;
+      }
+
+      if (msg.type === 'host_spawn_request') {
+        const { payload } = msg;
+        let exitCode = 1;
+        try {
+          const res = await this.executeExternalCommand(payload);
+          if (typeof res === 'object' && res !== null && typeof res.exitCode === 'number') {
+            exitCode = res.exitCode;
+          } else if (res === true || res === 0) {
+            exitCode = 0;
+          }
+        } catch (err) {
+          if (this.terminal) {
+            this.terminal.write(`\r\n\x1b[31m${err.message || String(err)}\x1b[0m\r\n`);
+          }
+          exitCode = 1;
+        }
+
+        if (this.shellSharedInt32) {
+          this.shellSharedInt32[1] = exitCode; // RESULT_IDX
+          Atomics.store(this.shellSharedInt32, 0, 2); // CONTROL_IDX: 2 = done
+          Atomics.notify(this.shellSharedInt32, 0, 1);
+        }
+        return;
+      }
+
+      // Handle legacy VFS RPC requests if any
       if (msg.type.startsWith('vfs_') || msg.type === 'exec_command') {
         this.handleWorkerRpc(msg);
       }
     };
 
+    // Forward master VFS changes to shell worker so its in-memory VFS stays synchronized
+    this.vfs.subscribe((event) => {
+      if (!this.shellWorker) return;
+      if (event.type === 'write' && !event.isDir) {
+        const content = this.vfs.readFile(event.path, false);
+        this.shellWorker.postMessage({
+          type: 'file_changed',
+          path: event.path,
+          content,
+        });
+      } else if (event.type === 'remove') {
+        this.shellWorker.postMessage({
+          type: 'file_deleted',
+          path: event.path,
+        });
+      } else if (event.type === 'rename') {
+        this.shellWorker.postMessage({
+          type: 'file_deleted',
+          path: event.oldPath,
+        });
+        const content = this.vfs.readFile(event.path, false);
+        this.shellWorker.postMessage({
+          type: 'file_changed',
+          path: event.path,
+          content,
+        });
+      }
+    });
+
     if (options.autoInit) {
       this.isReady = true;
-      this.shellWorker.postMessage({ type: 'init', cwd: '/workspace' });
+      const initialFiles = {};
+      const allFiles = this.vfs.getAllFiles('/workspace');
+      for (const f of allFiles) {
+        if (!f.isDir) {
+          initialFiles[f.path] = f.content;
+        }
+      }
+      this.shellWorker.postMessage({
+        type: 'init',
+        cwd: '/workspace',
+        sharedBuffer: this.shellSharedBuffer,
+        files: initialFiles,
+      });
     }
 
     const btnClearTerm = document.getElementById('btn-clear-term');
@@ -340,7 +449,11 @@ export class App {
   }
 
   async executeExternalCommand(payload) {
-    const { cmd, args, cwd, stdinData, captureStdout, stdoutRedirect } = payload;
+    let { cmd, args, cwd, stdinData, captureStdout, stdoutRedirect } = payload;
+    if (cmd === '__host_exec' && args && args.length > 0) {
+      cmd = args[0];
+      args = args.slice(1);
+    }
     let capturedStdout = '';
     const shouldCapture = Boolean(captureStdout || stdoutRedirect);
 

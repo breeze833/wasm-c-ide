@@ -1268,9 +1268,6 @@ export const BIN_COMMANDS = [
   'pwd',
   'clear',
   'echo',
-  'pushd',
-  'popd',
-  'dirs',
 ];
 
 export const USR_BIN_COMMANDS = [
@@ -1362,18 +1359,31 @@ export function mountSysroot(vfs) {
   // Mount /usr/lib/wasm-host-imports.txt for wasm-ld --allow-undefined-file
   vfs.writeFile('/usr/lib/wasm-host-imports.txt', WASM_HOST_IMPORTS.join('\n') + '\n', Date.now(), true);
 
+  // Binary executable stub header (\0asm) for sysroot commands so BusyBox ash does not
+  // interpret them as shell scripts and instead delegates toolchain commands to the host
+  const wasmBinaryStub = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+
   // Mount /bin built-in executables
   for (const cmd of BIN_COMMANDS) {
-    vfs.writeFile(`/bin/${cmd}`, `#!/bin/sh\n# Built-in utility: ${cmd}\n`, Date.now(), true);
+    if (!vfs.exists(`/bin/${cmd}`)) {
+      vfs.writeFile(`/bin/${cmd}`, wasmBinaryStub, Date.now(), true);
+    }
   }
 
   // Mount /usr/bin toolchain executables
   for (const cmd of USR_BIN_COMMANDS) {
-    vfs.writeFile(`/usr/bin/${cmd}`, `#!/bin/sh\n# Toolchain binary: ${cmd}\n`, Date.now(), true);
+    if (!vfs.exists(`/usr/bin/${cmd}`)) {
+      vfs.writeFile(`/usr/bin/${cmd}`, wasmBinaryStub, Date.now(), true);
+    }
   }
 }
 
 export const SYSROOT_UTILITIES = [
+  {
+    name: 'busybox',
+    file: 'busybox.wasm',
+    target: '/bin/busybox',
+  },
   {
     name: 'sqlite3',
     file: 'sqlite3.wasm',

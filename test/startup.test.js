@@ -88,7 +88,7 @@ console.log('--- Running Startup Loading & VFS Indication Unit Tests ---');
   assert.ok(mainSrc.includes('System ready.'), 'Startup must announce system ready in terminal');
 
   // Verify shellWorker init postMessage is deferred until after toolchain.init
-  const shellWorkerInitIdx = mainSrc.indexOf("this.shellWorker.postMessage({ type: 'init', cwd: '/workspace' })", toolchainInitIdx);
+  const shellWorkerInitIdx = mainSrc.indexOf("this.shellWorker.postMessage({", toolchainInitIdx);
   assert.ok(shellWorkerInitIdx > toolchainInitIdx, 'shellWorker init message must be deferred until after toolchain.init');
 
   // Verify input blocking in initTerminalAndShell

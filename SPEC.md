@@ -68,12 +68,13 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 |                         Web Worker Execution Sandboxes                           |
 |                                                                                  |
 |  +--------------------------+          +--------------------------------------+  |
-|  |    POSIX Shell Worker    |          |  Wasm Runtime (App + Raylib / Turtle)|  |
-|  |  - History & Autocomplete|          |  - SharedArrayBuffer (Stdin & Input) |  |
-|  |  - Directory Stack & Globs|         |  - Atomics.wait (Blocking IO & FPS)  |  |
-|  |  - Pipelines & Redirects |          |  - OffscreenCanvas (WebGL/2D Context)|  |
-|  +-------------+------------+          |  - Unified WasiHost (WASI Preview 1) |  |
-|                | (executes commands)   +------------------+-------------------+  |
+|  |  BusyBox WASI Shell (ash)|          |  Wasm Runtime (App + Raylib / Turtle)|  |
+|  |  - busybox.wasm 1.38.0   |          |  - SharedArrayBuffer (Stdin & Input) |  |
+|  |  - POSIX Scripting & Ash |          |  - Atomics.wait (Blocking IO & FPS)  |  |
+|  |  - Real Unix Coreutils   |          |  - OffscreenCanvas (WebGL/2D Context)|  |
+|  |  - wasi_host_spawn Bridge|          |  - Unified WasiHost (WASI Preview 1) |  |
+|  +-------------+------------+          +------------------+-------------------+  |
+|                | (executes commands)                      |                      |
 |                v                                          |                      |
 |  +--------------------------------------------------------+                      |
 |  |  LLVM 19 Single-Binary Toolchain (Direct VFS Host)                               |
@@ -114,8 +115,8 @@ This specification defines the architecture and design invariants of `wasm-c-ide
      - Preopens descriptor 3 (`name: '.'`, `path: '/workspace'`) exclusively.
      - Confines user application execution (`a.out`, `sqlite3`, etc.) to `/workspace`, preventing user code from mutating sysroot directories or system binaries.
 - **Terminal & Stream Synchronization**:
-  - **Standard Output & Error (`stdout`, `stderr`)**: Directs character streams to xterm.js, or captures streams to memory buffers during pipeline stages (`|`) and file redirections (`>`, `>>`).
-  - **Standard Input (`stdin`)**: Synchronizes with the main browser thread via `SharedArrayBuffer` and `Atomics.wait()` in worker threads for blocking interactive reads (`scanf`, `cin`, `getchar`), coupled with the host `LineEditor`. Supports immediate buffer feed for `<` input redirection.
+  - **Standard Output & Error (`stdout`, `stderr`)**: Directs character streams directly to `xterm.js`. All stream redirection (`>`, `>>`, `2>`, `2>&1`) and pipeline chaining (`|`) are handled natively inside the `busybox.wasm` shell via standard WASI file descriptors, eliminating custom JavaScript stream-capturing layers.
+  - **Standard Input (`stdin`)**: Synchronizes with the main browser thread via `SharedArrayBuffer` and `Atomics.wait()` in worker threads for blocking interactive reads (`scanf`, `cin`, `getchar`), coupled with the host `LineEditor`. For `<` redirection and shell pipelines, `ash` attaches the source file descriptor or in-memory pipe directly to `fd 0`.
   - **Bidirectional File Sync (`onFileSync`, `onFileDelete`)**: WasiHost lifecycle hooks stream file modification and unlinking events to `VFS`, immediately synchronizing dirty states with Monaco tabs and updating `FileTreeUI`.
 
 ### 3.2 Toolchain & Sysroot Integration (Zero-MemFS Single Binary)
@@ -185,7 +186,7 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 - Target binaries run in `runtime.worker.js` using `WasiHost`.
 - Standard input (`stdin`):
   - Handled via `SharedArrayBuffer` and `Atomics.wait()` on the worker thread for synchronous `scanf` / `cin` / `getchar` / `fgets`.
-  - Seamless fallback to preloaded buffer for `<` redirection and pipeline chaining (`|`).
+  - When invoked from the shell with `<` redirection or within a pipeline (`|`), input is routed by `ash` directly via standard WASI file descriptors.
   - Integrated with the host-side `LineEditor` (`src/terminal/line-editor.js`):
     - When a user binary requests interactive stdin, all terminal keystrokes pass through `RuntimeManager.prototype.handleTerminalInput()`.
     - Enables full in-line editing (Left/Right arrows, Home/End, Backspace, Delete) and Up/Down arrow history recall for interactive console applications.
@@ -286,6 +287,10 @@ This specification defines the architecture and design invariants of `wasm-c-ide
   - Mediates between raw `xterm.js` keystrokes and both execution domains:
     1. **Shell Worker (`shell.worker.js`)**: Interactive POSIX shell prompt (`ide:~$ `) and interactive built-in stdin (`cat`).
     2. **Runtime Manager (`runtime.js`)**: Interactive standard input for running WebAssembly binaries (`sqlite3`, `scanf`, `fgets`, `cin`).
+- **Syntax-Agnostic Invariant**:
+  - `LineEditor` functions strictly as a user-facing interactive text navigation, editing, and history recall engine.
+  - It does not tokenize, parse, split, or evaluate shell commands, quotes, command-chaining operators (`&&`, `||`, `;`), or stream redirections (`>`, `>>`, `<`, `|`).
+  - Upon pressing `Enter`, the raw command-line string is transmitted verbatim to the `busybox.wasm` shell worker, ensuring complete syntactic fidelity to POSIX shell standards.
 - **Prompt-Safe Relative Redrawing Algorithm**:
   - In CLI applications (such as SQLite's interactive shell `sqlite> `), the process writes its prompt directly to `stdout`. The host does not know the prompt length in advance.
   - `LineEditor` maintains cursor tracking strictly relative to the user's input line:
@@ -326,12 +331,68 @@ This specification defines the architecture and design invariants of `wasm-c-ide
   - Vite's default development server compresses static files and attaches `Content-Encoding: gzip` on `.tar.gz` files while serving them with `Cache-Control: no-cache`, causing browser-side decompressive double-handling and slow re-fetching during local manual testing.
   - The custom `emulate-production-sysroot` Vite plugin intercepts `/sysroot/wasm/` requests in both `server` and `preview` modes, streams files as raw binary `application/octet-stream` without `Content-Encoding: gzip`, and sets `Cache-Control: public, max-age=31536000, immutable` alongside CORS and COOP/COEP headers, matching production caching and streaming behavior.
 
+### 3.12 BusyBox WASI POSIX Shell & Host Process Dispatch Engine (`busybox-wasi`)
+- **Remote Package Integration & Sysroot Asset**:
+  - Directly integrates with upstream release package [`breeze833/busybox-wasi`](https://github.com/breeze833/busybox-wasi) (`v1.38.0`).
+  - Fetched dynamically on-demand during project installation via `scripts/download-sysroot.js` and placed at `/sysroot/wasm/busybox.wasm`.
+  - Cached permanently in IndexedDB via `wasm-cache.js` (`busybox-1.38.0`), ensuring zero-latency startup on subsequent sessions.
+- **True POSIX Shell Scripting via `ash`**:
+  - Completely replaces legacy JavaScript regex parsing and handwritten coreutils emulation in `shell.worker.js`.
+  - Delivers complete standard POSIX shell scripting features:
+    - Control structures: `for`, `while`, `until`, `if-then-else`, `case`.
+    - Functions, local variables, environment exports (`export VAR=val`), parameter expansions (`${VAR:-def}`), and arithmetic expansions (`$((...))`).
+    - In-process subshells `$(...)`, pipelines (`|`), and file redirections (`>`, `>>`, `<`).
+    - Real compiled Unix coreutils: `grep`, `egrep`, `fgrep`, `sed`, `awk`, `find`, `sort`, `uniq`, `cut`, `tr`, `wc`, `head`, `tail`, `cat`, `cmp`, `diff`, `cp`, `mv`, `rm`, `mkdir`, `rmdir`, `touch`, `tar`, `gzip`, `gunzip`, `expr`, `bc`, `dc`, `date`, `sleep`, `which`.
+- **The `make` Exception & Host Process Dispatch Bridge (`wasi_host_spawn`)**:
+  - `ash` distinguishes between compiled internal applets and external commands.
+  - When an external command is invoked, `ash` delegates execution to the host bridge via WebAssembly import:
+    ```c
+    __attribute__((__import_module__("env"), __import_name__("wasi_host_spawn")))
+    int wasi_host_spawn(const char *cmd, const char *const *argv, const char *const *envp);
+    ```
+  - The host bridge intercepts `wasi_host_spawn` and dispatches according to command classification:
+    1. **Build Engine (`make [targets...]`)**:
+       - Handled as a transparent pseudo-external command: executes the JavaScript build engine `runMake()` (`src/toolchain/make.js`) directly against the in-memory `VFS`.
+       - Evaluates Makefile rules, prerequisites, and file staleness (`mtime`), executing recipes through the toolchain and returning status code `0` (success) or `2` (failure) back to `ash`.
+    2. **Compiler Toolchain (`gcc`, `clang`, `g++`, `clang++`, `wasm-ld`, `ar`, `nm`, `size`, `objdump`, `strings`)**:
+       - Dispatched to `compiler.worker.js` via `CompilerClient.prototype.executeCommand`.
+    3. **User Binaries (`./a.out`, `*.out`, `/workspace/*`)**:
+       - Routed transparently via `__host_exec` bridge to `runtime.worker.js` via `RuntimeManager.prototype.runBinary`.
+    4. **Prebuilt Binaries (`sqlite3`)**:
+       - Dispatched to `runtime.worker.js` executing `/usr/bin/sqlite3.wasm`.
+    5. **Execution Profiling (`time <cmd>`)**:
+       - Dispatches command while profiling high-resolution elapsed time (`performance.now()`), outputting POSIX `real/user/sys` timing statistics.
+    6. **Terminal Actions (`clear`, `exit`)**:
+       - Emits clear-screen VT100 escapes to `xterm.js` or resets the terminal session.
+  - Returns the exact exit code back into `ash`, cleanly preserving shell chaining operators (`make && ./a.out`, `make clean || true`).
+- **Directory Stack (`pushd`, `popd`, `dirs`) & Subshell State Preservation**:
+  - Implements POSIX-compliant shell functions for `pushd`, `popd`, and `dirs` backed by `/workspace/.ide_dir_stack`.
+  - Integrates with `MemoryPipe` write-reference-counting in `WasiHost`, guaranteeing that file descriptor duplications (`dup`, `dup2`) across subshell command substitutions `$(...)` and pipelines (`|`) do not prematurely close active reader pipes.
+- **Sysroot Binary Stubs & Toolchain Delegation Invariant**:
+  - `mountSysroot()` mounts `/usr/bin/` toolchain executables with WebAssembly binary headers (`\0asm`) rather than shell scripts (`#!/bin/sh`).
+  - Ensures BusyBox `ash` does not attempt to parse and execute toolchain executables as shell scripts, delegating lookup to `__host_builtin_lookup` and dispatching cleanly to `executeExternalCommand`.
+- **Single Source of Truth for Redirection & Pipelines**:
+  - All stream redirections (`>`, `>>`, `<`, `2>`, `2>&1`) and inter-process pipelines (`|`) are handled **exclusively inside `ash` (`busybox.wasm`)** using standard WASI file descriptors and in-memory pipes.
+  - When `ash` executes an external command via `wasi_host_spawn` (such as `make > build.log 2>&1`), `ash` has already redirected the standard file descriptors before invoking the host bridge. The host simply reads from or writes to the provided WASI descriptor, completely eliminating the legacy JavaScript regex parsing, token splitting, and manual stream buffering previously located in `shell.worker.js`.
+- **Interactive Dual-Layer Terminal UX (`LineEditor` Integration)**:
+  - Preserves the fast, prompt-safe `LineEditor` at the frontend (`xterm.js`):
+    - Instant 60 FPS cursor positioning (Left/Right, Home/End, Backspace, Delete).
+    - Up/Down history recall and scratchpad preservation.
+    - Contextual history isolation and Tab autocompletion querying `VFS`.
+  - When Enter is pressed, the complete command line is evaluated by `busybox.wasm sh -c "<cmd>"`.
+  - Updates the active working directory (`cwd`) between `ash` and the IDE UI upon `cd`, ensuring the prompt (`ide:~/subfolder$ `) and file tree navigation remain synchronized.
+
 ---
 
 ## 4. Verification & Testing Checklist
 
 | Test Case | Expected Behavior |
 |---|---|
+| **BusyBox POSIX Shell Scripting** | Interactive loops (`for`, `while`), conditionals (`if-then-else`), arithmetic `$((...))`, and subshells `$(...)` execute accurately with full POSIX semantics in xterm. |
+| **Real Coreutils Execution** | `grep`, `sed`, `awk`, `find`, `sort`, `uniq`, `diff`, `tar`, and `wc` execute real BusyBox applets against `/workspace` files with correct standard flags and output. |
+| **Make Host Spawn Exception** | Running `make` or `make clean` inside `ash` delegates to `runMake()` via `wasi_host_spawn`, evaluating Makefile targets and returning exit codes back to `ash`. |
+| **Chained Execution (`make && ./a.out`)** | Command chains linking `make` and user executables (`make && ./a.out`) execute sequentially, halting if `make` fails and running the binary if `make` succeeds. |
+| **VFS Bidirectional Synchronization** | Shell file commands (`touch`, `mkdir`, `rm`, redirects `>`) immediately update the in-memory VFS and reflect in the sidebar file tree. |
 | **Standard C/C++ Headers Compilation** | Programs including `<cstdio>`, `<cstdlib>`, `<cstring>`, `<cmath>`, `<cctype>`, `<cassert>`, `<iostream>`, `<vector>`, `<string>`, `<algorithm>`, and `<memory>` compile, link, and execute cleanly with `g++` and `clang++` without missing header or unresolved symbol errors. |
 | **Direct VFS Clang Compilation** | `llvm-box.wasm` (`clang`) compiles C source files reading directly from VFS `/workspace` without MemFS. |
 | **Direct VFS LLD Linkage** | `llvm-box.wasm` (`wasm-ld`) links object files and static archives directly from VFS `/lib/wasm32-wasip1` without MemFS. |
