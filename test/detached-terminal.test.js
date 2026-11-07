@@ -79,7 +79,13 @@ const readmeSrc = fs.readFileSync('examples/README.md', 'utf8');
 assert.ok(readmeSrc.includes('08_ansi_terminal.c'), 'examples/README.md must reference 08_ansi_terminal.c');
 assert.ok(readmeSrc.includes('80×24'), 'examples/README.md must highlight 80x24 detached mode');
 // 6. Verify WasiHost properly decodes multi-byte UTF-8 box drawing sequences without corruption
-const hostSrc = fs.readFileSync('src/vfs/wasi-host.js', 'utf8');
+let hostSrc = fs.readFileSync('src/vfs/wasi-host.js', 'utf8');
+try {
+  const baseHostPath = import.meta.resolve ? new URL(import.meta.resolve('clang-wasi/host')).pathname : null;
+  if (baseHostPath && fs.existsSync(baseHostPath)) {
+    hostSrc += '\n' + fs.readFileSync(baseHostPath, 'utf8');
+  }
+} catch (_) {}
 assert.ok(hostSrc.includes('TextDecoder'), 'WasiHost must use TextDecoder for UTF-8 decoding');
 console.log('✓ WasiHost UTF-8 multi-byte decoding verified');
 

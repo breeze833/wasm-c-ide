@@ -812,10 +812,14 @@ console.log('✓ parseCommandChain passed');
   testVfs.mkdir('/workspace/testdir');
   testVfs.writeFile('/workspace/a.out', new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]));
 
-  const busyboxBuf = fs.readFileSync(path.resolve('public/sysroot/wasm/busybox.wasm'));
+  const baseDir = typeof import.meta.dirname !== 'undefined' ? import.meta.dirname : path.dirname(new URL(import.meta.url).pathname);
+  const busyboxPath = path.resolve(baseDir, '../public/sysroot/wasm/busybox.wasm');
+  const busyboxBuf = fs.readFileSync(busyboxPath);
   const busyboxMod = new WebAssembly.Module(busyboxBuf);
 
   const executedHostCmds = [];
+  let scriptCwd = '/workspace';
+  let testDirStack = '';
   function runShellCommand(cmdLine) {
     let output = '';
     const isTimed = /^\s*time(\s+|$)/.test(cmdLine);
@@ -825,45 +829,51 @@ console.log('✓ parseCommandChain passed');
     });
 
     const SHELL_PREAMBLE = `
-_read_dstack() {
-  if [ -f /workspace/.ide_dir_stack ]; then _DIR_STACK="$(cat /workspace/.ide_dir_stack 2>/dev/null)"; else _DIR_STACK=""; fi
-}
-_save_dstack() { echo "$_DIR_STACK" > /workspace/.ide_dir_stack; }
+_DIR_STACK="${testDirStack}"
+_save_dstack() { __host_update_dstack "$_DIR_STACK"; }
 pushd() {
-  _read_dstack
   if [ -z "$1" ]; then echo "pushd: no other directory" >&2; return 1; fi
   _DIR_STACK="$(pwd)|\${_DIR_STACK}"; _save_dstack; cd "$1" || return 1; dirs
 }
 popd() {
-  _read_dstack
   if [ -z "$_DIR_STACK" ]; then echo "popd: directory stack empty" >&2; return 1; fi
   _TARGET="\${_DIR_STACK%%|*}"; _DIR_STACK="\${_DIR_STACK#*|}"; _save_dstack; cd "$_TARGET" || return 1; dirs
 }
 dirs() {
-  _read_dstack; _res="$(pwd)"; _rest="$_DIR_STACK"
+  _res="$(pwd)"; _rest="$_DIR_STACK"
   while [ -n "$_rest" ]; do
     _d="\${_rest%%|*}"; _rest="\${_rest#*|}"; if [ -n "$_d" ]; then _res="$_res $_d"; fi
   done
   echo "$_res"
 }
 `;
-    const fullScript = `cd "/workspace"\n${SHELL_PREAMBLE}\n${wrapped}\n__rc=$?; pwd > /workspace/.ide_pwd; exit $__rc`;
+    const fullScript = `cd "/workspace"\n${SHELL_PREAMBLE}\n${wrapped}\n__rc=$?; __host_update_pwd "$(pwd)"; exit $__rc`;
     const t0 = performance.now();
 
     const host = new WasiHost({
       vfs: testVfs,
       cwd: '/workspace',
       argv: ['busybox', 'sh', '-c', fullScript],
+      rows: 32,
+      cols: 96,
       environ: { USER: 'student', HOME: '/workspace', PWD: '/workspace', PATH: '/bin:/usr/bin:/workspace' },
       stdout: (s) => { output += s; },
       stderr: (s) => { output += s; },
       hostBuiltinLookup: (name) => {
-        if (name === '__host_exec' || name === 'time' || name === 'gcc' || name === 'make' || name === 'sqlite3') return 1;
+        if (name === '__host_update_pwd' || name === '__host_update_dstack' || name === '__host_exec' || name === 'time' || name === 'gcc' || name === 'make' || name === 'sqlite3') return 1;
         return 0;
       },
       hostBuiltinRun: ({ argv }) => {
         let cmd = argv[0];
         let args = argv.slice(1);
+        if (cmd === '__host_update_pwd') {
+          scriptCwd = args[0] ? args[0].trim() : scriptCwd;
+          return 0;
+        }
+        if (cmd === '__host_update_dstack') {
+          testDirStack = args[0] || '';
+          return 0;
+        }
         if (cmd === '__host_exec') {
           cmd = args[0];
           args = args.slice(1);
@@ -881,7 +891,7 @@ dirs() {
       const elapsed = ((performance.now() - t0) / 1000).toFixed(3);
       output += `\r\nreal\t0m${elapsed}s\r\n`;
     }
-    return output;
+    return { output, cwd: scriptCwd };
   }
 
   // 1. External toolchain commands
@@ -897,23 +907,76 @@ dirs() {
   assert.deepStrictEqual(executedHostCmds[1].args, ['--flag']);
 
   // 3. Command substitution with MemoryPipe ref count
-  const subshellOut = runShellCommand('X=$(echo "hello_pipe"); echo "GOT: $X"');
+  const { output: subshellOut } = runShellCommand('X=$(echo "hello_pipe"); echo "GOT: $X"');
   assert.ok(subshellOut.includes('GOT: hello_pipe'), `Expected subshell output with hello_pipe, got: ${subshellOut}`);
 
   // 4. pushd / popd / dirs
-  const pushOut = runShellCommand('pushd /workspace/testdir');
+  const { output: pushOut, cwd: pushCwd } = runShellCommand('pushd /workspace/testdir');
   assert.ok(pushOut.includes('/workspace/testdir /workspace'), `pushd output must display dir stack: ${pushOut}`);
-  assert.strictEqual(testVfs.readFile('/workspace/.ide_pwd', true).trim(), '/workspace/testdir');
+  assert.strictEqual(pushCwd, '/workspace/testdir');
+  assert.strictEqual(testVfs.exists('/workspace/.ide_dir_stack'), false, 'No .ide_dir_stack file should ever exist');
 
-  const popOut = runShellCommand('popd');
+  const { output: popOut, cwd: popCwd } = runShellCommand('popd');
   assert.ok(popOut.includes('/workspace'), `popd output must display dir stack: ${popOut}`);
-  assert.strictEqual(testVfs.readFile('/workspace/.ide_pwd', true).trim(), '/workspace');
+  assert.strictEqual(popCwd, '/workspace');
+  assert.strictEqual(testVfs.exists('/workspace/.ide_dir_stack'), false, 'No .ide_dir_stack file should ever exist');
 
   // 5. time
-  const timeOut = runShellCommand('time ls');
+  const { output: timeOut } = runShellCommand('time ls');
   assert.ok(timeOut.includes('real\t0m'), `time output must include real elapsed time: ${timeOut}`);
 
-  console.log('✓ BusyBox WASI host builtin execution, ./a.out __host_exec, time, and pushd/popd verified');
+  // 6. Terminal window geometry bridge (__host_winsize)
+  const { output: sttyOut } = runShellCommand('stty size');
+  assert.strictEqual(sttyOut.trim(), '32 96', `stty size output must match rows/cols: ${sttyOut}`);
+
+  // 7. Directory navigation transitions (cd /, cd, cd subdir, cd, cd /, cd workspace)
+  let activeCwd = '/workspace';
+  function simulateCdCommand(cmd) {
+    const wrappedCmd = `cd "${activeCwd}"\n${cmd}\n__rc=$?; __host_update_pwd "$(pwd)"; exit $__rc`;
+    const host = new WasiHost({
+      vfs: testVfs,
+      cwd: activeCwd,
+      argv: ['busybox', 'sh', '-c', wrappedCmd],
+      environ: { USER: 'student', HOME: '/workspace', PWD: activeCwd, PATH: '/bin:/usr/bin:/workspace' },
+      stdout: () => {},
+      stderr: () => {},
+      hostBuiltinLookup: (name) => {
+        if (name === '__host_update_pwd') return 1;
+        return 0;
+      },
+      hostBuiltinRun: ({ argv }) => {
+        if (argv[0] === '__host_update_pwd') {
+          const newPwd = argv[1] ? argv[1].trim() : '';
+          if (newPwd && newPwd !== activeCwd && (testVfs.exists(newPwd) || newPwd === '/')) {
+            activeCwd = newPwd;
+          }
+          return 0;
+        }
+        return 127;
+      },
+    });
+    const inst = new WebAssembly.Instance(busyboxMod, host.createImportObject());
+    host.getMemory = () => inst.exports.memory;
+    try { inst.exports._start(); } catch (_) {}
+  }
+
+  simulateCdCommand('cd /');
+  assert.strictEqual(activeCwd, '/');
+  simulateCdCommand('cd');
+  assert.strictEqual(activeCwd, '/workspace');
+  simulateCdCommand('cd testdir');
+  assert.strictEqual(activeCwd, '/workspace/testdir');
+  simulateCdCommand('cd');
+  assert.strictEqual(activeCwd, '/workspace');
+  simulateCdCommand('cd /');
+  assert.strictEqual(activeCwd, '/');
+  simulateCdCommand('cd workspace');
+  assert.strictEqual(activeCwd, '/workspace');
+
+  assert.strictEqual(testVfs.exists('/workspace/testdir/.ide_pwd'), false, 'No .ide_pwd in subdirectories');
+  assert.strictEqual(testVfs.exists('/workspace/.ide_pwd'), false, 'No .ide_pwd in workspace');
+
+  console.log('✓ BusyBox WASI host builtin execution, ./a.out __host_exec, time, stty size, pushd/popd, and in-memory cd transitions verified');
 }
 
 console.log('--- ALL SHELL TESTS PASSED ---');

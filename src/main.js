@@ -186,6 +186,8 @@ export class App {
         sharedBuffer: this.shellSharedBuffer,
         files: initialFiles,
         basePath: wasmBasePath,
+        rows: this.terminal && this.terminal.term ? this.terminal.term.rows : 24,
+        cols: this.terminal && this.terminal.term ? this.terminal.term.cols : 80,
       });
     }
 
@@ -256,6 +258,12 @@ export class App {
         this.handleStopExecution();
       }
     );
+
+    this.terminal.onDimensionsChange = (cols, rows) => {
+      if (this.shellWorker) {
+        this.shellWorker.postMessage({ type: 'term_resize', cols, rows });
+      }
+    };
 
     this.runtimeManager = new RuntimeManager(this.terminal);
     this.graphicsWindow = new GraphicsWindowUI({
@@ -401,6 +409,8 @@ export class App {
         cwd: '/workspace',
         sharedBuffer: this.shellSharedBuffer,
         files: initialFiles,
+        rows: this.terminal && this.terminal.term ? this.terminal.term.rows : 24,
+        cols: this.terminal && this.terminal.term ? this.terminal.term.cols : 80,
       });
     }
 

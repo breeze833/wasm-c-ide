@@ -100,9 +100,12 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 
 ## 3. Detailed Component Specifications
 
-### 3.1 Unified WASI Preview 1 Host (`WasiHost`) Integration
-- **Upstream Source of Truth**: The `WasiHost` engine and its standard WASI Preview 1 syscall implementations (`path_open`, `fd_read`, `fd_write`, `fd_filestat_get`, `fd_readdir`, etc.) are authoritatively specified and maintained in [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi) (`SPEC.md`).
-- **Module Location & Lifecycle**: `src/vfs/wasi-host.js` is dynamically fetched from `clang-wasi` (`src/wasi-host.js`) on demand during project installation and setup via `scripts/download-sysroot.js`. It is gitignored to avoid repository divergence.
+### 3.1 Unified Platform Host (`WasiHost`) Integration & Architecture
+- **Platform Host Ownership**: `wasm-c-ide` directly owns `src/vfs/wasi-host.js` as its first-class, version-controlled Platform Host runtime. Rather than dynamically downloading host bridge code from upstream component repositories at setup time, `wasm-c-ide` acts as the system platform integrator, composing and multiplexing the reference host contracts provided by each upstream component:
+  1. **Standard WASI Preview 1 Core (`wasi_snapshot_preview1`)**: Baseline POSIX filesystem, preopens, stream I/O, clocks, and synchronous `poll_oneoff` timer sleeping (aligned with the reference specification from [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi)).
+  2. **BusyBox Host Bridge (`env`)**: In-memory `MemoryPipe` FIFO buffer management with write-reference counting, descriptor duplication (`__host_pipe`, `__host_dup`, `__host_dup2`), terminal geometry bridging (`__host_winsize`, `__host_winch`), execution cancellation (`__host_interrupt`), and command dispatching (`__host_builtin_*`, `wasi_host_spawn`) (aligned with [`breeze833/busybox-wasi`](https://github.com/breeze833/busybox-wasi)).
+  3. **Graphics & Audio Bridges (`canvas`, `gl`, `raylib`, `audio`)**: Multiplexes HTML5 Canvas 2D vector primitives and software framebuffers from [`breeze833/canvas-wasi`](https://github.com/breeze833/canvas-wasi) (v0.1.4) and WebGL ES 2.0 / Web Audio decoding from [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi).
+- **Asset Download Separation**: `scripts/download-sysroot.js` downloads only precompiled binary assets (`llvm-box.wasm`, `sysroot.tar.gz`, `busybox.wasm`, `libraylib.a`, `libsqlite3.a`, `sqlite3.wasm`). JavaScript host runtime code is maintained directly within `src/vfs/wasi-host.js` and tracked in Git.
 - **Direct VFS Binding**:
   - `WasiHost` binds directly to `wasm-c-ide`'s in-memory `VFS` instance (`src/vfs/vfs.js`).
   - Eliminates `memfs.wasm` and intermediate memory copying: all file operations operate directly on JavaScript `Uint8Array` buffers and the unified `Map` hierarchy shared by the Monaco editor, file tree sidebar, and terminal workers.
@@ -366,7 +369,7 @@ This specification defines the architecture and design invariants of `wasm-c-ide
        - Emits clear-screen VT100 escapes to `xterm.js` or resets the terminal session.
   - Returns the exact exit code back into `ash`, cleanly preserving shell chaining operators (`make && ./a.out`, `make clean || true`).
 - **Directory Stack (`pushd`, `popd`, `dirs`) & Subshell State Preservation**:
-  - Implements POSIX-compliant shell functions for `pushd`, `popd`, and `dirs` backed by `/workspace/.ide_dir_stack`.
+  - Implements POSIX-compliant shell functions for `pushd`, `popd`, and `dirs` backed by in-memory host synchronization (`__host_update_dstack`), with zero filesystem file creation.
   - Integrates with `MemoryPipe` write-reference-counting in `WasiHost`, guaranteeing that file descriptor duplications (`dup`, `dup2`) across subshell command substitutions `$(...)` and pipelines (`|`) do not prematurely close active reader pipes.
 - **Sysroot Binary Stubs & Toolchain Delegation Invariant**:
   - `mountSysroot()` mounts `/usr/bin/` toolchain executables with WebAssembly binary headers (`\0asm`) rather than shell scripts (`#!/bin/sh`).

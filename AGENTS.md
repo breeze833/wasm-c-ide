@@ -78,7 +78,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   ├── sysroot.js         # Standard C/C++ sysroot header and binary mount definitions
 │   │   ├── turtle-headers.js  # Auto-generated virtual headers module for libturtle
 │   │   ├── vfs.js             # In-memory virtual filesystem with path normalization
-│   │   └── wasi-host.js       # Unified WASI Preview 1 host (downloaded from clang-wasi, gitignored)
+│   │   └── wasi-host.js       # Unified Platform Host fusing WASI Preview 1, MemoryPipe, and component bridges
 │   └── workers/
 │       ├── compiler.worker.js # Dedicated Web Worker executing Clang, LLD, ar, and make
 │       ├── runtime.worker.js  # WASI host executing user binaries with Atomics stdin & OffscreenCanvas
@@ -276,9 +276,9 @@ Agents executing this project should proceed milestone-by-milestone:
   - Runtime worker (user binaries): preopens single `.` (/workspace, fd 3) to guarantee relative file accesses resolve cleanly inside `/workspace`.
 - Direct sysroot extraction:
   - Unpack `sysroot.tar.gz` directly into host `VFS` using `Tar` reader, preserving directory symlinks and header hierarchies.
-- Upstream `clang-wasi` Single Source of Truth:
-  - Maintain `WasiHost` authoritatively in `breeze833/clang-wasi` (`src/wasi-host.js`), providing in-memory VFS runners and automated C/C++ verification tests without external WASI runtime dependencies.
-  - Dynamically fetch or copy `wasi-host.js` on demand via `scripts/download-sysroot.js` in `wasm-c-ide`, removing redundant tracked copies and enforcing `.gitignore`.
+- Unified Platform Host Ownership:
+  - `wasm-c-ide` directly owns `src/vfs/wasi-host.js` as its tracked platform host, fusing baseline WASI Preview 1 (`clang-wasi`), BusyBox `MemoryPipe` and host builtins (`busybox-wasi`), terminal control, and component graphics/audio bridges.
+  - `scripts/download-sysroot.js` downloads only precompiled binary assets, leaving JavaScript runtime code fully tracked in Git.
 
 ### Milestone 17: Single-Binary Toolchain Consolidation (`llvm-box.wasm`) & Direct CLI Multicall Delegation
 - Consolidate upstream `clang-wasi` release assets into a single multicall binary `llvm-box.wasm` (~60MB), eliminating duplicate downloads of `clang.wasm` and `lld.wasm` and saving ~110MB network payload.

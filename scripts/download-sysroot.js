@@ -51,11 +51,7 @@ const TURTLE_HEADERS_JS = path.join(projectRoot, 'src', 'vfs', 'turtle-headers.j
 const RAYLIB_HEADERS_JS = path.join(projectRoot, 'src', 'vfs', 'raylib-headers.js');
 const SQLITE_HEADERS_JS = path.join(projectRoot, 'src', 'vfs', 'sqlite-headers.js');
 
-const WASI_HOST_JS = path.join(projectRoot, 'src', 'vfs', 'wasi-host.js');
-const CLANG_WASI_RAW_URL = 'https://raw.githubusercontent.com/breeze833/clang-wasi/main/src/wasi-host.js';
-
 const REQUIRED_FILES = [
-  WASI_HOST_JS,
   path.join(WASM_DIR, 'llvm-box.wasm'),
   path.join(WASM_DIR, 'sysroot.tar.gz'),
   path.join(WASM_DIR, 'libraylib.a'),
@@ -105,35 +101,7 @@ async function downloadToFile(url, destPath) {
 }
 
 async function downloadClangWasiAssets() {
-  // 1. Ensure src/vfs/wasi-host.js is single-sourced from clang-wasi
-  if (force || !fs.existsSync(WASI_HOST_JS) || fs.statSync(WASI_HOST_JS).size === 0) {
-    fs.mkdirSync(path.dirname(WASI_HOST_JS), { recursive: true });
-    const localClangWasi = process.env.CLANG_WASI_DIR
-      ? path.join(process.env.CLANG_WASI_DIR, 'src', 'wasi-host.js')
-      : path.resolve(projectRoot, '../clang-wasi/src/wasi-host.js');
-
-    if (fs.existsSync(localClangWasi)) {
-      fs.copyFileSync(localClangWasi, WASI_HOST_JS);
-      console.log(`[sysroot] Copied wasi-host.js from local clang-wasi: ${localClangWasi}`);
-    } else {
-      console.log(`[sysroot] Downloading wasi-host.js from ${CLANG_WASI_RAW_URL} ...`);
-      let res = await fetch(CLANG_WASI_RAW_URL);
-      if (!res.ok) {
-        const releaseUrl = `${CLANG_WASI_BASE_URL}/wasi-host.js`;
-        res = await fetch(releaseUrl);
-        if (!res.ok) {
-          throw new Error(`Failed to download wasi-host.js: ${res.status} ${res.statusText}`);
-        }
-      }
-      const code = await res.text();
-      fs.writeFileSync(WASI_HOST_JS, code, 'utf-8');
-      console.log(`[sysroot] Downloaded and saved src/vfs/wasi-host.js (${code.length} bytes)`);
-    }
-  } else {
-    console.log('[sysroot] src/vfs/wasi-host.js already present, skipping.');
-  }
-
-  // 2. Download toolchain binaries
+  // Download toolchain binaries from clang-wasi releases
   const binaries = ['llvm-box.wasm', 'sysroot.tar.gz'];
   for (const name of binaries) {
     const dest = path.join(WASM_DIR, name);
@@ -414,13 +382,6 @@ async function downloadBusyboxAssets() {
   const destPath = path.join(WASM_DIR, 'busybox.wasm');
   if (!force && fs.existsSync(destPath) && fs.statSync(destPath).size > 0) {
     console.log('[sysroot] busybox.wasm already present, skipping.');
-    return;
-  }
-
-  const siblingPath = path.resolve(projectRoot, '..', 'busybox-wasi', 'bin', 'busybox.wasm');
-  if (fs.existsSync(siblingPath) && fs.statSync(siblingPath).size > 0) {
-    fs.copyFileSync(siblingPath, destPath);
-    console.log('[sysroot] Copied busybox.wasm from sibling repo busybox-wasi.');
     return;
   }
 

@@ -8,4 +8,3 @@ public/sysroot/wasm/
 public/sysroot/include/raylib/
 public/sysroot/include/turtle/
 public/sysroot/include/sqlite/
-src/vfs/wasi-host.js

@@ -19,6 +19,8 @@ const CACHE_KEY = 'busybox-1.38.0';
 let cwd = '/workspace';
 let isExecuting = false;
 let isInitialized = false;
+let termRows = 24;
+let termCols = 80;
 
 const vfs = new VFS();
 let busyboxModule = null;
@@ -150,19 +152,15 @@ async function loadBusyboxBinary(basePath) {
   return mod;
 }
 
-const SHELL_PREAMBLE = `
-_read_dstack() {
-  if [ -f /workspace/.ide_dir_stack ]; then
-    _DIR_STACK="$(cat /workspace/.ide_dir_stack 2>/dev/null)"
-  else
-    _DIR_STACK=""
-  fi
-}
+let dirStackStr = '';
+
+function getShellPreamble(stack) {
+  return `
+_DIR_STACK="${stack}"
 _save_dstack() {
-  echo "$_DIR_STACK" > /workspace/.ide_dir_stack
+  __host_update_dstack "$_DIR_STACK"
 }
 pushd() {
-  _read_dstack
   if [ -z "$1" ]; then
     echo "pushd: no other directory" >&2
     return 1
@@ -173,7 +171,6 @@ pushd() {
   dirs
 }
 popd() {
-  _read_dstack
   if [ -z "$_DIR_STACK" ]; then
     echo "popd: directory stack empty" >&2
     return 1
@@ -185,7 +182,6 @@ popd() {
   dirs
 }
 dirs() {
-  _read_dstack
   _res="$(pwd)"
   _rest="$_DIR_STACK"
   while [ -n "$_rest" ]; do
@@ -198,6 +194,7 @@ dirs() {
   echo "$_res"
 }
 `;
+}
 
 function wrapHostExecutables(cmdLine) {
   return cmdLine.replace(/(^|[;&|]\s*|\btime\s+)(\.{1,2}\/[^\s;&|<>]+|\/[^\s;&|<>]+)/g, (match, prefix, target) => {
@@ -227,8 +224,9 @@ async function executeCommandLine(toExecute) {
   const t0 = performance.now();
 
   // Prefix with cd "${cwd}" so busybox ash executes in the active directory,
-  // load directory stack functions, and record final working directory via /workspace/.ide_pwd
-  const wrappedCmd = `cd "${cwd}"\n${SHELL_PREAMBLE}\n${wrapped}\n__rc=$?; pwd > /workspace/.ide_pwd; exit $__rc`;
+  // load directory stack functions, and record final working directory and dir stack in-memory
+  const preamble = getShellPreamble(dirStackStr);
+  const wrappedCmd = `cd "${cwd}"\n${preamble}\n${wrapped}\n__rc=$?; __host_update_pwd "$(pwd)"; exit $__rc`;
 
   const wasiHost = new WasiHost({
     vfs,
@@ -242,8 +240,12 @@ async function executeCommandLine(toExecute) {
     },
     stdout: (str) => write(str),
     stderr: (str) => write(str),
+    rows: termRows,
+    cols: termCols,
     hostBuiltinLookup: (name) => {
       if (
+        name === '__host_update_pwd' ||
+        name === '__host_update_dstack' ||
         name === '__host_exec' ||
         name === 'time' ||
         name === 'make' ||
@@ -276,6 +278,20 @@ async function executeCommandLine(toExecute) {
     hostBuiltinRun: ({ cwd: runCwd, argc, argv, envp }) => {
       let cmd = argv[0];
       let args = argv.slice(1);
+
+      if (cmd === '__host_update_pwd') {
+        const newPwd = args[0] ? args[0].trim() : '';
+        if (newPwd && newPwd !== cwd && (vfs.exists(newPwd) || newPwd === '/')) {
+          cwd = newPwd;
+          self.postMessage({ type: 'cwd_changed', cwd });
+        }
+        return 0;
+      }
+
+      if (cmd === '__host_update_dstack') {
+        dirStackStr = args[0] || '';
+        return 0;
+      }
 
       if (cmd === '__host_exec') {
         cmd = args[0];
@@ -333,18 +349,6 @@ async function executeCommandLine(toExecute) {
   if (isTimed) {
     const elapsed = ((performance.now() - t0) / 1000).toFixed(3);
     write(`\r\nreal\t0m${elapsed}s\r\nuser\t0m${elapsed}s\r\nsys\t0m0.000s\r\n`);
-  }
-
-  // Check if cwd was updated by cd
-  if (vfs.exists('/workspace/.ide_pwd')) {
-    try {
-      const newPwd = vfs.readFile('/workspace/.ide_pwd', true).trim();
-      vfs.remove('/workspace/.ide_pwd');
-      if (newPwd && newPwd !== cwd && (vfs.exists(newPwd) || newPwd === '/')) {
-        cwd = newPwd;
-        self.postMessage({ type: 'cwd_changed', cwd });
-      }
-    } catch (_) {}
   }
 
   // Synchronize any workspace file modifications
@@ -459,6 +463,8 @@ self.onmessage = async (event) => {
 
   if (msg.type === 'init') {
     cwd = msg.cwd || '/workspace';
+    if (msg.rows) termRows = msg.rows;
+    if (msg.cols) termCols = msg.cols;
     if (msg.sharedBuffer) {
       sharedInt32 = new Int32Array(msg.sharedBuffer);
     }
@@ -486,6 +492,12 @@ self.onmessage = async (event) => {
     writeln('\x1b[1;36mWelcome to the In-Browser C/C++ Teaching IDE!\x1b[0m');
     writeln('Type \x1b[33mls\x1b[0m, \x1b[33mcat\x1b[0m, \x1b[33mcd\x1b[0m, \x1b[33mgcc\x1b[0m, \x1b[33msh\x1b[0m, \x1b[33mmake\x1b[0m, or use the toolbar buttons.\r\n');
     showPrompt();
+    return;
+  }
+
+  if (msg.type === 'term_resize') {
+    if (msg.rows) termRows = msg.rows;
+    if (msg.cols) termCols = msg.cols;
     return;
   }
 
