@@ -1060,6 +1060,136 @@ dirs() {
   try { whichTailInst.exports._start(); } catch (_) {}
   assert.strictEqual(whichTailOutput.trim(), '/bin/tail', `which tail must resolve to /bin/tail: ${whichTailOutput}`);
 
+  // 10. File and directory creation and deletion via BusyBox (touch, mkdir, rmdir, rm -rf)
+  const touchHost = new WasiHost({
+    vfs: testVfs,
+    cwd: '/workspace',
+    argv: ['busybox', 'touch', 'b.txt'],
+  });
+  const touchInst = new WebAssembly.Instance(busyboxMod, touchHost.createImportObject());
+  touchHost.getMemory = () => touchInst.exports.memory;
+  try { touchInst.exports._start(); } catch (_) {}
+  assert.strictEqual(testVfs.exists('/workspace/b.txt'), true, 'b.txt created by touch b.txt');
+
+  const mkdirHost = new WasiHost({
+    vfs: testVfs,
+    cwd: '/workspace',
+    argv: ['busybox', 'mkdir', 'ttt'],
+  });
+  const mkdirInst = new WebAssembly.Instance(busyboxMod, mkdirHost.createImportObject());
+  mkdirHost.getMemory = () => mkdirInst.exports.memory;
+  try { mkdirInst.exports._start(); } catch (_) {}
+  assert.strictEqual(testVfs.exists('/workspace/ttt'), true, 'ttt created by mkdir ttt');
+  assert.strictEqual(testVfs.isDir('/workspace/ttt'), true, 'ttt is a directory');
+
+  let lsTttOutput = '';
+  const lsTttHost = new WasiHost({
+    vfs: testVfs,
+    cwd: '/workspace',
+    argv: ['busybox', 'ls', '/workspace'],
+    stdout: (s) => { lsTttOutput += s; },
+  });
+  const lsTttInst = new WebAssembly.Instance(busyboxMod, lsTttHost.createImportObject());
+  lsTttHost.getMemory = () => lsTttInst.exports.memory;
+  try { lsTttInst.exports._start(); } catch (_) {}
+  assert.ok(lsTttOutput.includes('ttt'), `ls /workspace output includes ttt: ${lsTttOutput}`);
+
+  const rmdirHost = new WasiHost({
+    vfs: testVfs,
+    cwd: '/workspace',
+    argv: ['busybox', 'rmdir', 'ttt'],
+  });
+  const rmdirInst = new WebAssembly.Instance(busyboxMod, rmdirHost.createImportObject());
+  rmdirHost.getMemory = () => rmdirInst.exports.memory;
+  try { rmdirInst.exports._start(); } catch (_) {}
+  assert.strictEqual(testVfs.exists('/workspace/ttt'), false, 'ttt removed by rmdir ttt');
+
+  // Verify rm -rf on nested directory
+  testVfs.mkdir('/workspace/nested/subdir', true);
+  testVfs.writeFile('/workspace/nested/subdir/file.txt', 'hello');
+  assert.strictEqual(testVfs.exists('/workspace/nested/subdir/file.txt'), true);
+
+  const rmRfHost = new WasiHost({
+    vfs: testVfs,
+    cwd: '/workspace',
+    argv: ['busybox', 'rm', '-rf', 'nested'],
+  });
+  const rmRfInst = new WebAssembly.Instance(busyboxMod, rmRfHost.createImportObject());
+  rmRfHost.getMemory = () => rmRfInst.exports.memory;
+  try { rmRfInst.exports._start(); } catch (_) {}
+  assert.strictEqual(testVfs.exists('/workspace/nested'), false, 'nested directory removed by rm -rf');
+
+  // 11. Snapshot and Diff synchronization for empty files and directories
+  function getWorkspaceSnapshotHelper(v) {
+    const fileMap = new Map();
+    const dirSet = new Set();
+    const all = v.getAllFiles('/workspace');
+    for (const f of all) {
+      if (!f.isDir) {
+        fileMap.set(f.path, {
+          mtime: f.mtime,
+          length: f.content ? f.content.length : 0,
+        });
+      } else {
+        dirSet.add(f.path);
+      }
+    }
+    return { fileMap, dirSet };
+  }
+
+  function getWorkspaceDiffHelper(v, beforeSnapshot) {
+    const changedFiles = {};
+    const deletedFiles = [];
+    const createdDirs = [];
+    const deletedDirs = [];
+    const currentFiles = new Set();
+    const currentDirs = new Set();
+
+    const all = v.getAllFiles('/workspace');
+    for (const f of all) {
+      if (!f.isDir) {
+        currentFiles.add(f.path);
+        const before = beforeSnapshot.fileMap.get(f.path);
+        if (!before || before.mtime !== f.mtime || before.length !== (f.content ? f.content.length : 0)) {
+          changedFiles[f.path] = f.content;
+        }
+      } else {
+        currentDirs.add(f.path);
+        if (!beforeSnapshot.dirSet.has(f.path)) {
+          createdDirs.push(f.path);
+        }
+      }
+    }
+
+    for (const p of beforeSnapshot.fileMap.keys()) {
+      if (!currentFiles.has(p)) {
+        deletedFiles.push(p);
+      }
+    }
+
+    for (const p of beforeSnapshot.dirSet) {
+      if (!currentDirs.has(p)) {
+        deletedDirs.push(p);
+      }
+    }
+
+    return { changedFiles, deletedFiles, createdDirs, deletedDirs };
+  }
+
+  const snap0 = getWorkspaceSnapshotHelper(testVfs);
+  testVfs.mkdir('/workspace/new_empty_folder');
+  testVfs.writeFile('/workspace/empty_file.txt', '');
+  const diff1 = getWorkspaceDiffHelper(testVfs, snap0);
+  assert.ok(diff1.createdDirs.includes('/workspace/new_empty_folder'), 'createdDirs contains new_empty_folder');
+  assert.ok('/workspace/empty_file.txt' in diff1.changedFiles, 'changedFiles contains empty_file.txt');
+
+  const snap1 = getWorkspaceSnapshotHelper(testVfs);
+  testVfs.remove('/workspace/new_empty_folder');
+  testVfs.remove('/workspace/empty_file.txt');
+  const diff2 = getWorkspaceDiffHelper(testVfs, snap1);
+  assert.ok(diff2.deletedDirs.includes('/workspace/new_empty_folder'), 'deletedDirs contains new_empty_folder');
+  assert.ok(diff2.deletedFiles.includes('/workspace/empty_file.txt'), 'deletedFiles contains empty_file.txt');
+
   console.log('✓ BusyBox WASI host builtin execution, ./a.out __host_exec, time, stty size, pushd/popd, and in-memory cd transitions verified');
 }
 

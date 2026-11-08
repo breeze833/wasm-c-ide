@@ -315,7 +315,12 @@ export class App {
       }
 
       if (msg.type === 'vfs_sync') {
-        const { changedFiles, deletedFiles } = msg;
+        const { changedFiles, deletedFiles, createdDirs, deletedDirs } = msg;
+        if (createdDirs) {
+          for (const d of createdDirs) {
+            try { this.vfs.mkdir(d, true, true); } catch (_) {}
+          }
+        }
         if (changedFiles) {
           for (const [p, u8] of Object.entries(changedFiles)) {
             this.vfs.writeFile(p, u8, Date.now(), true);
@@ -324,6 +329,11 @@ export class App {
         if (deletedFiles) {
           for (const p of deletedFiles) {
             try { this.vfs.remove(p, true, true); } catch (_) {}
+          }
+        }
+        if (deletedDirs) {
+          for (const d of deletedDirs) {
+            try { this.vfs.remove(d, true, true); } catch (_) {}
           }
         }
         if (this.fileTreeUI) this.fileTreeUI.render();
@@ -369,7 +379,12 @@ export class App {
     // Forward master VFS changes to shell worker so its in-memory VFS stays synchronized
     this.vfs.subscribe((event) => {
       if (!this.shellWorker) return;
-      if (event.type === 'write' && !event.isDir) {
+      if (event.type === 'mkdir') {
+        this.shellWorker.postMessage({
+          type: 'dir_created',
+          path: event.path,
+        });
+      } else if (event.type === 'write' && !event.isDir) {
         const content = this.vfs.readFile(event.path, false);
         this.shellWorker.postMessage({
           type: 'file_changed',
@@ -386,22 +401,32 @@ export class App {
           type: 'file_deleted',
           path: event.oldPath,
         });
-        const content = this.vfs.readFile(event.path, false);
-        this.shellWorker.postMessage({
-          type: 'file_changed',
-          path: event.path,
-          content,
-        });
+        if (event.isDir || this.vfs.isDir(event.path)) {
+          this.shellWorker.postMessage({
+            type: 'dir_created',
+            path: event.path,
+          });
+        } else {
+          const content = this.vfs.readFile(event.path, false);
+          this.shellWorker.postMessage({
+            type: 'file_changed',
+            path: event.path,
+            content,
+          });
+        }
       }
     });
 
     if (options.autoInit) {
       this.isReady = true;
       const initialFiles = {};
+      const initialDirs = [];
       const allFiles = this.vfs.getAllFiles('/workspace');
       for (const f of allFiles) {
         if (!f.isDir) {
           initialFiles[f.path] = f.content;
+        } else {
+          initialDirs.push(f.path);
         }
       }
       this.shellWorker.postMessage({
@@ -409,6 +434,7 @@ export class App {
         cwd: '/workspace',
         sharedBuffer: this.shellSharedBuffer,
         files: initialFiles,
+        dirs: initialDirs,
         rows: this.terminal && this.terminal.term ? this.terminal.term.rows : 24,
         cols: this.terminal && this.terminal.term ? this.terminal.term.cols : 80,
       });

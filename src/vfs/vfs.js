@@ -212,6 +212,11 @@ export class VFS {
     };
   }
 
+  isDir(path) {
+    const s = this.stat(path);
+    return s ? Boolean(s.isDir) : false;
+  }
+
   readDir(path) {
     const norm = normalizePath(path);
     const node = this._resolve(norm);
@@ -267,6 +272,10 @@ export class VFS {
 
     parentNode.children.delete(name);
     this._notify({ type: 'remove', path: norm, isDir: targetNode.isDir });
+  }
+
+  rmdir(path, recursive = false, isSystem = false) {
+    return this.remove(path, recursive, isSystem);
   }
 
   rename(oldPath, newPath) {

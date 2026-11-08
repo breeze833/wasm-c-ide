@@ -59,42 +59,59 @@ function resolvePath(p) {
 }
 
 function getWorkspaceSnapshot() {
-  const map = new Map();
+  const fileMap = new Map();
+  const dirSet = new Set();
   const all = vfs.getAllFiles('/workspace');
   for (const f of all) {
     if (!f.isDir) {
-      map.set(f.path, {
+      fileMap.set(f.path, {
         mtime: f.mtime,
         length: f.content ? f.content.length : 0,
       });
+    } else {
+      dirSet.add(f.path);
     }
   }
-  return map;
+  return { fileMap, dirSet };
 }
 
-function getWorkspaceDiff(beforeMap) {
+function getWorkspaceDiff(beforeSnapshot) {
   const changedFiles = {};
   const deletedFiles = [];
+  const createdDirs = [];
+  const deletedDirs = [];
   const currentFiles = new Set();
+  const currentDirs = new Set();
 
   const all = vfs.getAllFiles('/workspace');
   for (const f of all) {
     if (!f.isDir) {
       currentFiles.add(f.path);
-      const before = beforeMap.get(f.path);
+      const before = beforeSnapshot.fileMap.get(f.path);
       if (!before || before.mtime !== f.mtime || before.length !== (f.content ? f.content.length : 0)) {
         changedFiles[f.path] = f.content;
+      }
+    } else {
+      currentDirs.add(f.path);
+      if (!beforeSnapshot.dirSet.has(f.path)) {
+        createdDirs.push(f.path);
       }
     }
   }
 
-  for (const p of beforeMap.keys()) {
+  for (const p of beforeSnapshot.fileMap.keys()) {
     if (!currentFiles.has(p)) {
       deletedFiles.push(p);
     }
   }
 
-  return { changedFiles, deletedFiles };
+  for (const p of beforeSnapshot.dirSet) {
+    if (!currentDirs.has(p)) {
+      deletedDirs.push(p);
+    }
+  }
+
+  return { changedFiles, deletedFiles, createdDirs, deletedDirs };
 }
 
 // Synchronous host dispatch via SharedArrayBuffer + Atomics.wait
@@ -351,13 +368,20 @@ async function executeCommandLine(toExecute) {
     write(`\r\nreal\t0m${elapsed}s\r\nuser\t0m${elapsed}s\r\nsys\t0m0.000s\r\n`);
   }
 
-  // Synchronize any workspace file modifications
-  const { changedFiles, deletedFiles } = getWorkspaceDiff(beforeMap);
-  if (Object.keys(changedFiles).length > 0 || deletedFiles.length > 0) {
+  // Synchronize any workspace file and directory modifications
+  const { changedFiles, deletedFiles, createdDirs, deletedDirs } = getWorkspaceDiff(beforeMap);
+  if (
+    Object.keys(changedFiles).length > 0 ||
+    deletedFiles.length > 0 ||
+    createdDirs.length > 0 ||
+    deletedDirs.length > 0
+  ) {
     self.postMessage({
       type: 'vfs_sync',
       changedFiles,
       deletedFiles,
+      createdDirs,
+      deletedDirs,
     });
   }
 }
@@ -471,6 +495,12 @@ self.onmessage = async (event) => {
 
     mountSysroot(vfs);
 
+    if (msg.dirs) {
+      for (const d of msg.dirs) {
+        try { vfs.mkdir(normalizePath(d), true, true); } catch (_) {}
+      }
+    }
+
     if (msg.files) {
       for (const [p, content] of Object.entries(msg.files)) {
         const norm = normalizePath(p);
@@ -512,6 +542,12 @@ self.onmessage = async (event) => {
       ? new TextEncoder().encode(msg.content)
       : (msg.content instanceof Uint8Array ? msg.content : new Uint8Array(msg.content));
     vfs.writeFile(norm, u8, Date.now(), true);
+    return;
+  }
+
+  if (msg.type === 'dir_created') {
+    const norm = normalizePath(msg.path);
+    try { vfs.mkdir(norm, true, true); } catch (_) {}
     return;
   }
 

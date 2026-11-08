@@ -534,4 +534,5 @@ Before marking any task complete, agents must verify:
 | **Portable Zip Distribution** | `npm run pack` creates a standalone `wasm-c-ide.zip` that runs in any static web server document root. |
 | **Virtual Character Devices (`/dev/null`, `/dev/zero`)** | Shell stream redirections (`> /dev/null`, `< /dev/null`, `/dev/zero`) operate without allocating physical VFS storage; `ls /dev` lists virtual character devices `null` and `zero`. |
 | **BusyBox Applet VFS Publishing** | All 70+ BusyBox multicall applets are mounted into `/bin` and discoverable via `ls /bin` and `which <cmd>`. |
+| **Bidirectional VFS & Shell Directory Sync** | `touch`, `mkdir`, and `rmdir` execute reliably in shell; file and directory additions/removals synchronize bidirectionally between terminal and sidebar file tree without page refresh. |
 
