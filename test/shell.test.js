@@ -67,16 +67,25 @@ assert.strictEqual(normalizeCommand('/usr/bin/clang++'), 'clang++');
 assert.strictEqual(normalizeCommand('make'), 'make');
 console.log('✓ Command path normalization passed');
 
+import { VFS } from '../src/vfs/vfs.js';
+import { mountSysroot, BIN_COMMANDS, USR_BIN_COMMANDS } from '../src/vfs/sysroot.js';
+
 // Test 5: which resolution
 function resolveWhich(name) {
-  if (['sh', 'ls', 'cat', 'rm', 'mkdir', 'cp', 'mv', 'pwd', 'clear', 'echo'].includes(name)) {
+  if (BIN_COMMANDS.includes(name)) {
     return `/bin/${name}`;
-  } else if (['gcc', 'clang', 'g++', 'clang++', 'make', 'wasm-ld'].includes(name)) {
+  } else if (USR_BIN_COMMANDS.includes(name)) {
     return `/usr/bin/${name}`;
   }
   return null;
 }
 assert.strictEqual(resolveWhich('ls'), '/bin/ls');
+assert.strictEqual(resolveWhich('head'), '/bin/head');
+assert.strictEqual(resolveWhich('tail'), '/bin/tail');
+assert.strictEqual(resolveWhich('grep'), '/bin/grep');
+assert.strictEqual(resolveWhich('awk'), '/bin/awk');
+assert.strictEqual(resolveWhich('sed'), '/bin/sed');
+assert.strictEqual(resolveWhich('wc'), '/bin/wc');
 assert.strictEqual(resolveWhich('gcc'), '/usr/bin/gcc');
 assert.strictEqual(resolveWhich('g++'), '/usr/bin/g++');
 assert.strictEqual(resolveWhich('clang++'), '/usr/bin/clang++');
@@ -84,13 +93,16 @@ assert.strictEqual(resolveWhich('make'), '/usr/bin/make');
 assert.strictEqual(resolveWhich('sh'), '/bin/sh');
 console.log('✓ which path resolution passed');
 
-import { VFS } from '../src/vfs/vfs.js';
-import { mountSysroot } from '../src/vfs/sysroot.js';
-
 // Test 5.1: Sysroot mounts g++ and clang++
 {
   const vfs = new VFS();
   mountSysroot(vfs);
+  assert.strictEqual(vfs.exists('/bin/head'), true);
+  assert.strictEqual(vfs.exists('/bin/tail'), true);
+  assert.strictEqual(vfs.exists('/bin/grep'), true);
+  assert.strictEqual(vfs.exists('/bin/awk'), true);
+  assert.strictEqual(vfs.exists('/bin/sed'), true);
+  assert.strictEqual(vfs.exists('/bin/wc'), true);
   assert.strictEqual(vfs.exists('/usr/bin/gcc'), true);
   assert.strictEqual(vfs.exists('/usr/bin/g++'), true);
   assert.strictEqual(vfs.exists('/usr/bin/clang'), true);
@@ -100,7 +112,7 @@ import { mountSysroot } from '../src/vfs/sysroot.js';
   assert.strictEqual(vfs.exists('/usr/bin/lld'), true);
   assert.strictEqual(vfs.exists('/usr/bin/wasm-ld'), true);
   assert.strictEqual(vfs.exists('/usr/bin/strip'), true);
-  console.log('✓ sysroot mounts gcc, g++, clang, lld, wasm-ld, and utilities under /usr/bin');
+  console.log('✓ sysroot mounts /bin BusyBox applets and /usr/bin toolchain utilities');
 }
 
 // Test 6: parseTokens distinguishing quoted vs unquoted tokens
@@ -233,7 +245,16 @@ async function expandGlobToken(token, currentDir, vfs) {
   assert.deepStrictEqual(exp4, ['build/*.unknown']); // unmatched stays as-is
 
   const exp5 = await expandGlobToken('/bin/c*', '/workspace', vfs);
-  assert.deepStrictEqual(exp5, ['/bin/cat', '/bin/clear', '/bin/cp']);
+  assert.deepStrictEqual(exp5, [
+    '/bin/cat',
+    '/bin/cksum',
+    '/bin/clear',
+    '/bin/cmp',
+    '/bin/comm',
+    '/bin/cp',
+    '/bin/crc32',
+    '/bin/cut',
+  ]);
 
   console.log('✓ Glob expansion against VFS passed');
 }
@@ -975,6 +996,69 @@ dirs() {
 
   assert.strictEqual(testVfs.exists('/workspace/testdir/.ide_pwd'), false, 'No .ide_pwd in subdirectories');
   assert.strictEqual(testVfs.exists('/workspace/.ide_pwd'), false, 'No .ide_pwd in workspace');
+
+  // 8. Virtual character device redirection (/dev/null, /dev/zero) and ls /dev
+  simulateCdCommand('echo "test data" > /dev/null\ncat < /dev/null');
+  assert.strictEqual(testVfs.exists('/workspace/dev/null'), false, 'No /workspace/dev/null created on redirection');
+  assert.strictEqual(testVfs.exists('/dev/null'), false, 'No /dev/null file created on VFS');
+  assert.strictEqual(testVfs.exists('/workspace/dev/zero'), false, 'No /workspace/dev/zero created');
+  assert.strictEqual(testVfs.exists('/dev/zero'), false, 'No /dev/zero file created on VFS');
+
+  let devLsOutput = '';
+  const devLsHost = new WasiHost({
+    vfs: testVfs,
+    cwd: '/workspace',
+    argv: ['busybox', 'ls', '/dev'],
+    stdout: (s) => { devLsOutput += s; },
+  });
+  const devLsInst = new WebAssembly.Instance(busyboxMod, devLsHost.createImportObject());
+  devLsHost.getMemory = () => devLsInst.exports.memory;
+  try { devLsInst.exports._start(); } catch (_) {}
+  assert.ok(devLsOutput.includes('null'), `ls /dev output must include null: ${devLsOutput}`);
+  assert.ok(devLsOutput.includes('zero'), `ls /dev output must include zero: ${devLsOutput}`);
+
+  // 9. Published BusyBox multicall applets in /bin and which resolution
+  let binLsOutput = '';
+  const binLsHost = new WasiHost({
+    vfs: testVfs,
+    cwd: '/workspace',
+    argv: ['busybox', 'ls', '/bin'],
+    stdout: (s) => { binLsOutput += s; },
+  });
+  const binLsInst = new WebAssembly.Instance(busyboxMod, binLsHost.createImportObject());
+  binLsHost.getMemory = () => binLsInst.exports.memory;
+  try { binLsInst.exports._start(); } catch (_) {}
+  assert.ok(binLsOutput.includes('head'), `ls /bin output must include head: ${binLsOutput}`);
+  assert.ok(binLsOutput.includes('tail'), `ls /bin output must include tail: ${binLsOutput}`);
+  assert.ok(binLsOutput.includes('grep'), `ls /bin output must include grep: ${binLsOutput}`);
+  assert.ok(binLsOutput.includes('awk'), `ls /bin output must include awk: ${binLsOutput}`);
+  assert.ok(binLsOutput.includes('wc'), `ls /bin output must include wc: ${binLsOutput}`);
+
+  let whichHeadOutput = '';
+  const whichHeadHost = new WasiHost({
+    vfs: testVfs,
+    cwd: '/workspace',
+    argv: ['busybox', 'which', 'head'],
+    env: { PATH: '/bin:/usr/bin' },
+    stdout: (s) => { whichHeadOutput += s; },
+  });
+  const whichHeadInst = new WebAssembly.Instance(busyboxMod, whichHeadHost.createImportObject());
+  whichHeadHost.getMemory = () => whichHeadInst.exports.memory;
+  try { whichHeadInst.exports._start(); } catch (_) {}
+  assert.strictEqual(whichHeadOutput.trim(), '/bin/head', `which head must resolve to /bin/head: ${whichHeadOutput}`);
+
+  let whichTailOutput = '';
+  const whichTailHost = new WasiHost({
+    vfs: testVfs,
+    cwd: '/workspace',
+    argv: ['busybox', 'which', 'tail'],
+    env: { PATH: '/bin:/usr/bin' },
+    stdout: (s) => { whichTailOutput += s; },
+  });
+  const whichTailInst = new WebAssembly.Instance(busyboxMod, whichTailHost.createImportObject());
+  whichTailHost.getMemory = () => whichTailInst.exports.memory;
+  try { whichTailInst.exports._start(); } catch (_) {}
+  assert.strictEqual(whichTailOutput.trim(), '/bin/tail', `which tail must resolve to /bin/tail: ${whichTailOutput}`);
 
   console.log('✓ BusyBox WASI host builtin execution, ./a.out __host_exec, time, stty size, pushd/popd, and in-memory cd transitions verified');
 }

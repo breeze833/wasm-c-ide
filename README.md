@@ -79,8 +79,10 @@ This IDE is specifically engineered for **students and systems programming educa
   - Window control actions: minimize to title bar (`_`) and maximize/restore (`□`).
   - Active focus tracking with distinct green glow outline.
   - Global keyboard shortcut: `Ctrl+Shift+D` (or `Cmd+Shift+D`) to toggle between docked and floating modes.
-- **Interactive Shell Worker**:
-  - POSIX utilities: `sh`, `ls`, `cd`, `pwd`, `cat`, `rm`, `mkdir`, `cp`, `mv`, `clear`, `echo` (with `>` and `>>` redirection), and `which`.
+- **Interactive Shell Worker & 70+ BusyBox Unix Utilities**:
+  - Full-featured POSIX `ash` shell powered by `busybox.wasm`.
+  - All 70+ compiled BusyBox core utilities (`ash`, `awk`, `basename`, `bc`, `cat`, `cksum`, `cmp`, `comm`, `cp`, `crc32`, `cut`, `date`, `dc`, `diff`, `dirname`, `du`, `echo`, `egrep`, `expr`, `false`, `fgrep`, `find`, `fold`, `getopt`, `grep`, `gunzip`, `gzip`, `head`, `hexdump`, `httpd`, `kill`, `ls`, `md5sum`, `mkdir`, `mktemp`, `mv`, `nproc`, `paste`, `printenv`, `printf`, `pwd`, `readlink`, `realpath`, `rm`, `rmdir`, `sed`, `seq`, `sh`, `sha1sum`, `sha256sum`, `sleep`, `sort`, `stat`, `stty`, `tac`, `tail`, `tar`, `tee`, `test`, `touch`, `tr`, `true`, `uname`, `uniq`, `unlink`, `wc`, `wget`, `which`, `xargs`, `xxd`, `yes`) are mounted into `/bin` and discoverable via `ls /bin` and `which <cmd>`.
+  - **Virtual Character Devices (`/dev/null`, `/dev/zero`)**: Pre-mounts `/dev` providing standard virtual devices `/dev/null` and `/dev/zero` for shell stream redirections (e.g. `> /dev/null`, `< /dev/null`) and zero-byte generation without physical VFS memory allocation. Discoverable via `ls /dev`.
   - **Directory Stack**: Full support for `pushd`, `popd`, `dirs`, and `cd -`.
   - **Command Chaining & Pipelines**: Supports `;`, `&&`, `||`, and sequential stream pipelines (`|`).
   - **Stream Redirections**: File input (`<`) and output (`>`, `>>`) across builtins and external binaries.
@@ -267,7 +269,7 @@ The repository includes a ready-to-run suite of single-file C programs in the `e
 - **IndexedDB Persistence**: Automatically persists `/workspace` across browser sessions and page refreshes.
 - **Bidirectional Runtime Synchronization**: Changes made to `/workspace` files via C/C++ `fopen`/`fwrite`/`fputs`, C++ `<fstream>`, or SQLite 3 `sqlite3_open`/`sqlite3_step` automatically sync back to VFS in real-time and persist to IndexedDB, updating the file tree and editor tabs.
 - **Zip Import & Export**: One-click export of `/workspace` into a standard `.zip` file using JSZip, and direct zip unpacking into the workspace.
-- **Sysroot Protection**: Read-only protection on system root paths (`/usr`, `/bin`), pre-mounting standard C/C++ headers (`<stdio.h>`, `<stdlib.h>`, `<iostream>`, `<fstream>`, etc.), `<graphics.h>`, `<graphics_canvas.h>`, `<turtle.h>`, `<raylib.h>`, `<sqlite3.h>`, `<sqlite3ext.h>`, runtime static libraries (`libc.a`, `libturtle.a`, `libraylib.a`, `libturtle_raylib.a`, and `libsqlite3.a`), and CLI tools (`/usr/bin/sqlite3`).
+- **Sysroot & Device Protection**: Read-only protection on system root paths (`/usr`, `/bin`, `/dev`), pre-mounting standard C/C++ headers (`<stdio.h>`, `<stdlib.h>`, `<iostream>`, `<fstream>`, etc.), `<graphics.h>`, `<graphics_canvas.h>`, `<turtle.h>`, `<raylib.h>`, `<sqlite3.h>`, `<sqlite3ext.h>`, runtime static libraries (`libc.a`, `libturtle.a`, `libraylib.a`, `libturtle_raylib.a`, and `libsqlite3.a`), CLI tools (`/usr/bin/sqlite3`), all 70+ BusyBox applets (`/bin/*`), and virtual character devices (`/dev/null`, `/dev/zero`).
 
 ### 11. Progressive Web App (PWA) & Offline Execution
 - **Installable Desktop/Mobile App**: Certified PWA with Web App Manifest (`manifest.webmanifest`), dark theme colors, and icons.

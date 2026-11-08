@@ -36,8 +36,9 @@ assert.strictEqual(dirList.length, 1);
 assert.strictEqual(dirList[0].name, 'hello.c');
 console.log('✓ VFS basic operations passed');
 
-// Test 3: Read-only protection on /usr and /bin, and sysroot mounting
+// Test 3: Read-only protection on /usr, /bin, and /dev, and sysroot mounting
 mountSysroot(vfs);
+assert.strictEqual(vfs.exists('/dev'), true);
 assert.strictEqual(vfs.exists('/usr/include/stdio.h'), true);
 assert.strictEqual(vfs.exists('/usr/lib/libc.a'), true);
 assert.strictEqual(vfs.exists('/usr/lib/crt1.o'), true);
@@ -45,6 +46,10 @@ assert.strictEqual(vfs.exists('/bin/ls'), true);
 assert.strictEqual(vfs.exists('/bin/sh'), true);
 assert.strictEqual(vfs.exists('/usr/bin/gcc'), true);
 assert.strictEqual(vfs.exists('/usr/bin/make'), true);
+
+assert.throws(() => {
+  vfs.writeFile('/dev/test', 'fail');
+}, /Permission denied/);
 
 assert.throws(() => {
   vfs.writeFile('/usr/include/test.h', 'fail');
@@ -61,7 +66,7 @@ assert.throws(() => {
 assert.throws(() => {
   vfs.remove('/usr/include/stdio.h');
 }, /Permission denied/);
-console.log('✓ VFS read-only protection on /usr and /bin passed');
+console.log('✓ VFS read-only protection on /usr, /bin, and /dev passed');
 
 // Test 4: Rename and Remove
 vfs.rename('/workspace/src/hello.c', '/workspace/src/main.c');

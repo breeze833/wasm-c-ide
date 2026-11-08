@@ -87,6 +87,7 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 |  +-------------------------------------------------------------------------------+
 |  | Virtual File System (VFS - Single Source of Truth)                            |
 |  | - /workspace (Read-Write, IndexedDB Sync, .zip Export/Import)                |
+|  | - /dev (Virtual Character Devices: /dev/null, /dev/zero)                     |
 |  | - /usr/include & /include/wasm32-wasip1 (C/C++, graphics, turtle, raylib)     |
 |  | - /usr/lib & /lib/wasm32-wasip1 (libc, libc++, compiler-rt, libturtle, raylib)|
 |  | - /bin & /usr/bin (POSIX and Toolchain Binaries: gcc, g++, ar, make, etc.)   |
@@ -371,9 +372,9 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 - **Directory Stack (`pushd`, `popd`, `dirs`) & Subshell State Preservation**:
   - Implements POSIX-compliant shell functions for `pushd`, `popd`, and `dirs` backed by in-memory host synchronization (`__host_update_dstack`), with zero filesystem file creation.
   - Integrates with `MemoryPipe` write-reference-counting in `WasiHost`, guaranteeing that file descriptor duplications (`dup`, `dup2`) across subshell command substitutions `$(...)` and pipelines (`|`) do not prematurely close active reader pipes.
-- **Sysroot Binary Stubs & Toolchain Delegation Invariant**:
-  - `mountSysroot()` mounts `/usr/bin/` toolchain executables with WebAssembly binary headers (`\0asm`) rather than shell scripts (`#!/bin/sh`).
-  - Ensures BusyBox `ash` does not attempt to parse and execute toolchain executables as shell scripts, delegating lookup to `__host_builtin_lookup` and dispatching cleanly to `executeExternalCommand`.
+- **Sysroot Binary Stubs & Applet Publishing Invariant**:
+  - `mountSysroot()` mounts all BusyBox multicall applets into `/bin/` (e.g. `cat`, `ls`, `head`, `tail`, `grep`, `awk`, `sed`, `find`, `sort`, `uniq`, `diff`, `wc`, `tar`, `tr`, etc.) and toolchain executables into `/usr/bin/` with WebAssembly binary headers (`\0asm`).
+  - Ensures all supported Unix core utilities are fully discoverable via `ls /bin` and resolved accurately by `which <cmd>`, while preventing BusyBox `ash` from parsing them as shell scripts.
 - **Single Source of Truth for Redirection & Pipelines**:
   - All stream redirections (`>`, `>>`, `<`, `2>`, `2>&1`) and inter-process pipelines (`|`) are handled **exclusively inside `ash` (`busybox.wasm`)** using standard WASI file descriptors and in-memory pipes.
   - When `ash` executes an external command via `wasi_host_spawn` (such as `make > build.log 2>&1`), `ash` has already redirected the standard file descriptors before invoking the host bridge. The host simply reads from or writes to the provided WASI descriptor, completely eliminating the legacy JavaScript regex parsing, token splitting, and manual stream buffering previously located in `shell.worker.js`.
@@ -392,7 +393,7 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 | Test Case | Expected Behavior |
 |---|---|
 | **BusyBox POSIX Shell Scripting** | Interactive loops (`for`, `while`), conditionals (`if-then-else`), arithmetic `$((...))`, and subshells `$(...)` execute accurately with full POSIX semantics in xterm. |
-| **Real Coreutils Execution** | `grep`, `sed`, `awk`, `find`, `sort`, `uniq`, `diff`, `tar`, and `wc` execute real BusyBox applets against `/workspace` files with correct standard flags and output. |
+| **Real Coreutils Execution** | `grep`, `sed`, `awk`, `find`, `sort`, `uniq`, `diff`, `tar`, `wc`, `head`, `tail` execute real BusyBox applets against `/workspace` files with correct standard flags and output; all 70+ applets are published in VFS `/bin` and discoverable via `ls /bin` and `which`. |
 | **Make Host Spawn Exception** | Running `make` or `make clean` inside `ash` delegates to `runMake()` via `wasi_host_spawn`, evaluating Makefile targets and returning exit codes back to `ash`. |
 | **Chained Execution (`make && ./a.out`)** | Command chains linking `make` and user executables (`make && ./a.out`) execute sequentially, halting if `make` fails and running the binary if `make` succeeds. |
 | **VFS Bidirectional Synchronization** | Shell file commands (`touch`, `mkdir`, `rm`, redirects `>`) immediately update the in-memory VFS and reflect in the sidebar file tree. |
@@ -406,6 +407,7 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 | **In-Code Standard File I/O** | `fopen`, `fread`, `fwrite`, `fseek`, `fclose`, and `std::fstream` operate seamlessly via unified `WasiHost`. |
 | **Interactive `scanf` & `Ctrl-D` EOF** | Runtime worker standard input blocks via `SharedArrayBuffer` until Enter; `Ctrl-D` sends EOF cleanly. |
 | **Pipelines & Redirections** | Command pipelines (`|`) and stream redirections (`<`, `>`, `>>`) execute deterministically across stages. |
+| **Virtual Character Devices (`/dev/null`, `/dev/zero`)** | Shell stream redirections (`> /dev/null`, `< /dev/null`, `/dev/zero`) operate without allocating physical VFS storage; `ls /dev` lists virtual character devices `null` and `zero`. |
 | **Static Archiver (`ar rcs`)** | Built-in `ar` creates archives directly in VFS; `wasm-ld` links against them without errors. |
 | **Permanent Sysroot Bundling** | Raylib 5.5, Raylib turtle, and SQLite development files (`raylib.h`, `turtle.h`, `sqlite3.h`, `libraylib.a`, `libturtle.a`, `libsqlite3.a`) mount in sysroot by default. |
 | **Canvas & Raylib Graphics** | Generic framebuffer, 2D vector canvas, and Raylib interactive graphics render at ~60 FPS via zero-copy `ImageBitmap`. |

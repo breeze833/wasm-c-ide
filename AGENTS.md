@@ -453,6 +453,16 @@ Agents executing this project should proceed milestone-by-milestone:
 - Comprehensive Architectural Documentation:
   - Authored case study `docs/DEDICATED_COMPILER_WORKER.md` detailing the threading model, root causes of UI freezing, and comparative analysis of worker designs.
 
+### Milestone 30: BusyBox Applet VFS Publishing & Virtual Character Devices (/dev/null, /dev/zero)
+- Publish all 72 compiled BusyBox applets into `BIN_COMMANDS` mounted under `/bin` using `wasmBinaryStub` (`\0asm`).
+- Guarantee full toolchain discoverability: `ls /bin` displays all core utilities (`cat`, `ls`, `head`, `tail`, `grep`, `awk`, `sed`, `find`, `sort`, `uniq`, `diff`, `wc`, `tar`, `tr`, etc.) and `which <cmd>` resolves accurately to `/bin/<cmd>`.
+- Pre-mount `/dev` with read-only protection in `VFS`.
+- Support virtual character devices `/dev/null` and `/dev/zero` via `clang-wasi` Platform Host:
+  - Discard written bytes without memory allocations.
+  - Return EOF (`0` bytes) for `/dev/null` reads and zero-filled buffers for `/dev/zero` reads.
+  - Synthesize virtual directory entries in `ls /dev` (`null`, `zero` with `d_type: 2`) without physical VFS nodes.
+- Update automated test suite in `test/shell.test.js` and `test/vfs.test.js`.
+
 ---
 
 ## 4. Verification & Testing Checklist
@@ -522,4 +532,6 @@ Before marking any task complete, agents must verify:
 | **Startup Loading Indication & Deferred Prompt** | Startup streams informational loading and progress messages into the xterm terminal area during VFS preparation (sysroot fetching, decompression, unpacking, library preloading); input is guarded during boot, and the welcome message and interactive shell prompt appear only after all VFS items are fully populated. |
 | **Offline PWA Installation** | Application provides valid manifest, registers service worker with COOP/COEP headers, and operates offline. |
 | **Portable Zip Distribution** | `npm run pack` creates a standalone `wasm-c-ide.zip` that runs in any static web server document root. |
+| **Virtual Character Devices (`/dev/null`, `/dev/zero`)** | Shell stream redirections (`> /dev/null`, `< /dev/null`, `/dev/zero`) operate without allocating physical VFS storage; `ls /dev` lists virtual character devices `null` and `zero`. |
+| **BusyBox Applet VFS Publishing** | All 70+ BusyBox multicall applets are mounted into `/bin` and discoverable via `ls /bin` and `which <cmd>`. |
 

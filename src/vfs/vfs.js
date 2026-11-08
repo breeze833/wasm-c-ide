@@ -31,6 +31,7 @@ export class VFS {
 
     // Ensure root directories exist
     this.mkdir('/workspace', true, true);
+    this.mkdir('/dev', true, true);
     this.mkdir('/usr', true, true);
     this.mkdir('/usr/include', true, true);
     this.mkdir('/usr/lib', true, true);
@@ -58,6 +59,7 @@ export class VFS {
   _isReadOnly(path) {
     const norm = normalizePath(path);
     return (
+      norm.startsWith('/dev') ||
       norm.startsWith('/usr') ||
       norm.startsWith('/bin') ||
       norm.startsWith('/include') ||

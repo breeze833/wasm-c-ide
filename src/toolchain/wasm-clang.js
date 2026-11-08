@@ -104,6 +104,7 @@ export class WasmToolchain {
         this.vfs.mkdir('/workspace/src', true, true);
         this.vfs.mkdir('/workspace/include', true, true);
         this.vfs.mkdir('/workspace/build', true, true);
+        this.vfs.mkdir('/dev', true, true);
         this.vfs.mkdir('/usr', true, true);
         this.vfs.mkdir('/usr/lib', true, true);
         this.vfs.mkdir('/usr/include', true, true);

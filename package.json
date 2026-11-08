@@ -20,7 +20,7 @@
     "@xterm/xterm": "^5.5.0",
     "busybox-wasi": "https://github.com/breeze833/busybox-wasi/releases/download/latest/busybox-wasi-1.38.0.tgz",
     "canvas-wasi": "https://github.com/breeze833/canvas-wasi/releases/download/v0.1.4/canvas-wasi-0.1.4.tgz",
-    "clang-wasi": "https://github.com/breeze833/clang-wasi/releases/download/latest/clang-wasi-19.1.0.tgz",
+    "clang-wasi": "https://github.com/breeze833/clang-wasi/releases/download/v19.1.0/clang-wasi-19.1.0.tgz",
     "jszip": "^3.10.1",
     "monaco-editor": "^0.52.2",
     "raylib-wasi": "https://github.com/breeze833/raylib-wasi/releases/download/latest/raylib-wasi-5.5.0.tgz",
