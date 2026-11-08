@@ -43,14 +43,37 @@ export async function loadMakeBinary(basePath = '/sysroot/wasm', vfs = null) {
       }
     }
 
-    // 3. Fetch from basePath
+    // 3. Fetch from basePath (with subpath fallback if hosted under subfolder/GitHub Pages)
     if (!arrayBuf) {
-      const url = `${basePath}/make.wasm`;
-      const res = await fetch(url);
-      if (!res.ok) {
-        throw new Error(`Failed to load make.wasm from ${url}: ${res.status} ${res.statusText}`);
+      const urlsToTry = [`${basePath}/make.wasm`];
+      if (typeof location !== 'undefined' && location.pathname && (basePath === '/sysroot/wasm' || basePath.startsWith('/sysroot/'))) {
+        const parts = location.pathname.split('/').filter(Boolean);
+        if (parts.length > 1) {
+          const rootSubPath = '/' + parts[0];
+          urlsToTry.push(`${rootSubPath}/sysroot/wasm/make.wasm`);
+          const parentSubPath = '/' + parts.slice(0, -1).join('/');
+          urlsToTry.push(`${parentSubPath}/sysroot/wasm/make.wasm`);
+        }
       }
-      arrayBuf = await res.arrayBuffer();
+
+      let lastError = null;
+      for (const url of urlsToTry) {
+        try {
+          const res = await fetch(url);
+          if (res && (res.ok || typeof res.ok === 'undefined')) {
+            arrayBuf = await res.arrayBuffer();
+            if (arrayBuf && arrayBuf.byteLength > 0) break;
+          } else {
+            lastError = new Error(`Failed to load make.wasm from ${url}: ${res.status} ${res.statusText}`);
+          }
+        } catch (err) {
+          lastError = err;
+        }
+      }
+
+      if (!arrayBuf) {
+        throw lastError || new Error(`Failed to load make.wasm from ${urlsToTry[0]}`);
+      }
     }
 
     const mod = await WebAssembly.compile(arrayBuf);
@@ -155,7 +178,10 @@ export async function runMake({
     }
   };
 
-  const mod = await loadMakeBinary(basePath, vfs);
+  const effectiveBasePath = (basePath && basePath !== '/sysroot/wasm')
+    ? basePath
+    : ((toolchain && toolchain.basePath) || basePath || '/sysroot/wasm');
+  const mod = await loadMakeBinary(effectiveBasePath, vfs);
 
   // Initialize toolchain if provided so sync execution is ready
   if (toolchain) {

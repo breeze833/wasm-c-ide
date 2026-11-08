@@ -18,6 +18,7 @@ import { runMake } from '../toolchain/make.js';
 const vfs = new VFS();
 let toolchain = null;
 let isInitialized = false;
+let workerBasePath = '/sysroot/wasm';
 
 function getWorkspaceSnapshot() {
   const map = new Map();
@@ -63,7 +64,8 @@ self.onmessage = async (event) => {
   if (!msg) return;
 
   if (msg.type === 'init') {
-    const basePath = msg.basePath || '/sysroot/wasm';
+    workerBasePath = msg.basePath || '/sysroot/wasm';
+    const basePath = workerBasePath;
     mountSysroot(vfs);
 
     toolchain = new WasmToolchain({
@@ -91,7 +93,7 @@ self.onmessage = async (event) => {
   }
 
   if (msg.type === 'exec') {
-    const { id, cmd, args = [], cwd = '/workspace', mode = 'c', files = {}, deletedFiles = [] } = msg;
+    const { id, cmd, args = [], cwd = '/workspace', mode = 'c', files = {}, deletedFiles = [], basePath } = msg;
 
     if (!isInitialized || !toolchain) {
       self.postMessage({ type: 'done', id, exitCode: 1, error: 'Compiler worker not initialized' });
@@ -174,12 +176,13 @@ self.onmessage = async (event) => {
           write: writeFn,
         });
       } else if (cmd === 'make') {
+        const makeBasePath = basePath || (toolchain && toolchain.basePath) || workerBasePath || '/sysroot/wasm';
         exitCode = await runMake({
           args,
           cwd,
           vfs,
           toolchain,
-          basePath: '/sysroot/wasm',
+          basePath: makeBasePath,
           mode,
           write: writeFn,
         });

@@ -206,7 +206,7 @@ globalThis.fetch = async (url, ...args) => {
   if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://'))) {
     return nativeFetch(url, ...args);
   }
-  let clean = String(url).replace(/^\/?sysroot\//, 'public/sysroot/').replace(/^\//, '');
+  let clean = String(url).replace(/^.*\/sysroot\//, 'public/sysroot/').replace(/^\//, '');
   if (clean.startsWith('sysroot/')) clean = 'public/' + clean;
   const resolved = path.resolve(projectRoot, clean);
   const data = fs.readFileSync(resolved);
@@ -494,6 +494,12 @@ clean:
   const mod2 = await loadMakeBinary('/sysroot/wasm', makeVfs);
   assert.ok(mod2 instanceof WebAssembly.Module, 'Subsequent load must return WebAssembly.Module without BufferSource error');
   console.log('✓ loadMakeBinary cache resilience verified');
+
+  // Test 9: loadMakeBinary subpath basePath resolution (GitHub Pages / server subfolder)
+  console.log('Test 9: Verify subpath basePath resolution for GitHub Pages / sub-path hosting...');
+  const subpathMod = await loadMakeBinary('/wasm-c-ide/sysroot/wasm', makeVfs);
+  assert.ok(subpathMod instanceof WebAssembly.Module, 'Must load make.wasm from subpath basePath');
+  console.log('✓ Subpath basePath resolution verified');
 }
 
 await testGnuMakeWasi();

@@ -248,6 +248,7 @@ export class CompilerClient {
         cwd,
         mode,
         files,
+        basePath: this.basePath,
       });
     });
   }
