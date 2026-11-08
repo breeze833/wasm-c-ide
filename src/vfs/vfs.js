@@ -174,7 +174,30 @@ export class VFS {
     };
 
     dirNode.children.set(fileName, node);
-    this._notify({ type: 'write', path: norm, isDir: false });
+    this._notify({ type: 'write', path: norm, isDir: false, mtime });
+  }
+
+  setTimes(path, atim, mtim) {
+    const norm = normalizePath(path);
+    if (this._isReadOnly(norm)) {
+      throw new Error(`Permission denied: Cannot modify read-only path ${norm}`);
+    }
+    const node = this._resolve(norm);
+    if (!node) {
+      throw new Error(`No such file or directory: ${norm}`);
+    }
+    let mtimeMs = Date.now();
+    if (typeof mtim === 'bigint') {
+      mtimeMs = Number(mtim / 1000000n);
+    } else if (typeof mtim === 'number' && !isNaN(mtim) && mtim > 0) {
+      mtimeMs = mtim;
+    }
+    if (node.mtime && mtimeMs <= node.mtime) {
+      mtimeMs = node.mtime + 1;
+    }
+    node.mtime = mtimeMs;
+    this._notify({ type: 'write', path: norm, isDir: node.isDir, mtime: mtimeMs });
+    return mtimeMs;
   }
 
   readFile(path, asText = true) {

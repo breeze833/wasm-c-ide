@@ -57,15 +57,103 @@ export class WasiHost extends BaseWasiHost {
   getImports() {
     const baseImports = super.getImports();
 
-    // Ensure path_filestat_set_times returns ENOENT for non-existent files so touch can create them
+    // Ensure path_filestat_get preserves actual mtime from VFS nodes
+    const origPathFilestatGet = baseImports.path_filestat_get;
+    baseImports.path_filestat_get = (dirfd, flags, path_ptr, path_len, stat_out) => {
+      const res = origPathFilestatGet(dirfd, flags, path_ptr, path_len, stat_out);
+      if (res === ESUCCESS && this.vfs && typeof this.vfs.stat === 'function') {
+        const pathStr = this.readStr(path_ptr, path_len);
+        const fullPath = this.resolvePath(dirfd, pathStr);
+        const st = this.vfs.stat(fullPath);
+        if (st && st.mtime) {
+          const mtimeNs = BigInt(st.mtime) * 1000000n;
+          this.memI64()[(stat_out + 48) >> 3] = mtimeNs;
+        }
+      }
+      return res;
+    };
+
+    // Ensure fd_filestat_get preserves actual mtime from VFS nodes
+    const origFdFilestatGet = baseImports.fd_filestat_get;
+    baseImports.fd_filestat_get = (fd, stat_out) => {
+      const res = origFdFilestatGet(fd, stat_out);
+      if (res === ESUCCESS && this.vfs && typeof this.vfs.stat === 'function') {
+        let p = null;
+        for (const preopen of this.preopens) {
+          if (preopen.fd === fd) { p = preopen.path; break; }
+        }
+        if (!p && this.openFiles.has(fd)) {
+          p = this.openFiles.get(fd).path;
+        }
+        if (p) {
+          const st = this.vfs.stat(p);
+          if (st && st.mtime) {
+            const mtimeNs = BigInt(st.mtime) * 1000000n;
+            this.memI64()[(stat_out + 48) >> 3] = mtimeNs;
+          }
+        }
+      }
+      return res;
+    };
+
+    // Ensure path_filestat_set_times returns ENOENT for non-existent files so touch can create them,
+    // and correctly updates the modification timestamp in VFS
     baseImports.path_filestat_set_times = (dirfd, flags, path_ptr, path_len, atim, mtim, fst_flags) => {
       const pathStr = this.readStr(path_ptr, path_len);
       const fullPath = this.resolvePath(dirfd, pathStr);
       if (!this._vfsExists(fullPath) && !this._vfsIsDir(fullPath)) {
         return ENOENT;
       }
+      let mtimeNs = BigInt(Date.now()) * 1000000n;
+      if ((fst_flags & 4) !== 0) {
+        mtimeNs = mtim;
+      }
       if (this.vfs && typeof this.vfs.setTimes === 'function') {
-        try { this.vfs.setTimes(fullPath, atim, mtim); } catch {}
+        try { this.vfs.setTimes(fullPath, atim, mtimeNs); } catch (_) {}
+      } else if (this.vfs && typeof this.vfs._resolve === 'function') {
+        const node = this.vfs._resolve(fullPath);
+        if (node) {
+          node.mtime = Number(mtimeNs / 1000000n);
+          if (typeof this.vfs._notify === 'function') {
+            this.vfs._notify({ type: 'write', path: fullPath, isDir: node.isDir, mtime: node.mtime });
+          }
+        }
+      }
+      if (this.changedFiles && this._vfsExists(fullPath) && !this._vfsIsDir(fullPath)) {
+        const bytes = this._vfsReadFile(fullPath);
+        if (bytes) this.changedFiles.set(fullPath, bytes);
+      }
+      return ESUCCESS;
+    };
+
+    // Ensure fd_filestat_set_times updates mtime timestamp on open file descriptors
+    baseImports.fd_filestat_set_times = (fd, atim, mtim, fst_flags) => {
+      let p = null;
+      for (const preopen of this.preopens) {
+        if (preopen.fd === fd) { p = preopen.path; break; }
+      }
+      if (!p && this.openFiles.has(fd)) {
+        p = this.openFiles.get(fd).path;
+      }
+      if (!p) return EBADF;
+      let mtimeNs = BigInt(Date.now()) * 1000000n;
+      if ((fst_flags & 4) !== 0) {
+        mtimeNs = mtim;
+      }
+      if (this.vfs && typeof this.vfs.setTimes === 'function') {
+        try { this.vfs.setTimes(p, atim, mtimeNs); } catch (_) {}
+      } else if (this.vfs && typeof this.vfs._resolve === 'function') {
+        const node = this.vfs._resolve(p);
+        if (node) {
+          node.mtime = Number(mtimeNs / 1000000n);
+          if (typeof this.vfs._notify === 'function') {
+            this.vfs._notify({ type: 'write', path: p, isDir: node.isDir, mtime: node.mtime });
+          }
+        }
+      }
+      if (this.changedFiles && this._vfsExists(p) && !this._vfsIsDir(p)) {
+        const bytes = this._vfsReadFile(p);
+        if (bytes) this.changedFiles.set(p, bytes);
       }
       return ESUCCESS;
     };

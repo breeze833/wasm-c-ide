@@ -322,8 +322,10 @@ export class App {
           }
         }
         if (changedFiles) {
-          for (const [p, u8] of Object.entries(changedFiles)) {
-            this.vfs.writeFile(p, u8, Date.now(), true);
+          for (const [p, item] of Object.entries(changedFiles)) {
+            const u8 = (item && item.content !== undefined) ? item.content : item;
+            const mtime = (item && item.mtime !== undefined) ? item.mtime : Date.now();
+            this.vfs.writeFile(p, u8, mtime, true);
           }
         }
         if (deletedFiles) {
@@ -386,10 +388,12 @@ export class App {
         });
       } else if (event.type === 'write' && !event.isDir) {
         const content = this.vfs.readFile(event.path, false);
+        const mtime = event.mtime || (this.vfs.stat(event.path)?.mtime) || Date.now();
         this.shellWorker.postMessage({
           type: 'file_changed',
           path: event.path,
           content,
+          mtime,
         });
       } else if (event.type === 'remove') {
         this.shellWorker.postMessage({
@@ -408,10 +412,12 @@ export class App {
           });
         } else {
           const content = this.vfs.readFile(event.path, false);
+          const mtime = event.mtime || (this.vfs.stat(event.path)?.mtime) || Date.now();
           this.shellWorker.postMessage({
             type: 'file_changed',
             path: event.path,
             content,
+            mtime,
           });
         }
       }
@@ -424,7 +430,7 @@ export class App {
       const allFiles = this.vfs.getAllFiles('/workspace');
       for (const f of allFiles) {
         if (!f.isDir) {
-          initialFiles[f.path] = f.content;
+          initialFiles[f.path] = { content: f.content, mtime: f.mtime };
         } else {
           initialDirs.push(f.path);
         }

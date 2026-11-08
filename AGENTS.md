@@ -463,6 +463,27 @@ Agents executing this project should proceed milestone-by-milestone:
   - Synthesize virtual directory entries in `ls /dev` (`null`, `zero` with `d_type: 2`) without physical VFS nodes.
 - Update automated test suite in `test/shell.test.js` and `test/vfs.test.js`.
 
+### Milestone 31: Real GNU Make WASI Integration (`make-wasi`) & Educational JS Parser Retirement
+- Replace the legacy educational JS-based Makefile runner (`src/toolchain/make.js`) with genuine GNU Make 4.4.1 compiled for WASI Preview 1 (`make.wasm`) from `make-wasi`.
+- Host-assisted recipe dispatch (`wasi_run_recipe`):
+  - Bridges GNU Make recipe execution directly into the host runtime via `make-wasi/host`.
+  - Seamlessly evaluates built-in filesystem operations (`mkdir -p`, `rm -rf`, `touch`, `cp`, `mv`, `echo`) and toolchain commands (`gcc`, `g++`, `clang`, `clang++`, `ar`, `wasm-ld`).
+  - Evaluates `$(shell ...)` expansions via `wasi_capture_command`.
+- Synchronous Toolchain Execution in Background Worker:
+  - Extends `WasmToolchain` and `AppInstance` with synchronous instantiation (`AppInstance.createSync`, `compileSync`, `linkSync`, `runToolSync`, `runClangSync`) using the pre-compiled `llvmBoxModule`.
+  - Implements `executeGccCommandSync` in `src/toolchain/driver.js` to synchronously compile and link object files during GNU Make recipe execution without async event loop suspension.
+- Accurate VFS Mtime Preservation & Touch Integration:
+  - Implements `setTimes` in `VFS` (`src/vfs/vfs.js`) and overrides `path_filestat_set_times` / `fd_filestat_set_times` in `WasiHost` (`src/vfs/wasi-host.js`), enabling BusyBox `touch` to update timestamps on existing files with monotonic forward advancement.
+  - Preserves exact `{ content, mtime }` across `shell.worker.js`, `compiler.worker.js`, and host `main.js` via `vfs_sync` and `CompilerClient.getWorkspaceFiles()`, preventing timestamp clobbering.
+  - Overrides `path_filestat_get` and `fd_filestat_get` in `WasiHost` (`src/vfs/wasi-host.js`) to report real nanosecond modification timestamps from `VFS` nodes (`st.mtime * 1000000n`).
+  - Enables accurate GNU Make incremental rebuilds: avoids rebuilding targets whose prerequisites are older than the target, and selectively rebuilds only modified targets.
+- Pre-mounted Toolchain Binary:
+  - Mounts `/usr/bin/make` backed by `make.wasm` in `SYSROOT_UTILITIES` in `src/vfs/sysroot.js`.
+  - Adds `downloadMakeAssets()` in `scripts/download-sysroot.js` fetching `make.wasm` from `https://github.com/breeze833/make-wasi/releases/download/latest/make.wasm`.
+  - Adds dependency `"make-wasi"` to `package.json`.
+- Comprehensive Automated Test Suite:
+  - Updates `test/make.test.js` covering automatic variables (`$@`, `$<`, `$^`), order-only prerequisites (`|`), pattern rules (`build/%.o: src/%.c`), conditionals (`ifeq`), `include` directives, `-k` (keep-going), `-n` (dry-run), error propagation, and end-to-end C compilation into WebAssembly binaries.
+
 ---
 
 ## 4. Verification & Testing Checklist

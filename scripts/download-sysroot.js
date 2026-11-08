@@ -41,6 +41,7 @@ const SQLITE_WASI_TAG = 'v3.54.1';
 const SQLITE_WASI_VERSION = '3.54.1';
 const SQLITE_WASI_BASE_URL = `https://github.com/breeze833/sqlite-wasi/releases/download/${SQLITE_WASI_TAG}`;
 const BUSYBOX_WASI_BASE_URL = 'https://github.com/breeze833/busybox-wasi/releases/download/latest';
+const MAKE_WASI_BASE_URL = 'https://github.com/breeze833/make-wasi/releases/download/latest';
 
 const WASM_DIR = path.join(projectRoot, 'public', 'sysroot', 'wasm');
 const RAYLIB_INC_DIR = path.join(projectRoot, 'public', 'sysroot', 'include', 'raylib');
@@ -61,6 +62,7 @@ const REQUIRED_FILES = [
   path.join(WASM_DIR, 'libsqlite3.a'),
   path.join(WASM_DIR, 'sqlite3.wasm'),
   path.join(WASM_DIR, 'busybox.wasm'),
+  path.join(WASM_DIR, 'make.wasm'),
   path.join(RAYLIB_INC_DIR, 'raylib.h'),
   path.join(RAYLIB_INC_DIR, 'raymath.h'),
   path.join(RAYLIB_INC_DIR, 'rlgl.h'),
@@ -389,6 +391,17 @@ async function downloadBusyboxAssets() {
   await downloadToFile(url, destPath);
 }
 
+async function downloadMakeAssets() {
+  const destPath = path.join(WASM_DIR, 'make.wasm');
+  if (!force && fs.existsSync(destPath) && fs.statSync(destPath).size > 0) {
+    console.log('[sysroot] make.wasm already present, skipping.');
+    return;
+  }
+
+  const url = `${MAKE_WASI_BASE_URL}/make.wasm`;
+  await downloadToFile(url, destPath);
+}
+
 async function main() {
   if (!force && allAssetsPresent()) {
     console.log('[sysroot] All toolchain & sysroot assets are present. Skipping download.');
@@ -406,6 +419,7 @@ async function main() {
   await downloadTurtleAssets();
   await downloadSqliteAssets();
   await downloadBusyboxAssets();
+  await downloadMakeAssets();
   console.log('[sysroot] All assets successfully downloaded and ready.');
 }
 

@@ -89,7 +89,7 @@ function getWorkspaceDiff(beforeSnapshot) {
       currentFiles.add(f.path);
       const before = beforeSnapshot.fileMap.get(f.path);
       if (!before || before.mtime !== f.mtime || before.length !== (f.content ? f.content.length : 0)) {
-        changedFiles[f.path] = f.content;
+        changedFiles[f.path] = { content: f.content, mtime: f.mtime };
       }
     } else {
       currentDirs.add(f.path);
@@ -502,12 +502,14 @@ self.onmessage = async (event) => {
     }
 
     if (msg.files) {
-      for (const [p, content] of Object.entries(msg.files)) {
+      for (const [p, item] of Object.entries(msg.files)) {
         const norm = normalizePath(p);
+        const content = (item && item.content !== undefined) ? item.content : item;
+        const mtime = (item && item.mtime !== undefined) ? item.mtime : Date.now();
         const u8 = typeof content === 'string'
           ? new TextEncoder().encode(content)
           : (content instanceof Uint8Array ? content : new Uint8Array(content));
-        vfs.writeFile(norm, u8, Date.now(), true);
+        vfs.writeFile(norm, u8, mtime, true);
       }
     }
 
@@ -541,7 +543,7 @@ self.onmessage = async (event) => {
     const u8 = typeof msg.content === 'string'
       ? new TextEncoder().encode(msg.content)
       : (msg.content instanceof Uint8Array ? msg.content : new Uint8Array(msg.content));
-    vfs.writeFile(norm, u8, Date.now(), true);
+    vfs.writeFile(norm, u8, msg.mtime || Date.now(), true);
     return;
   }
 

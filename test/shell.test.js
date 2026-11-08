@@ -1070,6 +1070,18 @@ dirs() {
   touchHost.getMemory = () => touchInst.exports.memory;
   try { touchInst.exports._start(); } catch (_) {}
   assert.strictEqual(testVfs.exists('/workspace/b.txt'), true, 'b.txt created by touch b.txt');
+  const bMtime1 = testVfs.stat('/workspace/b.txt').mtime;
+
+  const touch2Host = new WasiHost({
+    vfs: testVfs,
+    cwd: '/workspace',
+    argv: ['busybox', 'touch', 'b.txt'],
+  });
+  const touch2Inst = new WebAssembly.Instance(busyboxMod, touch2Host.createImportObject());
+  touch2Host.getMemory = () => touch2Inst.exports.memory;
+  try { touch2Inst.exports._start(); } catch (_) {}
+  const bMtime2 = testVfs.stat('/workspace/b.txt').mtime;
+  assert.ok(bMtime2 > bMtime1, `touch on existing file must advance mtime: ${bMtime2} > ${bMtime1}`);
 
   const mkdirHost = new WasiHost({
     vfs: testVfs,

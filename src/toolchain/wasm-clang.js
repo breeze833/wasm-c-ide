@@ -45,6 +45,15 @@ export class AppInstance {
     return app;
   }
 
+  static createSync(module, wasiHost, name, ...args) {
+    const app = new AppInstance(wasiHost, name, ...args);
+    const imports = app._buildImports();
+    const instance = new WebAssembly.Instance(module, imports);
+    app.instance = instance;
+    app.exports = instance.exports;
+    return app;
+  }
+
   run() {
     try {
       if (typeof this.exports._start === 'function') {
@@ -350,6 +359,33 @@ export class WasmToolchain {
     }
   }
 
+  runToolSync(toolName, toolArgs = [], options = {}) {
+    const llvmBox = this.llvmBoxModule;
+    if (!llvmBox) {
+      throw new Error('llvmBox module not initialized');
+    }
+    const cwd = options.cwd || '/workspace';
+
+    const wasiHost = new WasiHost({
+      vfs: this.vfs,
+      cwd,
+      argv: [toolName, ...toolArgs],
+      stdout: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+      stderr: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+    });
+
+    try {
+      const app = AppInstance.createSync(llvmBox, wasiHost, toolName, ...toolArgs);
+      return app.run();
+    } finally {
+      wasiHost.setMemory(null);
+    }
+  }
+
   async runClang(cmd, args = [], options = {}) {
     await this.init();
     const clang = await this._getClang();
@@ -381,6 +417,43 @@ export class WasmToolchain {
 
     try {
       const app = await AppInstance.create(clang, wasiHost, binary, ...finalArgs);
+      return app.run();
+    } finally {
+      wasiHost.setMemory(null);
+    }
+  }
+
+  runClangSync(cmd, args = [], options = {}) {
+    const clang = this.llvmBoxModule;
+    if (!clang) {
+      throw new Error('llvmBox module not initialized');
+    }
+    const cwd = options.cwd || '/workspace';
+    const binary = (cmd === 'g++' || cmd === 'clang++') ? 'clang++' : 'clang';
+
+    const finalArgs = [];
+    if (!args.some(a => a.startsWith('--target'))) {
+      finalArgs.push('--target=wasm32-wasip1');
+    }
+    if (!args.some(a => a.startsWith('--sysroot'))) {
+      finalArgs.push('--sysroot=/');
+    }
+    finalArgs.push(...args);
+
+    const wasiHost = new WasiHost({
+      vfs: this.vfs,
+      cwd,
+      argv: [binary, ...finalArgs],
+      stdout: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+      stderr: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+    });
+
+    try {
+      const app = AppInstance.createSync(clang, wasiHost, binary, ...finalArgs);
       return app.run();
     } finally {
       wasiHost.setMemory(null);
@@ -431,10 +504,7 @@ export class WasmToolchain {
     return false;
   }
 
-  async compile(sourcePath, objPath, mode = 'c', customFlags = [], options = {}) {
-    await this.init();
-    const clang = await this._getClang();
-
+  _buildCompileArgs(sourcePath, objPath, mode = 'c', customFlags = [], options = {}) {
     const cleanSrc = sourcePath.startsWith('/') ? sourcePath : `/${sourcePath}`;
     const cleanObj = objPath === '-' ? '-' : (objPath.startsWith('/') ? objPath : `/${objPath}`);
 
@@ -509,6 +579,13 @@ export class WasmToolchain {
 
     args.push(...processedFlags);
     args.push('-o', cleanObj, cleanSrc);
+    return args;
+  }
+
+  async compile(sourcePath, objPath, mode = 'c', customFlags = [], options = {}) {
+    await this.init();
+    const clang = await this._getClang();
+    const args = this._buildCompileArgs(sourcePath, objPath, mode, customFlags, options);
 
     const wasiHost = new WasiHost({
       vfs: this.vfs,
@@ -530,10 +607,34 @@ export class WasmToolchain {
     }
   }
 
-  async link(objPaths, outputPath, customFlags = []) {
-    await this.init();
-    const lld = await this._getLld();
+  compileSync(sourcePath, objPath, mode = 'c', customFlags = [], options = {}) {
+    const clang = this.llvmBoxModule;
+    if (!clang) {
+      throw new Error('llvmBox module not initialized');
+    }
+    const args = this._buildCompileArgs(sourcePath, objPath, mode, customFlags, options);
 
+    const wasiHost = new WasiHost({
+      vfs: this.vfs,
+      cwd: '/workspace',
+      stdout: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+      stderr: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+    });
+
+    try {
+      const app = AppInstance.createSync(clang, wasiHost, 'clang', ...args);
+      const exitCode = app.run();
+      return exitCode;
+    } finally {
+      wasiHost.setMemory(null);
+    }
+  }
+
+  _buildLinkArgs(objPaths, outputPath, customFlags = []) {
     const cleanObjs = objPaths.map(p => (p.startsWith('/') ? p : `/${p}`));
     const cleanOut = outputPath.startsWith('/') ? outputPath : `/${outputPath}`;
 
@@ -619,6 +720,13 @@ export class WasmToolchain {
         '-o', cleanOut,
       );
     }
+    return args;
+  }
+
+  async link(objPaths, outputPath, customFlags = []) {
+    await this.init();
+    const lld = await this._getLld();
+    const args = this._buildLinkArgs(objPaths, outputPath, customFlags);
 
     const wasiHost = new WasiHost({
       vfs: this.vfs,
@@ -633,6 +741,33 @@ export class WasmToolchain {
 
     try {
       const app = await AppInstance.create(lld, wasiHost, 'wasm-ld', ...args);
+      const exitCode = app.run();
+      return exitCode;
+    } finally {
+      wasiHost.setMemory(null);
+    }
+  }
+
+  linkSync(objPaths, outputPath, customFlags = []) {
+    const lld = this.llvmBoxModule;
+    if (!lld) {
+      throw new Error('llvmBox module not initialized');
+    }
+    const args = this._buildLinkArgs(objPaths, outputPath, customFlags);
+
+    const wasiHost = new WasiHost({
+      vfs: this.vfs,
+      cwd: '/workspace',
+      stdout: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+      stderr: (str) => {
+        if (typeof this.hostWrite === 'function') this.hostWrite(str);
+      },
+    });
+
+    try {
+      const app = AppInstance.createSync(lld, wasiHost, 'wasm-ld', ...args);
       const exitCode = app.run();
       return exitCode;
     } finally {

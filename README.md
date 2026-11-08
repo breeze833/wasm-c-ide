@@ -138,16 +138,17 @@ This IDE is specifically engineered for **students and systems programming educa
   - Shared library creation: `gcc -shared -fPIC src/math.c -o build/libmath.so` (and `g++ -shared -fPIC ...` for C++) generates standard WebAssembly dynamic libraries with `dylink.0` custom sections.
 - **Zero-MemFS Direct VFS Architecture**: `memfs.wasm` is completely eliminated. The unified Platform Host (`src/vfs/wasi-host.js`) directly bridges `llvm-box.wasm` (`clang`, `wasm-ld`, `llvm-ar`) and runtime binaries (`a.out`, `busybox.wasm`) to the application `VFS`, fusing standard WASI Preview 1 POSIX syscalls, in-memory `MemoryPipe` descriptors, and component graphics/audio bridges without double-buffering, memory limits, or intermediate file copying.
 - **Dedicated Compiler Web Worker (`compiler.worker.js`)**:
-  - Clang, LLD linker, archiver (`ar`), and `make` execute off the main browser thread in a dedicated, persistent Web Worker managed by `CompilerClient` (`src/toolchain/compiler-client.js`).
+  - Clang, LLD linker, archiver (`ar`), and GNU Make (`make`) execute off the main browser thread in a dedicated, persistent Web Worker managed by `CompilerClient` (`src/toolchain/compiler-client.js`).
   - **Zero UI Freezing**: Large header expansions (such as `raygui.h` in `examples/10_raylib_gui_audio.c`) run entirely in the background without blocking Monaco Editor typing, xterm.js rendering, or floating window interactions.
   - **Streaming Diagnostics & Instant Cancellation**: Compiler stderr/stdout streams in real-time to the terminal. Pressing `Ctrl+C` or clicking Stop terminates the worker immediately, cleanly aborting stuck builds without leaving corrupted state.
 
 ### 4. Dual Build Systems (Shell Script & Makefile)
 - **Track 1: Shell Script (`build.sh`)**:
   - Generates `/workspace/build.sh` reflecting active compiler flags, include directories, and output binaries.
-- **Track 2: Standard Makefile (`Makefile`)**:
+- **Track 2: Standard Makefile (`Makefile`) & Genuine GNU Make 4.4.1 WASI**:
   - Generates a modular Makefile with `all`, `clean`, and pattern rules (`%.o: %.c`).
-  - Built-in incremental `make` engine checks modification timestamps (`mtime`) against prerequisites to avoid redundant rebuilds.
+  - Integrated with genuine **GNU Make 4.4.1 WASI** (`make-wasi`): delivers complete standard capabilities including automatic variables (`$@`, `$<`, `$^`), pattern rules (`build/%.o: src/%.c`), order-only prerequisites (`|`), conditionals (`ifeq`/`ifneq`), `include` directives, `$(shell ...)` expansions, and incremental builds evaluating nanosecond VFS modification timestamps (`mtime`).
+  - Supports standard CLI flags: `-n` (dry-run), `-k` (keep-going), `-C <dir>`, `-f <file>`, `-B` (always rebuild).
 - **Project Settings Modal**:
   - Decoupled **Save** and **Generate Build Script** buttons: save configuration and toggle sysroots without clobbering existing files in `/workspace`.
   - Configure language mode, include directories, compiler warning flags, default build track, target binary name, linker flags, and custom Run Command (default: `pushd . && cd /workspace && ./a.out; popd`).

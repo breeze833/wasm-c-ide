@@ -186,6 +186,32 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 - **Node.js Environment Fallback**:
   - `CompilerClient` transparently detects Node.js environments (such as unit test suites) and executes `WasmToolchain` in-process, preserving full test suite compatibility.
 
+### 3.2.2 Real GNU Make WASI Integration (`make-wasi`)
+- **Retirement of Educational Parser**:
+  - Replaces the legacy JavaScript regex-based Makefile runner (`src/toolchain/make.js`) with genuine GNU Make 4.4.1 compiled for WASI Preview 1 (`public/sysroot/wasm/make.wasm`) from upstream package [`breeze833/make-wasi`](https://github.com/breeze833/make-wasi).
+  - Delivers complete standard GNU Make capabilities:
+    - Automatic variables: `$@`, `$<`, `$^`, `$*`, `$(@D)`, `$(@F)`.
+    - Pattern rules: `build/%.o: src/%.c`.
+    - Built-in functions: `$(patsubst ...)`, `$(filter ...)`, `$(wildcard ...)`, `$(dir ...)`.
+    - Conditionals: `ifeq`, `ifneq`, `ifdef`, `ifndef`, `else`, `endif`.
+    - Order-only prerequisites: `target: prereqs | order_only_dirs`.
+    - Directives: `include <file>`.
+    - Command flags: `-n` (dry run), `-k` (keep going), `-f FILE`, `-C DIR`, `-s` (silent), `-B` (always make).
+- **Synchronous Recipe Dispatch Bridge (`wasi_run_recipe`)**:
+  - GNU Make executes recipes via host import `env.wasi_run_recipe(cmdline, envp)`.
+  - In `compiler.worker.js` (and `compiler-client.js` fallback), `makeBridge` delegates recipe lines to:
+    - Filesystem built-ins (`mkdir -p`, `rm -rf`, `touch`, `cp`, `mv`, `echo`).
+    - Toolchain compiler commands (`gcc`, `g++`, `clang`, `clang++`, `ar`, `wasm-ld`) executed synchronously via `executeGccCommandSync` and `AppInstance.createSync` against `llvmBoxModule`.
+  - GNU Make `$(shell <cmd>)` expansions are evaluated synchronously via `env.wasi_capture_command`.
+- **Accurate Nanosecond VFS Timestamp Evaluation & Touch Integration**:
+  - `VFS` implements `setTimes(path, atim, mtim)` with monotonic forward advancement, and `WasiHost` overrides `path_filestat_set_times` and `fd_filestat_set_times` so shell commands like `touch` update mtimes on existing files without clobbering directories.
+  - Differential workspace synchronizations across `shell.worker.js`, `compiler.worker.js`, and host `main.js` preserve `{ content, mtime }`, preventing reset of file mtimes during cross-worker dispatch.
+  - `WasiHost` overrides `path_filestat_get` and `fd_filestat_get` to report genuine VFS modification timestamps (`node.mtime * 1000000n`).
+  - Guarantees genuine incremental compilation: targets are evaluated against prerequisite timestamps, skipping up-to-date targets and rebuilding only modified units.
+- **Sysroot Mounting**:
+  - `/usr/bin/make` is pre-mounted into VFS via `mountSysrootUtilities` in `src/vfs/sysroot.js`.
+  - `scripts/download-sysroot.js` downloads `make.wasm` from GitHub releases into `public/sysroot/wasm/make.wasm`.
+
 ### 3.3 Runtime & Interactive Standard I/O
 - Target binaries run in `runtime.worker.js` using `WasiHost`.
 - Standard input (`stdin`):
@@ -394,7 +420,7 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 |---|---|
 | **BusyBox POSIX Shell Scripting** | Interactive loops (`for`, `while`), conditionals (`if-then-else`), arithmetic `$((...))`, and subshells `$(...)` execute accurately with full POSIX semantics in xterm. |
 | **Real Coreutils Execution** | `grep`, `sed`, `awk`, `find`, `sort`, `uniq`, `diff`, `tar`, `wc`, `head`, `tail` execute real BusyBox applets against `/workspace` files with correct standard flags and output; all 70+ applets are published in VFS `/bin` and discoverable via `ls /bin` and `which`. |
-| **Make Host Spawn Exception** | Running `make` or `make clean` inside `ash` delegates to `runMake()` via `wasi_host_spawn`, evaluating Makefile targets and returning exit codes back to `ash`. |
+| **GNU Make WASI Execution** | Running `make` or `make clean` inside `ash` delegates to `runMake()` via `wasi_host_spawn`, executing genuine `make.wasm` to evaluate Makefile rules, automatic variables (`$@`, `$<`, `$^`), order-only prereqs (`|`), pattern rules (`%.o: %.c`), conditionals (`ifeq`), and includes; builds selectively according to mtime staleness and returns accurate exit codes back to `ash`. |
 | **Chained Execution (`make && ./a.out`)** | Command chains linking `make` and user executables (`make && ./a.out`) execute sequentially, halting if `make` fails and running the binary if `make` succeeds. |
 | **VFS Bidirectional Synchronization** | Shell file commands (`touch`, `mkdir`, `rm`, redirects `>`) immediately update the in-memory VFS and reflect in the sidebar file tree. |
 | **Standard C/C++ Headers Compilation** | Programs including `<cstdio>`, `<cstdlib>`, `<cstring>`, `<cmath>`, `<cctype>`, `<cassert>`, `<iostream>`, `<vector>`, `<string>`, `<algorithm>`, and `<memory>` compile, link, and execute cleanly with `g++` and `clang++` without missing header or unresolved symbol errors. |

@@ -44,7 +44,7 @@ function getWorkspaceDiff(beforeMap) {
       currentFiles.add(f.path);
       const before = beforeMap.get(f.path);
       if (!before || before.mtime !== f.mtime || before.length !== (f.content ? f.content.length : 0)) {
-        changedFiles[f.path] = f.content;
+        changedFiles[f.path] = { content: f.content, mtime: f.mtime };
       }
     }
   }
@@ -100,12 +100,17 @@ self.onmessage = async (event) => {
 
     // Apply incoming workspace file updates
     if (files) {
-      for (const [p, content] of Object.entries(files)) {
+      for (const [p, item] of Object.entries(files)) {
         const norm = normalizePath(p);
+        const content = (item && item.content !== undefined) ? item.content : item;
+        const mtime = (item && item.mtime !== undefined) ? item.mtime : Date.now();
         const u8 = typeof content === 'string'
           ? new TextEncoder().encode(content)
           : (content instanceof Uint8Array ? content : new Uint8Array(content));
-        vfs.writeFile(norm, u8, Date.now(), true);
+        const existing = vfs.stat(norm);
+        if (!existing || existing.mtime !== mtime || existing.size !== u8.byteLength) {
+          vfs.writeFile(norm, u8, mtime, true);
+        }
       }
     }
 
@@ -170,59 +175,13 @@ self.onmessage = async (event) => {
         });
       } else if (cmd === 'make') {
         exitCode = await runMake({
-          targetName: args[0] || 'all',
+          args,
+          cwd,
           vfs,
-          write: (str) => writeFn(str.replace(/\r?\n/g, '\r\n')),
-          executeCommand: async (cmdLine) => {
-            const trimmed = cmdLine.trim();
-            if (!trimmed) return 0;
-
-            if (trimmed.startsWith('rm ')) {
-              const rmParts = trimmed.split(/\s+/).slice(1);
-              const rmTargets = rmParts.filter(p => !p.startsWith('-'));
-              for (const t of rmTargets) {
-                const norm = normalizePath(t.startsWith('/') ? t : `${cwd}/${t}`);
-                if (vfs.exists(norm)) vfs.remove(norm, true, true);
-              }
-              return 0;
-            } else if (trimmed.startsWith('mkdir ')) {
-              const dir = trimmed.split(/\s+/).pop();
-              const norm = normalizePath(dir.startsWith('/') ? dir : `${cwd}/${dir}`);
-              vfs.mkdir(norm, true, true);
-              return 0;
-            } else if (
-              trimmed.startsWith('gcc ') ||
-              trimmed.startsWith('clang ') ||
-              trimmed.startsWith('g++ ') ||
-              trimmed.startsWith('clang++ ') ||
-              trimmed.startsWith('$(CC)') ||
-              trimmed.startsWith('$(CXX)')
-            ) {
-              const subArgs = trimmed.split(/\s+/);
-              const subCmd = subArgs.shift();
-              const subMode = (subCmd === 'g++' || subCmd === 'clang++' || subCmd === '$(CXX)') ? 'cpp' : mode;
-              return await executeGccCommand({
-                cmd: subCmd,
-                args: subArgs,
-                cwd,
-                vfs,
-                toolchain,
-                mode: subMode,
-                write: writeFn,
-              });
-            } else if (trimmed.startsWith('ar ') || trimmed.startsWith('$(AR)')) {
-              const subArgs = trimmed.split(/\s+/);
-              subArgs.shift();
-              return await executeArCommand({
-                args: subArgs,
-                cwd,
-                vfs,
-                toolchain,
-                write: writeFn,
-              });
-            }
-            return 0;
-          },
+          toolchain,
+          basePath: '/sysroot/wasm',
+          mode,
+          write: writeFn,
         });
       } else {
         writeFn(`compiler.worker: unrecognized command: ${cmd}\r\n`);

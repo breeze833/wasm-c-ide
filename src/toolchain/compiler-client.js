@@ -30,7 +30,7 @@ export class CompilerClient {
     const all = this.vfs.getAllFiles('/workspace');
     for (const f of all) {
       if (!f.isDir && f.content) {
-        files[f.path] = f.content;
+        files[f.path] = { content: f.content, mtime: f.mtime };
       }
     }
     return files;
@@ -71,9 +71,11 @@ export class CompilerClient {
 
           // Commit changed files back to master VFS
           if (this.vfs && msg.changedFiles) {
-            for (const [p, content] of Object.entries(msg.changedFiles)) {
+            for (const [p, item] of Object.entries(msg.changedFiles)) {
               try {
-                this.vfs.writeFile(p, content, Date.now(), true);
+                const content = (item && item.content !== undefined) ? item.content : item;
+                const mtime = (item && item.mtime !== undefined) ? item.mtime : Date.now();
+                this.vfs.writeFile(p, content, mtime, true);
               } catch (_) {}
             }
           }
@@ -215,60 +217,13 @@ export class CompilerClient {
       }
       if (cmd === 'make') {
         return await runMake({
-          targetName: args[0] || 'all',
+          args,
+          cwd,
           vfs: this.vfs,
+          toolchain: this.inProcessToolchain,
+          basePath: this.basePath,
+          mode,
           write: write || this.hostWrite,
-          executeCommand: async (cmdLine) => {
-            const trimmed = cmdLine.trim();
-            if (!trimmed) return 0;
-            if (trimmed.startsWith('rm ')) {
-              const rmParts = trimmed.split(/\s+/).slice(1).filter(p => !p.startsWith('-'));
-              for (const t of rmParts) {
-                const norm = normalizePath(t.startsWith('/') ? t : `${cwd}/${t}`);
-                if (this.vfs.exists(norm)) this.vfs.remove(norm, true, true);
-              }
-              return 0;
-            }
-            if (trimmed.startsWith('mkdir ')) {
-              const dir = trimmed.split(/\s+/).pop();
-              const norm = normalizePath(dir.startsWith('/') ? dir : `${cwd}/${dir}`);
-              this.vfs.mkdir(norm, true, true);
-              return 0;
-            }
-            if (
-              trimmed.startsWith('gcc ') ||
-              trimmed.startsWith('clang ') ||
-              trimmed.startsWith('g++ ') ||
-              trimmed.startsWith('clang++ ') ||
-              trimmed.startsWith('$(CC)') ||
-              trimmed.startsWith('$(CXX)')
-            ) {
-              const subArgs = trimmed.split(/\s+/);
-              const subCmd = subArgs.shift();
-              const subMode = (subCmd === 'g++' || subCmd === 'clang++' || subCmd === '$(CXX)') ? 'cpp' : mode;
-              return await executeGccCommand({
-                cmd: subCmd,
-                args: subArgs,
-                cwd,
-                vfs: this.vfs,
-                toolchain: this.inProcessToolchain,
-                mode: subMode,
-                write: write || this.hostWrite,
-              });
-            }
-            if (trimmed.startsWith('ar ') || trimmed.startsWith('$(AR)')) {
-              const subArgs = trimmed.split(/\s+/);
-              subArgs.shift();
-              return await executeArCommand({
-                args: subArgs,
-                cwd,
-                vfs: this.vfs,
-                toolchain: this.inProcessToolchain,
-                write: write || this.hostWrite,
-              });
-            }
-            return 0;
-          },
         });
       }
       return 127;

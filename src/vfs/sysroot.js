@@ -1452,6 +1452,11 @@ export const SYSROOT_UTILITIES = [
     file: 'sqlite3.wasm',
     target: '/usr/bin/sqlite3',
   },
+  {
+    name: 'make',
+    file: 'make.wasm',
+    target: '/usr/bin/make',
+  },
 ];
 
 /**
