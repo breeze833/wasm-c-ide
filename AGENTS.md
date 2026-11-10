@@ -30,6 +30,15 @@ You are an autonomous senior systems and web engineer implementing the project s
 │       ├── SPECv2.md
 │       ├── SPECv3.md
 │       └── SPECv4.md
+├── ide-docs/                  # Standalone public API documentation portal source
+│   ├── index.html             # Documentation portal home & quick start
+│   ├── libc-wasi.html         # General C Libc & WASI Preview 1 restrictions guide
+│   ├── turtle.html            # Turtle graphics API reference (<turtle.h>)
+│   ├── canvas.html            # Canvas 2D & Direct Software Framebuffer reference
+│   ├── raylib.html            # Raylib 5.5 WASI reference (<raylib.h>)
+│   ├── sqlite.html            # SQLite 3 WASI reference (<sqlite3.h>)
+│   ├── highlighter.js         # Zero-dependency client-side syntax highlighter
+│   └── style.css              # Responsive dark theme documentation styling
 ├── examples/                  # Bundled pedagogical single-file C examples & guide
 │   ├── 01_stdio.c             # Standard I/O console menu demo
 │   ├── 02_raylib_interactive.c # Interactive Raylib 5.5 GLES2 graphics demo
@@ -46,16 +55,20 @@ You are an autonomous senior systems and web engineer implementing the project s
 ├── package.json               # Development tooling, dependencies, and test scripts
 ├── vite.config.js             # Vite configuration (COOP/COEP headers, workers, wasm support)
 ├── scripts/
+│   ├── build-docs.js          # API docs builder compiling ide-docs/ into dist/docs/ and public/docs/
 │   └── download-sysroot.js    # Automated LLVM 19, Raylib WASI & libturtle asset downloader and unpacker
 ├── src/
 │   ├── main.js                # App bootstrap, DOM layout, and UI event binding
 │   ├── style.css              # Dark theme styling, button color hierarchy, tooltips
 │   ├── components/
+│   │   ├── examples-data.js   # Embedded offline pedagogical C examples for 1-click loading
 │   │   ├── filetree.js        # File tree sidebar, directory expansion, file operations
+│   │   ├── reference.js       # In-IDE slide-out right Reference Drawer & cheatsheet tabs
 │   │   ├── settings.js        # Project settings modal with decoupled Save and Generate buttons
 │   │   └── toast.js           # Non-blocking notification toasts
 │   ├── editor/
 │   │   ├── editor.js          # Monaco editor instance controller and save actions
+│   │   ├── hover-provider.js  # Monaco hover & autocomplete provider for custom headers
 │   │   ├── monaco-setup.js    # Monaco worker environment setup
 │   │   └── tabs.js            # Tab bar manager and dirty mark (*) tracking
 │   ├── terminal/
@@ -100,6 +113,7 @@ You are an autonomous senior systems and web engineer implementing the project s
     ├── make.test.js           # Makefile parsing and incremental build tests
     ├── pipeline.test.js       # Command pipeline (|) and file redirection (<, >, >>) tests
     ├── raylib.test.js         # Raylib graphics compilation, input sync, and canvas UI tests
+    ├── reference-drawer.test.js # In-IDE Reference Drawer, Monaco hover tooltips, and public docs tests
     ├── runtime.test.js        # SharedArrayBuffer Atomics protocol and Ctrl-D EOF tests
     ├── settings-upgrade.test.js # Project Settings save/generate decoupling and passive upgrade tests
     ├── shell.test.js          # Shell argument parsing, globs, pushd/popd, mv/cp, and direct scripts
@@ -556,4 +570,12 @@ Before marking any task complete, agents must verify:
 | **Virtual Character Devices (`/dev/null`, `/dev/zero`)** | Shell stream redirections (`> /dev/null`, `< /dev/null`, `/dev/zero`) operate without allocating physical VFS storage; `ls /dev` lists virtual character devices `null` and `zero`. |
 | **BusyBox Applet VFS Publishing** | All 70+ BusyBox multicall applets are mounted into `/bin` and discoverable via `ls /bin` and `which <cmd>`. |
 | **Bidirectional VFS & Shell Directory Sync** | `touch`, `mkdir`, and `rmdir` execute reliably in shell; file and directory additions/removals synchronize bidirectionally between terminal and sidebar file tree without page refresh. |
+| **Slide-Out Right Reference Drawer UI** | Clicking `#btn-reference` or pressing `Ctrl+Shift+H` / `F1` toggles the slide-out drawer on the right without occluding the editor or disrupting terminal output. |
+| **Offline Documentation Invariant** | In offline PWA mode, the reference drawer renders all tabs (Libc/WASI limits, Turtle, Canvas, Raylib, and SQLite) instantly with zero network requests. |
+| **Pristine Upstream Headers Invariant** | Upstream headers (`raylib.h`, `sqlite3.h`) remain 100% byte-for-byte identical to upstream without manual docstring edits or patch drift. |
+| **Monaco Custom Header Hover Tooltips** | Hovering over functions declared in custom sysroot headers (`turtle_forward`, `graphics_fill_rect`, `raylib_turtle_init`) displays detailed prototypes, parameter explanations, and coordinate notes parsed from header docstrings. |
+| **Libc & WASI Restrictions Guidance** | The General C Libc tab clearly documents unavailable syscalls (`fork`, `exec`, `sockets`, `pthreads`) and demonstrates idiomatic WASI alternatives (`poll_oneoff`, `WasiHost` VFS file I/O). |
+| **1-Click Example Template Loading** | Clicking "Load Example" from any reference tab prompts cleanly if the active tab is unsaved, opens the corresponding C example in a new editor tab, and synchronizes with the file tree. |
+| **External Documentation Link Safety** | Clicking external links to the public documentation site, Raylib cheatsheet, or SQLite reference opens in a new browser tab with `rel="noopener noreferrer"`, preserving active IDE state and avoiding navigation loss. |
+| **Subpath & Base URL Documentation Resolution** | In any deployment subpath (e.g. `/`, `/ide/`, or GitHub Pages `/<repo>/`), clicking the "Open Full Documentation" link in the reference drawer navigates accurately to `${BASE_URL}docs/`, and links within the documentation navigate back to the IDE via `../` with zero 404 errors. |
 

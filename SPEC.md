@@ -412,6 +412,72 @@ This specification defines the architecture and design invariants of `wasm-c-ide
   - When Enter is pressed, the complete command line is evaluated by `busybox.wasm sh -c "<cmd>"`.
   - Updates the active working directory (`cwd`) between `ash` and the IDE UI upon `cd`, ensuring the prompt (`ide:~/subfolder$ `) and file tree navigation remain synchronized.
 
+### 3.13 Integrated API Reference & Documentation Subsystem (In-IDE Cheatsheets & External Documentation Portal)
+
+- **Motivation & Offline-First Design Invariant**:
+  - `wasm-c-ide` incorporates custom WebAssembly libraries (`canvas-wasi`, `libturtle`) alongside standard libraries and runtimes adapted to WASI Preview 1 (`raylib-wasi`, `sqlite-wasi`, `wasi-libc`). Students and developers need immediate API reference without context-switching away from their active coding environment.
+  - **Zero Upstream Header Patching**: Upstream headers for Raylib (`raylib.h`, `rlgl.h`, `raymath.h`, `raygui.h`) and SQLite (`sqlite3.h`) MUST remain 100% pristine and unpatched to prevent maintenance drift and upgrade complexity. Documentation for these libraries is provided exclusively through the reference drawer and official cheatsheet links. Custom in-house headers (`turtle.h`, `graphics.h`, `graphics_canvas.h`) provide Doxygen docstrings directly in their respective source repositories.
+  - **Offline PWA Invariant**: All custom API references, function signatures, libc constraints, and WASI-specific restriction matrices must be embedded within the client bundle and operate with zero network access once cached.
+  - **Separation of Project Docs vs. Public API Docs**:
+    - Repository `docs/` is reserved strictly for internal developer architectural documents, case studies, and historical specifications (`DEDICATED_COMPILER_WORKER.md`, `KNOWN_ISSUES.md`, `SINGLE_THREAD_FRAME_PACING.md`, `archived/`).
+    - The public user-facing API documentation project source resides under `ide-docs/` in the repository root.
+    - The build output of `ide-docs/` compiles into `dist/docs/`, preserving the unified distribution structure.
+
+- **Tier 1: In-Editor Monaco Intelligence (Custom Header Docstrings)**:
+  - Custom virtual headers mounted into `/usr/include/` (`turtle.h`, `turtle_backend_canvas_wasi.h`, `turtle_backend_raylib.h`, `graphics.h`, `graphics_canvas.h`) provide standardized Doxygen-style docstrings (`/** ... */`).
+  - Monaco Editor configuration provides:
+    - **Hover Tooltips (`hoverProvider`)**: Inspecting custom function symbols displays their prototype, parameter descriptions, coordinate conventions (e.g. Turtle Cartesian center `(0, 0)` vs. Canvas raster top-left `(0, 0)`), and buffer formats (e.g. little-endian `0xAABBGGRR`).
+    - **Signature Help (`signatureHelpProvider`)**: Active parameter highlighting when typing function arguments.
+    - **Autocomplete Snippets (`completionItemProvider`)**: Idiomatic boilerplate snippets for library initialization (e.g. `turtle_begin`, `graphics_wait_frame`, `sqlite3_open_v2`).
+
+- **Tier 2: In-IDE Slide-Out Right Reference Drawer (`src/components/reference.js`)**:
+  - **UI Entrypoint**: Dedicated "Reference" button (`#btn-reference`) in the top navigation bar, quick toggle in the right editor gutter, and global keyboard shortcut (`Ctrl+Shift+H` or `F1`).
+  - **UI Form Factor**: A smooth slide-out drawer on the right side of the screen (`#reference-drawer`). Users can keep the drawer open while typing in Monaco or running programs in the terminal, with an easy collapse toggle (`✕` or pressing the shortcut again).
+  - **Structured Tabbed Navigation**:
+    1. **General C Libc & WASI Restrictions**:
+       - *Process Control*: No `fork()`, `exec()`, `waitpid()`, `system()`, or `popen()`. All code runs within the single-threaded WASI instance; multi-process piping is coordinated exclusively by the shell (`busybox-wasi`).
+       - *Signals*: Unsupported asynchronous POSIX signals (`SIGKILL`, `SIGTERM`, `SIGALRM`, `signal()`, `sigaction()` are stubbed or no-ops). Interactive cancellation is handled via host worker termination (`Ctrl+C`).
+       - *Networking & Sockets*: BSD sockets (`<sys/socket.h>`, `<netdb.h>`, `socket()`, `connect()`, `bind()`, `listen()`) are not supported in pure WASI Preview 1.
+       - *Threading*: Single-threaded execution (`-DLLVM_ENABLE_THREADS=OFF`). POSIX threads (`<pthread.h>`) are not available; frame pacing uses synchronous `Atomics.wait()` via host clock events.
+       - *Filesystem & Standard I/O*: Full standard POSIX file I/O (`<stdio.h>`, `<fstream>`, `fopen`, `fread`, `fwrite`, `fseek`) backed by in-memory VFS under `/workspace`. File locking (`fcntl(F_SETLK)`) is a no-op.
+       - *Timers & Sleep*: `sleep()`, `usleep()`, and `nanosleep()` operate accurately via WASI `poll_oneoff`.
+    2. **Turtle Graphics (`<turtle.h>`)**:
+       - Complete function catalog (~20 functions: motion, turns, pen state, color, canvas queries).
+       - Coordinate system diagram: Origin `(0, 0)` at canvas center, $+Y$ North, $+X$ East.
+       - Color conversion macros: `COLOR_RGB(r, g, b)` and `COLOR_RGBA(r, g, b, a)`.
+       - Backend selection: Canvas-WASI (`-lturtle`) vs. Raylib (`-lturtle_raylib -lraylib`).
+    3. **Canvas 2D & Direct Framebuffer (`<graphics.h>`, `<graphics_canvas.h>`)**:
+       - Framebuffer memory layout: 32-bit RGBA (`0xAABBGGRR`), zero-copy presentation (`graphics_present`).
+       - Vector drawing primitives: lines, rectangles, circles, paths, and transforms.
+       - Synchronous input querying: mouse coordinates, button bitmasks (`GRAPHICS_BTN_*`), and key codes (`graphics_is_key_down`).
+       - Frame pacing invariant: `graphics_wait_frame(fps)` using `Atomics.wait()` synchronization.
+    4. **Raylib WASI Compatibility Matrix (`<raylib.h>`)**:
+       - High-level subsystem summary: Core, Shapes, Textures, Text/Fonts, Raymath, Raygui.
+       - **WASI Preview 1 Restrictions Matrix**:
+         - *Threading*: Strictly single-threaded; no multi-threaded resource loading.
+         - *Frame Pacing*: `SetTargetFPS(60)` clamped via host `WaitTime()` using `Atomics.wait()`.
+         - *Audio*: Hardware-decoupled Web Audio subsystem (`raudio_wasi.c`); stream chunks proxied to main-thread `AudioContext`.
+         - *Unsupported*: Native GLFW window pointers, OS drag-and-drop, network sockets.
+       - Direct link to official cheatsheet: `https://www.raylib.com/cheatsheet/cheatsheet.html`.
+    5. **SQLite 3 WASI Guide (`<sqlite3.h>`)**:
+       - Database persistence modes: transient in-memory (`:memory:`) vs. persistent VFS files (`/workspace/*.db`).
+       - Single-threaded concurrency model (`SQLITE_THREADSAFE=0`) and transaction handling.
+       - Terminal CLI execution: using `sqlite3 /workspace/app.db` directly in `ash`.
+       - Direct link to official C API reference: `https://www.sqlite.org/c3ref/intro.html`.
+  - **1-Click Example Integration**:
+    - Each documentation section features a **"Load Example"** button.
+    - Clicking the button checks for unsaved changes in the active tab, opens the corresponding pedagogical example from `examples/` (`01_stdio.c` to `10_raylib_gui_audio.c`), and switches focus directly to Monaco.
+  - **External Link Banner**:
+    - Provides a prominent "Open Full Documentation Portal ↗" link targeting the public documentation site with `target="_blank" rel="noopener noreferrer"`.
+
+- **Tier 3: Public Documentation Site (Decoupled Co-Located Sub-Build in `ide-docs/`)**:
+  - Source resides under `ide-docs/` in the `wasm-c-ide` repository root.
+  - Built independently via `npm run docs:build` into `dist/docs/`, preserving repository `docs/` strictly for internal project documents.
+  - **Path Consistency & Subpath Invariant**:
+    - Both the IDE and documentation use relative base path resolution (`./docs/` and `../`).
+    - The IDE computes the documentation link via `${BASE_URL}docs/` (or `new URL('docs/', window.location.href)`), resolving consistently whether deployed at domain root (`/`), custom subpath (e.g. `/ide/docs/`), or GitHub Pages (`/<repo>/docs/`).
+    - The documentation portal links back to the IDE using relative parent resolution (`../` or `../?example=<id>`), ensuring 1-click playground launches work seamlessly without hardcoded domains.
+
 ---
 
 ## 4. Verification & Testing Checklist
@@ -457,3 +523,11 @@ This specification defines the architecture and design invariants of `wasm-c-ide
 | **Ctrl-D and Ctrl-C Invariants** | `Ctrl-C` immediately halts running binaries or interrupts the shell, while `Ctrl-D` cleanly terminates interactive sessions (`sqlite3`, `cat`) or sends EOF without input corruption. |
 | **Passive System Upgrade & Workspace Preservation** | Clicking `#modal-upgrade-btn` in Project Settings header displays confirmation dialog; confirming purges compiler wasm-cache and Service Worker CacheStorage, triggers page reload, and keeps `/workspace` user files intact. |
 | **Startup Loading Indication & Deferred Prompt** | Startup streams informational loading and progress messages into the xterm terminal area during VFS preparation (sysroot fetching, decompression, unpacking, library preloading); input is guarded during boot, and the welcome message and interactive shell prompt appear only after all VFS items are fully populated. |
+| **Slide-Out Right Reference Drawer UI** | Clicking `#btn-reference` or pressing `Ctrl+Shift+H` / `F1` toggles the slide-out drawer on the right without occluding the editor or disrupting terminal output. |
+| **Offline Documentation Invariant** | In offline PWA mode, the reference drawer renders all tabs (Libc/WASI limits, Turtle, Canvas, Raylib, and SQLite) instantly with zero network requests. |
+| **Pristine Upstream Headers Invariant** | Upstream headers (`raylib.h`, `sqlite3.h`) remain 100% byte-for-byte identical to upstream without manual docstring edits or patch drift. |
+| **Monaco Custom Header Hover Tooltips** | Hovering over functions declared in custom sysroot headers (`turtle_forward`, `graphics_fill_rect`, `raylib_turtle_init`) displays detailed prototypes, parameter explanations, and coordinate notes parsed from header docstrings. |
+| **Libc & WASI Restrictions Guidance** | The General C Libc tab clearly documents unavailable syscalls (`fork`, `exec`, `sockets`, `pthreads`) and demonstrates idiomatic WASI alternatives (`poll_oneoff`, `WasiHost` VFS file I/O). |
+| **1-Click Example Template Loading** | Clicking "Load Example" from any reference tab prompts cleanly if the active tab is unsaved, opens the corresponding C example in a new editor tab, and synchronizes with the file tree. |
+| **External Documentation Link Safety** | Clicking external links to the public documentation site, Raylib cheatsheet, or SQLite reference opens in a new browser tab with `rel="noopener noreferrer"`, preserving active IDE state and avoiding navigation loss. |
+| **Subpath & Base URL Documentation Resolution** | In any deployment subpath (e.g. `/`, `/ide/`, or GitHub Pages `/<repo>/`), clicking the "Open Full Documentation" link in the reference drawer navigates accurately to `${BASE_URL}docs/`, and links within the documentation navigate back to the IDE via `../` with zero 404 errors. |

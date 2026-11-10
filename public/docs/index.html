@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Documentation & Guides - wasm-c-ide</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="highlighter.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a href="index.html" class="brand">
+      <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M1 2.828c.885-.37 2.154-.769 3.388-.893 1.33-.134 2.458.063 3.112.752v9.746c-.935-.53-2.12-.603-3.213-.493-1.18.12-2.37.461-3.287.811V2.828zm7.5-.141c.654-.689 1.782-.886 3.112-.752 1.234.124 2.503.523 3.388.893v9.923c-.918-.35-2.107-.692-3.287-.81-1.094-.111-2.278-.039-3.213.492V2.687zM8 1.783C7.015.936 5.587.81 4.287.94 2.85 1.084 1.353 1.542.454 1.94A.5.5 0 0 0 0 2.404v10.518a.5.5 0 0 0 .66.473c.961-.36 2.37-.777 3.754-.918 1.13-.115 2.148.04 2.898.489.262.157.625.157.888 0 .75-.449 1.768-.604 2.898-.489 1.384.141 2.793.558 3.754.918a.5.5 0 0 0 .66-.473V2.404a.5.5 0 0 0-.454-.464c-.899-.398-2.396-.856-3.833-.999-1.3-.13-2.728-.004-3.713.842z"/>
+      </svg>
+      <span>wasm-c-ide Docs</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link active">Home</a>
+      <a href="libc-wasi.html" class="nav-link">Libc &amp; WASI</a>
+      <a href="turtle.html" class="nav-link">Turtle</a>
+      <a href="canvas.html" class="nav-link">Canvas 2D</a>
+      <a href="raylib.html" class="nav-link">Raylib</a>
+      <a href="sqlite.html" class="nav-link">SQLite 3</a>
+      <a href="../" class="btn-back-ide">
+        <span>Open IDE</span>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+          <path fill-rule="evenodd" d="M14 2.5a.5.5 0 0 0-.5-.5h-6a.5.5 0 0 0 0 1h4.793L2.146 13.146a.5.5 0 0 0 .708.708L13 3.707V8.5a.5.5 0 0 0 1 0v-6z"/>
+        </svg>
+      </a>
+    </div>
+  </header>
+
+  <div class="layout-container">
+    <aside class="sidebar">
+      <div>
+        <div class="sidebar-group-title">Documentation</div>
+        <ul class="sidebar-menu">
+          <li><a href="index.html" class="sidebar-link active">Overview</a></li>
+          <li><a href="libc-wasi.html" class="sidebar-link">General C Libc &amp; WASI</a></li>
+        </ul>
+      </div>
+      <div>
+        <div class="sidebar-group-title">Libraries &amp; APIs</div>
+        <ul class="sidebar-menu">
+          <li><a href="turtle.html" class="sidebar-link">Turtle Graphics (&lt;turtle.h&gt;)</a></li>
+          <li><a href="canvas.html" class="sidebar-link">Canvas 2D &amp; Framebuffer</a></li>
+          <li><a href="raylib.html" class="sidebar-link">Raylib 5.5 WASI</a></li>
+          <li><a href="sqlite.html" class="sidebar-link">SQLite 3 WASI</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <h1>C/C++ WebAssembly Teaching IDE</h1>
+      <p class="subtitle">Complete technical documentation, API specifications, coordinate systems, and WASI Preview 1 compatibility guides for wasm-c-ide.</p>
+
+      <div class="callout callout-info">
+        <div class="callout-title">Zero-Install, Client-Side Architecture</div>
+        <p><code>wasm-c-ide</code> executes Clang/LLVM 19, GNU Make, BusyBox shell, and user-compiled binaries entirely inside modern web browsers using WebAssembly. No server compilation, no container overhead, and full offline PWA support.</p>
+      </div>
+
+      <h2>API Reference &amp; Guides</h2>
+      <div class="grid">
+        <a href="libc-wasi.html" class="card">
+          <span class="badge badge-amber">WASI Preview 1</span>
+          <h3>General C Libc &amp; WASI Limits</h3>
+          <p>Understand the WebAssembly sandbox constraints: no fork/exec, single-threaded execution, synchronous clocks via poll_oneoff, and in-memory VFS.</p>
+        </a>
+
+        <a href="turtle.html" class="card">
+          <span class="badge badge-emerald">Built-in Library</span>
+          <h3>Turtle Graphics (&lt;turtle.h&gt;)</h3>
+          <p>Interactive Cartesian turtle geometry with center origin (0, 0), +Y North, 60 FPS animation delays, and modular Raylib / Canvas backends.</p>
+        </a>
+
+        <a href="canvas.html" class="card">
+          <span class="badge badge-emerald">Built-in Library</span>
+          <h3>Canvas 2D &amp; Framebuffer</h3>
+          <p>Direct 32-bit RGBA (0xAABBGGRR) pixel framebuffer access and HTML5 2D vector primitives with synchronous input queries.</p>
+        </a>
+
+        <a href="raylib.html" class="card">
+          <span class="badge badge-blue">WASI Port</span>
+          <h3>Raylib 5.5 WASI Port</h3>
+          <p>2D/3D graphics, procedural Web Audio, raymath, and raygui compiled for WebAssembly with 60 FPS Atomics frame pacing.</p>
+        </a>
+
+        <a href="sqlite.html" class="card">
+          <span class="badge badge-blue">WASI Port</span>
+          <h3>SQLite 3 Database &amp; CLI</h3>
+          <p>Embedded relational database operations in pure C with transient :memory: tables or persistent VFS storage, plus interactive CLI.</p>
+        </a>
+      </div>
+
+      <h2>Quick Start Example</h2>
+      <p>Here is a minimal C program demonstrating direct standard I/O and mathematics:</p>
+      <pre><code><span class="token-prep">#include</span> <span class="token-str">&lt;stdio.h&gt;</span>
+<span class="token-prep">#include</span> <span class="token-str">&lt;math.h&gt;</span>
+
+<span class="token-kw">int</span> <span class="token-fn">main</span>(<span class="token-kw">void</span>) {
+    <span class="token-fn">printf</span>(<span class="token-str">"Hello from WebAssembly C IDE!\n"</span>);
+    <span class="token-kw">for</span> (<span class="token-kw">int</span> i = <span class="token-num">0</span>; i &lt;= <span class="token-num">5</span>; i++) {
+        <span class="token-fn">printf</span>(<span class="token-str">"sqrt(%d) = %.4f\n"</span>, i, <span class="token-fn">sqrt</span>((<span class="token-type">double</span>)i));
+    }
+    <span class="token-kw">return</span> <span class="token-num">0</span>;
+}</code></pre>
+      <a href="../" class="btn-run-ide">Launch IDE &amp; Run Code ↗</a>
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <p>wasm-c-ide &bull; Zero-Dependency Pure WebAssembly C/C++ Teaching Environment</p>
+  </footer>
+</body>
+</html>

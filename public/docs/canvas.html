@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Canvas 2D &amp; Framebuffer API - wasm-c-ide</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="highlighter.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a href="index.html" class="brand">
+      <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M1 2.828c.885-.37 2.154-.769 3.388-.893 1.33-.134 2.458.063 3.112.752v9.746c-.935-.53-2.12-.603-3.213-.493-1.18.12-2.37.461-3.287.811V2.828zm7.5-.141c.654-.689 1.782-.886 3.112-.752 1.234.124 2.503.523 3.388.893v9.923c-.918-.35-2.107-.692-3.287-.81-1.094-.111-2.278-.039-3.213.492V2.687zM8 1.783C7.015.936 5.587.81 4.287.94 2.85 1.084 1.353 1.542.454 1.94A.5.5 0 0 0 0 2.404v10.518a.5.5 0 0 0 .66.473c.961-.36 2.37-.777 3.754-.918 1.13-.115 2.148.04 2.898.489.262.157.625.157.888 0 .75-.449 1.768-.604 2.898-.489 1.384.141 2.793.558 3.754.918a.5.5 0 0 0 .66-.473V2.404a.5.5 0 0 0-.454-.464c-.899-.398-2.396-.856-3.833-.999-1.3-.13-2.728-.004-3.713.842z"/>
+      </svg>
+      <span>wasm-c-ide Docs</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link">Home</a>
+      <a href="libc-wasi.html" class="nav-link">Libc &amp; WASI</a>
+      <a href="turtle.html" class="nav-link">Turtle</a>
+      <a href="canvas.html" class="nav-link active">Canvas 2D</a>
+      <a href="raylib.html" class="nav-link">Raylib</a>
+      <a href="sqlite.html" class="nav-link">SQLite 3</a>
+      <a href="../" class="btn-back-ide">
+        <span>Open IDE</span>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+          <path fill-rule="evenodd" d="M14 2.5a.5.5 0 0 0-.5-.5h-6a.5.5 0 0 0 0 1h4.793L2.146 13.146a.5.5 0 0 0 .708.708L13 3.707V8.5a.5.5 0 0 0 1 0v-6z"/>
+        </svg>
+      </a>
+    </div>
+  </header>
+
+  <div class="layout-container">
+    <aside class="sidebar">
+      <div>
+        <div class="sidebar-group-title">Documentation</div>
+        <ul class="sidebar-menu">
+          <li><a href="index.html" class="sidebar-link">Overview</a></li>
+          <li><a href="libc-wasi.html" class="sidebar-link">General C Libc &amp; WASI</a></li>
+        </ul>
+      </div>
+      <div>
+        <div class="sidebar-group-title">Libraries &amp; APIs</div>
+        <ul class="sidebar-menu">
+          <li><a href="turtle.html" class="sidebar-link">Turtle Graphics (&lt;turtle.h&gt;)</a></li>
+          <li><a href="canvas.html" class="sidebar-link active">Canvas 2D &amp; Framebuffer</a></li>
+          <li><a href="raylib.html" class="sidebar-link">Raylib 5.5 WASI</a></li>
+          <li><a href="sqlite.html" class="sidebar-link">SQLite 3 WASI</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <h1>Canvas 2D &amp; Direct Software Framebuffer</h1>
+      <p class="subtitle">Complete C/C++ API reference for low-level software framebuffers (<code>&lt;graphics.h&gt;</code>) and HTML5 2D vector primitives (<code>&lt;graphics_canvas.h&gt;</code>) via <code>canvas-wasi</code>.</p>
+
+      <div class="callout callout-info">
+        <div class="callout-title">Zero Linker Flags Guarantee</div>
+        <p>All functions declared in <code>&lt;graphics.h&gt;</code> and <code>&lt;graphics_canvas.h&gt;</code> are resolved directly by WebAssembly host imports provided by the browser environment (under the <code>env</code> namespace). When compiling in <code>wasm-c-ide</code> or using <code>clang --target=wasm32-wasi</code>, <strong>no external <code>-l</code> linker flags are required</strong>.</p>
+      </div>
+
+      <h2>Part 1: Software Framebuffer API (<code class="badge badge-emerald">&lt;graphics.h&gt;</code>)</h2>
+
+      <h3>1.1 Window Lifecycle &amp; Control</h3>
+      <table>
+        <thead><tr><th>Function Signature</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>void graphics_init(int width, int height, const char *title);</code></td>
+            <td>Initializes the graphics display window with logical dimensions (e.g. <code>640x480</code>) and title bar string. Opens the floating canvas window in the UI.</td>
+          </tr>
+          <tr>
+            <td><code>bool graphics_should_close(void);</code></td>
+            <td>Returns <code>true</code> if the user has requested closing the window (via the close button or shortcut).</td>
+          </tr>
+          <tr>
+            <td><code>void graphics_close(void);</code></td>
+            <td>Requests closing and hiding the graphics window from within C code.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>1.2 Frame Presentation &amp; Memory Layout</h3>
+      <table>
+        <thead><tr><th>Function Signature</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>void graphics_present(const uint32_t *pixels);</code></td>
+            <td>Copies a full-screen buffer of <code>width * height</code> 32-bit pixels directly to the display canvas.</td>
+          </tr>
+          <tr>
+            <td><code>void graphics_present_rgba(const uint8_t *rgba, int width, int height);</code></td>
+            <td>Transfers a raw byte array of RGBA pixels with explicit dimensions to the screen.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout callout-info">
+        <div class="callout-title">Pixel Format (Little-Endian 0xAABBGGRR)</div>
+        <p>In memory (from byte 0 to byte 3):</p>
+        <ul>
+          <li><strong>Byte 0:</strong> Red (0 - 255)</li>
+          <li><strong>Byte 1:</strong> Green (0 - 255)</li>
+          <li><strong>Byte 2:</strong> Blue (0 - 255)</li>
+          <li><strong>Byte 3:</strong> Alpha (0 - 255)</li>
+        </ul>
+        <p>Helper macro: <code>#define RGBA(r,g,b,a) (((uint32_t)(a)&lt;&lt;24)|((uint32_t)(b)&lt;&lt;16)|((uint32_t)(g)&lt;&lt;8)|(uint32_t)(r))</code></p>
+      </div>
+
+      <h3>Minimal Framebuffer Starter Template</h3>
+      <pre><code><span class="token-prep">#include</span> <span class="token-str">&lt;graphics.h&gt;</span>
+<span class="token-prep">#include</span> <span class="token-str">&lt;stdint.h&gt;</span>
+
+<span class="token-prep">#define</span> WIDTH <span class="token-num">640</span>
+<span class="token-prep">#define</span> HEIGHT <span class="token-num">480</span>
+<span class="token-prep">#define</span> <span class="token-fn">RGBA</span>(r,g,b,a) (((<span class="token-type">uint32_t</span>)(a)&lt;&lt;<span class="token-num">24</span>)|((<span class="token-type">uint32_t</span>)(b)&lt;&lt;<span class="token-num">16</span>)|((<span class="token-type">uint32_t</span>)(g)&lt;&lt;<span class="token-num">8</span>)|((<span class="token-type">uint32_t</span>)(r)))
+
+<span class="token-kw">int</span> <span class="token-fn">main</span>(<span class="token-kw">void</span>) {
+    <span class="token-fn">graphics_init</span>(WIDTH, HEIGHT, <span class="token-str">"Direct Software Framebuffer"</span>);
+    <span class="token-kw">static</span> <span class="token-type">uint32_t</span> fb[WIDTH * HEIGHT];
+
+    <span class="token-kw">while</span> (!<span class="token-fn">graphics_should_close</span>()) {
+        <span class="token-kw">for</span> (<span class="token-kw">int</span> i = <span class="token-num">0</span>; i &lt; WIDTH * HEIGHT; i++) {
+            fb[i] = <span class="token-fn">RGBA</span>(<span class="token-num">255</span>, <span class="token-num">128</span>, <span class="token-num">0</span>, <span class="token-num">255</span>); <span class="token-comment">// 32-bit RGBA orange</span>
+        }
+        <span class="token-fn">graphics_present</span>(fb);
+        <span class="token-fn">graphics_wait_frame</span>(<span class="token-num">60</span>);
+    }
+
+    <span class="token-fn">graphics_close</span>();
+    <span class="token-kw">return</span> <span class="token-num">0</span>;
+}</code></pre>
+
+      <h3>1.3 Frame Pacing</h3>
+      <table>
+        <thead><tr><th>Function Signature</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>void graphics_wait_frame(int target_fps);</code></td>
+            <td>Synchronously sleeps the remainder of the frame duration using host <code>Atomics.wait()</code>, pacing rendering cleanly at 60 FPS without CPU busy-looping.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>1.4 Synchronous Input Handling</h3>
+      <table>
+        <thead><tr><th>Function Signature</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>void graphics_get_mouse(int *x, int *y, int *buttons, int *wheel);</code></td>
+            <td>Reads current mouse position (<code>*x</code>, <code>*y</code>) in render pixels, mouse button bitmask (<code>*buttons</code>: 1 = Left, 2 = Middle, 4 = Right), and vertical wheel delta (<code>*wheel</code>).</td>
+          </tr>
+          <tr>
+            <td><code>bool graphics_is_key_down(int key);</code></td>
+            <td>Queries whether the specified virtual keycode is currently held down (e.g. 27 for Escape, 32 for Space, 37-40 for Arrow keys, 256 for Enter).</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <a href="../?example=03_framebuffer_graphics" class="btn-run-ide">Load Framebuffer Example in IDE ↗</a>
+
+      <h2>Part 2: HTML5 Canvas 2D Vector API (<code class="badge badge-emerald">&lt;graphics_canvas.h&gt;</code>)</h2>
+
+      <h3>2.1 Frame Presentation</h3>
+      <table>
+        <thead><tr><th>Function Signature</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>void canvas_present(void);</code></td>
+            <td>Flushes all vector rasterization commands off-thread and presents the updated surface to the canvas display window. Content is preserved across frames.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Minimal Vector Canvas Starter Template</h3>
+      <pre><code><span class="token-prep">#include</span> <span class="token-str">&lt;graphics_canvas.h&gt;</span>
+
+<span class="token-kw">int</span> <span class="token-fn">main</span>(<span class="token-kw">void</span>) {
+    <span class="token-fn">graphics_init</span>(<span class="token-num">800</span>, <span class="token-num">600</span>, <span class="token-str">"Canvas 2D Vector API"</span>);
+
+    <span class="token-kw">while</span> (!<span class="token-fn">graphics_should_close</span>()) {
+        <span class="token-fn">canvas_clear_rect</span>(<span class="token-num">0</span>, <span class="token-num">0</span>, <span class="token-num">800</span>, <span class="token-num">600</span>);
+
+        <span class="token-fn">canvas_set_fill_style</span>(<span class="token-str">"#00e5ff"</span>);
+        <span class="token-fn">canvas_fill_rect</span>(<span class="token-num">100</span>, <span class="token-num">100</span>, <span class="token-num">200</span>, <span class="token-num">150</span>);
+
+        <span class="token-fn">canvas_begin_path</span>();
+        <span class="token-fn">canvas_arc</span>(<span class="token-num">500</span>, <span class="token-num">200</span>, <span class="token-num">60</span>, <span class="token-num">0</span>, <span class="token-num">6.283185f</span>, <span class="token-kw">false</span>);
+        <span class="token-fn">canvas_set_fill_style</span>(<span class="token-str">"#ff5722"</span>);
+        <span class="token-fn">canvas_fill</span>();
+
+        <span class="token-fn">canvas_present</span>();
+        <span class="token-fn">graphics_wait_frame</span>(<span class="token-num">60</span>);
+    }
+
+    <span class="token-fn">graphics_close</span>();
+    <span class="token-kw">return</span> <span class="token-num">0</span>;
+}</code></pre>
+
+      <h3>2.2 Rectangles &amp; Clearing</h3>
+      <table>
+        <thead><tr><th>Function Signature</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>void canvas_clear_rect(float x, float y, float w, float h);</code></td>
+            <td>Clears the specified rectangular area to transparent black (<code>rgba(0,0,0,0)</code>).</td>
+          </tr>
+          <tr>
+            <td><code>void canvas_fill_rect(float x, float y, float w, float h);</code></td>
+            <td>Fills a rectangle at <code>(x, y)</code> with dimensions <code>(w, h)</code> using the current fill style.</td>
+          </tr>
+          <tr>
+            <td><code>void canvas_stroke_rect(float x, float y, float w, float h);</code></td>
+            <td>Strokes a rectangle outline using the current stroke style and line width.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>2.3 Path Drawing</h3>
+      <table>
+        <thead><tr><th>Function Signature</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>void canvas_begin_path(void);</code></td><td>Starts a new path or resets the current path.</td></tr>
+          <tr><td><code>void canvas_close_path(void);</code></td><td>Draws a straight line from current point to start of active subpath.</td></tr>
+          <tr><td><code>void canvas_move_to(float x, float y);</code></td><td>Moves path cursor to <code>(x, y)</code> without drawing.</td></tr>
+          <tr><td><code>void canvas_line_to(float x, float y);</code></td><td>Adds a line segment from current position to <code>(x, y)</code>.</td></tr>
+          <tr><td><code>void canvas_arc(float x, float y, float radius, float start_angle, float end_angle, bool counterclockwise);</code></td><td>Adds an arc to path with given center, radius, and radian angles.</td></tr>
+          <tr><td><code>void canvas_fill(void);</code></td><td>Fills current subpaths using active fill style.</td></tr>
+          <tr><td><code>void canvas_stroke(void);</code></td><td>Strokes current subpaths using active stroke style and line width.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>2.4 Styles, Colors &amp; Line Attributes</h3>
+      <table>
+        <thead><tr><th>Function Signature</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>void canvas_set_fill_style(const char *style);</code></td><td>Sets fill color using CSS string (e.g. <code>"#ff5722"</code>, <code>"rgba(0,255,100,0.8)"</code>).</td></tr>
+          <tr><td><code>void canvas_set_stroke_style(const char *style);</code></td><td>Sets stroke color using CSS string (e.g. <code>"#00e5ff"</code>).</td></tr>
+          <tr><td><code>void canvas_set_fill_rgb(uint8_t r, uint8_t g, uint8_t b);</code></td><td>Sets fill color via raw RGB integer components (0 - 255).</td></tr>
+          <tr><td><code>void canvas_set_line_width(float width);</code></td><td>Sets line stroke width in pixels.</td></tr>
+          <tr><td><code>void canvas_set_line_cap(const char *cap);</code></td><td>Sets line end style: <code>"butt"</code>, <code>"round"</code>, or <code>"square"</code>.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>2.5 Text Rendering</h3>
+      <table>
+        <thead><tr><th>Function Signature</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>void canvas_fill_text(const char *text, float x, float y);</code></td><td>Draws filled text string at coordinates <code>(x, y)</code>.</td></tr>
+          <tr><td><code>void canvas_stroke_text(const char *text, float x, float y);</code></td><td>Draws stroked text outline at coordinates <code>(x, y)</code>.</td></tr>
+          <tr><td><code>void canvas_set_font(const char *font);</code></td><td>Sets CSS font descriptor (e.g. <code>"bold 24px monospace"</code>, <code>"16px sans-serif"</code>).</td></tr>
+        </tbody>
+      </table>
+
+      <h3>2.6 Matrix Transformations &amp; State Management</h3>
+      <table>
+        <thead><tr><th>Function Signature</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>void canvas_save(void);</code></td><td>Pushes current transformation matrix, styles, and clip region to state stack.</td></tr>
+          <tr><td><code>void canvas_restore(void);</code></td><td>Pops and restores previous state from stack.</td></tr>
+          <tr><td><code>void canvas_translate(float x, float y);</code></td><td>Translates canvas origin by <code>(x, y)</code> pixels.</td></tr>
+          <tr><td><code>void canvas_rotate(float radians);</code></td><td>Rotates coordinate space clockwise by given angle in radians.</td></tr>
+          <tr><td><code>void canvas_scale(float sx, float sy);</code></td><td>Scales coordinate space along X and Y axes.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>2.7 Pixel-Level Manipulation &amp; Direct Interop</h3>
+      <table>
+        <thead><tr><th>Function Signature</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>void canvas_get_image_data(int sx, int sy, int sw, int sh, uint32_t *pixels_out);</code></td><td>Copies a sub-rectangle of canvas pixels into a little-endian <code>0xAABBGGRR</code> array.</td></tr>
+          <tr><td><code>void canvas_put_image_data(int dx, int dy, int dw, int dh, const uint32_t *pixels_in);</code></td><td>Renders a <code>0xAABBGGRR</code> pixel buffer into a sub-rectangle on the canvas.</td></tr>
+          <tr><td><code>void canvas_get_pixels(uint32_t *pixels_out);</code></td><td>Reads the entire full-screen canvas into a <code>width * height</code> pixel buffer.</td></tr>
+          <tr><td><code>void canvas_put_pixels(const uint32_t *pixels_in);</code></td><td>Overwrites the entire full-screen canvas from a <code>width * height</code> pixel buffer.</td></tr>
+          <tr><td><code>uint32_t canvas_get_pixel(int x, int y);</code></td><td>Reads a single 32-bit pixel at coordinate <code>(x, y)</code>.</td></tr>
+          <tr><td><code>void canvas_set_pixel(int x, int y, uint32_t color);</code></td><td>Writes a single 32-bit pixel at coordinate <code>(x, y)</code>.</td></tr>
+        </tbody>
+      </table>
+
+      <a href="../?example=04_canvas_vector" class="btn-run-ide">Load Canvas 2D Vector Example in IDE ↗</a>
+      <a href="../?example=05_canvas_pixels" class="btn-run-ide" style="margin-left: 8px;">Load Canvas Pixel Filter Example in IDE ↗</a>
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <p>wasm-c-ide &bull; Zero-Dependency Pure WebAssembly C/C++ Teaching Environment</p>
+  </footer>
+</body>
+</html>

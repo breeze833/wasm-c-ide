@@ -23,6 +23,7 @@ A zero-backend, installation-free, multi-file C/C++ development and learning env
   - [Interactive Educational Examples Suite](#9-interactive-educational-examples-suite)
   - [Virtual File System & Storage](#10-virtual-file-system--storage)
   - [Progressive Web App (PWA) & Offline Execution](#11-progressive-web-app-pwa--offline-execution)
+  - [Integrated API Reference & Documentation Subsystem](#12-integrated-api-reference--documentation-subsystem)
 - [Getting Started & Local Development](#getting-started--local-development)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
@@ -280,6 +281,24 @@ The repository includes a ready-to-run suite of single-file C programs in the `e
   - Seamless offline execution with retained `COOP: same-origin` and `COEP: require-corp` isolation headers so `SharedArrayBuffer` remains operational without an internet connection.
   - Automatic connection status notifications when transitioning between online and offline modes.
 
+### 12. Integrated API Reference & Documentation Subsystem
+- **In-IDE Slide-Out Reference Drawer**:
+  - Toggled via the **Reference** toolbar button (`#btn-reference`) or keyboard shortcuts (<kbd>Ctrl+Shift+H</kbd> / <kbd>F1</kbd>) without occluding editor code or disrupting active terminal output.
+  - **5 Specialized Documentation Tabs**:
+    1. **General C Libc & WASI Restrictions**: Clear explanations of sandboxed WASI Preview 1 limits (no `fork`/`exec`, no raw BSD sockets, single-threaded execution, in-memory VFS) and standard idiomatic alternatives (POSIX shell pipelines, `poll_oneoff` synchronous sleeping via `SharedArrayBuffer` `Atomics.wait`).
+    2. **Turtle Graphics (`<turtle.h>`)**: Full Cartesian coordinate diagrams, animation pacing (`turtle_delay`), complete lifecycle, motion, pen, and state inspection functions with required linker flags (`-lturtle`, `-lturtle_raylib -lraylib`).
+    3. **Canvas 2D & Direct Software Framebuffer (`<graphics.h>`, `<graphics_canvas.h>`)**: Complete 32-bit `0xAABBGGRR` framebuffer presentation, synchronous input queries, HTML5 2D vector primitives, path construction, text rendering, and pixel-level image processing.
+    4. **Raylib 5.5 WASI (`<raylib.h>`)**: Subsystem compatibility matrix (GLES2 WebGL, Web Audio, `raygui.h`), starter template, and link to the official cheatsheet.
+    5. **SQLite 3 WASI (`<sqlite3.h>`)**: Transient in-memory databases (`:memory:`), persistent VFS files (`/workspace/*.db`), core C statement preparation and query execution, and terminal interactive CLI syntax.
+  - **Real-Time Search Filter**: Rapidly filters API functions, concepts, and keywords across the active tab.
+  - **1-Click Pedagogical Example Loading**: Seamlessly loads starter templates (`01_stdio.c` through `10_raylib_gui_audio.c`) into Monaco editor tabs and the workspace file tree.
+- **Monaco Hover & Autocomplete Tooltips**:
+  - Custom Monaco hover provider (`src/editor/hover-provider.js`) parsing function declarations and parameter documentation for custom sysroot headers (`<turtle.h>`, `<graphics.h>`, `<graphics_canvas.h>`), providing contextual IntelliSense tooltips during editing.
+- **Standalone User Documentation Portal (`ide-docs/` -> `dist/docs/`)**:
+  - Fully static, multi-page reference site compiled into `dist/docs/` and `public/docs/` via `npm run docs:build`.
+  - Zero-dependency client-side syntax highlighter (`highlighter.js`) with pre-rendered tokens for zero-FOUC rendering.
+  - Fully resilient to any deployment path (domain root `/`, subpath `/ide/`, or GitHub Pages `/<repo>/`) with relative links and 1-click launch buttons returning directly to the playground.
+
 ---
 
 ## Getting Started & Local Development
@@ -311,7 +330,7 @@ Open your browser and navigate to `http://localhost:5173`.
 > **Note**: Vite is configured with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` HTTP headers to enable `SharedArrayBuffer` support out of the box during development. Additionally, the custom `emulate-production-sysroot` Vite plugin serves `/sysroot/wasm/` static assets as raw `application/octet-stream` with immutable caching headers, eliminating local dev server gzip double-handling and matching production streaming behavior.
 
 ### Running Tests
-Execute the full unit test suite (covering all 20 test suites: VFS, Shell parser, Toolchain driver, Static Archiver, Runtime Atomics, Make engine, PWA Service Worker, Zoom controls, Pipelines & Redirections, Raylib graphics, Generic Graphics / Canvas 2D, Shared Objects, Turtle Graphics, In-Code File I/O, Detached Terminal & ANSI, Collapsible & Resizable Sidebar, SQLite 3 WASI, Unified Terminal LineEditor, Project Settings & Passive Upgrade, and Startup Loading Indication):
+Execute the full unit test suite (covering all 22 test suites: VFS, Shell parser, Toolchain driver, Static Archiver, Runtime Atomics, Make engine, PWA Service Worker, Zoom controls, Pipelines & Redirections, Raylib graphics, Generic Graphics / Canvas 2D, Shared Objects, Turtle Graphics, In-Code File I/O, Detached Terminal & ANSI, Collapsible & Resizable Sidebar, SQLite 3 WASI, Unified Terminal LineEditor, Project Settings & Passive Upgrade, Startup Loading Indication, Compiler Worker, and Reference Drawer & Documentation Portal):
 
 ```bash
 npm test
@@ -462,6 +481,7 @@ Add a `_headers` file to `public/` (or configure in dashboard):
 ## Documentation & Technical Guides
 
 - [**`SPEC.md`**](./SPEC.md): Technical specification and architectural ground truth defining the unified VFS host, toolchain integration, and windowing system.
+- [**`ide-docs/` (API Documentation Portal)**](./ide-docs/index.html): Public API documentation portal and cheatsheet covering Libc/WASI limits, Turtle graphics, Canvas 2D, Raylib, and SQLite 3.
 - [**`docs/KNOWN_ISSUES.md`**](./docs/KNOWN_ISSUES.md): Documented version gaps, limits, and runtime constraints.
 - [**`docs/SINGLE_THREAD_FRAME_PACING.md`**](./docs/SINGLE_THREAD_FRAME_PACING.md): Case study on single-threaded WebAssembly graphics, progressive animation pacing, and mathematical derivation of frame cadence metrics.
 - [**`AGENTS.md`**](./AGENTS.md): Autonomous agent engineering guidelines, milestone tracking, and verification checklists.

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Raylib 5.5 WASI Port Guide - wasm-c-ide</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="highlighter.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a href="index.html" class="brand">
+      <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M1 2.828c.885-.37 2.154-.769 3.388-.893 1.33-.134 2.458.063 3.112.752v9.746c-.935-.53-2.12-.603-3.213-.493-1.18.12-2.37.461-3.287.811V2.828zm7.5-.141c.654-.689 1.782-.886 3.112-.752 1.234.124 2.503.523 3.388.893v9.923c-.918-.35-2.107-.692-3.287-.81-1.094-.111-2.278-.039-3.213.492V2.687zM8 1.783C7.015.936 5.587.81 4.287.94 2.85 1.084 1.353 1.542.454 1.94A.5.5 0 0 0 0 2.404v10.518a.5.5 0 0 0 .66.473c.961-.36 2.37-.777 3.754-.918 1.13-.115 2.148.04 2.898.489.262.157.625.157.888 0 .75-.449 1.768-.604 2.898-.489 1.384.141 2.793.558 3.754.918a.5.5 0 0 0 .66-.473V2.404a.5.5 0 0 0-.454-.464c-.899-.398-2.396-.856-3.833-.999-1.3-.13-2.728-.004-3.713.842z"/>
+      </svg>
+      <span>wasm-c-ide Docs</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link">Home</a>
+      <a href="libc-wasi.html" class="nav-link">Libc &amp; WASI</a>
+      <a href="turtle.html" class="nav-link">Turtle</a>
+      <a href="canvas.html" class="nav-link">Canvas 2D</a>
+      <a href="raylib.html" class="nav-link active">Raylib</a>
+      <a href="sqlite.html" class="nav-link">SQLite 3</a>
+      <a href="../" class="btn-back-ide">
+        <span>Open IDE</span>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+          <path fill-rule="evenodd" d="M14 2.5a.5.5 0 0 0-.5-.5h-6a.5.5 0 0 0 0 1h4.793L2.146 13.146a.5.5 0 0 0 .708.708L13 3.707V8.5a.5.5 0 0 0 1 0v-6z"/>
+        </svg>
+      </a>
+    </div>
+  </header>
+
+  <div class="layout-container">
+    <aside class="sidebar">
+      <div>
+        <div class="sidebar-group-title">Documentation</div>
+        <ul class="sidebar-menu">
+          <li><a href="index.html" class="sidebar-link">Overview</a></li>
+          <li><a href="libc-wasi.html" class="sidebar-link">General C Libc &amp; WASI</a></li>
+        </ul>
+      </div>
+      <div>
+        <div class="sidebar-group-title">Libraries &amp; APIs</div>
+        <ul class="sidebar-menu">
+          <li><a href="turtle.html" class="sidebar-link">Turtle Graphics (&lt;turtle.h&gt;)</a></li>
+          <li><a href="canvas.html" class="sidebar-link">Canvas 2D &amp; Framebuffer</a></li>
+          <li><a href="raylib.html" class="sidebar-link active">Raylib 5.5 WASI</a></li>
+          <li><a href="sqlite.html" class="sidebar-link">SQLite 3 WASI</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <h1>Raylib 5.5 WebAssembly Port</h1>
+      <p class="subtitle">Official Raylib 5.5 compiled to pure WASI Preview 1 via WebGL ES 2.0, Web Audio, and SharedArrayBuffer frame pacing.</p>
+
+      <h2>WASI Preview 1 Restrictions Matrix</h2>
+      <p>Upstream Raylib source is 100% clean and unmodified, but WebAssembly runs under the following constraints:</p>
+      <table>
+        <thead>
+          <tr><th>Feature / Subsystem</th><th>Status</th><th>Technical Details</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Core &amp; Windowing</strong></td>
+            <td><span class="badge badge-emerald">Supported</span></td>
+            <td><code>InitWindow</code>, <code>WindowShouldClose</code>, <code>CloseWindow</code>, <code>SetWindowTitle</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>2D &amp; 3D Graphics</strong></td>
+            <td><span class="badge badge-emerald">Supported</span></td>
+            <td>Shapes, Textures, RenderTextures, Fonts, Models, and WebGL ES 2.0 (<code>rlgl</code>).</td>
+          </tr>
+          <tr>
+            <td><strong>Frame Pacing</strong></td>
+            <td><span class="badge badge-emerald">Supported</span></td>
+            <td><code>SetTargetFPS(60)</code> clamped cleanly using host <code>WaitTime()</code> and <code>Atomics.wait()</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>Web Audio</strong></td>
+            <td><span class="badge badge-emerald">Supported</span></td>
+            <td>Hardware-decoupled Web Audio subsystem (<code>raudio_wasi.c</code>) streaming to browser <code>AudioContext</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>Immediate GUI (raygui)</strong></td>
+            <td><span class="badge badge-emerald">Supported</span></td>
+            <td>Include <code>&lt;raygui.h&gt;</code> with <code>#define RAYGUI_IMPLEMENTATION</code> for 25+ UI controls.</td>
+          </tr>
+          <tr>
+            <td><strong>Multi-Threading</strong></td>
+            <td><span class="badge badge-amber">Disabled</span></td>
+            <td>No <code>pthreads</code>. Background async loading must be processed incrementally on main thread.</td>
+          </tr>
+          <tr>
+            <td><strong>Native Desktop Handles</strong></td>
+            <td><span class="badge badge-amber">Disabled</span></td>
+            <td>GLFW window pointers, OS file drop callbacks, and hardware cursor locks are not available.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Interactive Starter Template</h2>
+      <pre><code><span class="token-prep">#include</span> <span class="token-str">"raylib.h"</span>
+
+<span class="token-kw">int</span> <span class="token-fn">main</span>(<span class="token-kw">void</span>) {
+    <span class="token-kw">const</span> <span class="token-kw">int</span> screenWidth = <span class="token-num">800</span>;
+    <span class="token-kw">const</span> <span class="token-kw">int</span> screenHeight = <span class="token-num">450</span>;
+
+    <span class="token-fn">InitWindow</span>(screenWidth, screenHeight, <span class="token-str">"Raylib 5.5 - wasm-c-ide"</span>);
+    <span class="token-fn">SetTargetFPS</span>(<span class="token-num">60</span>);
+
+    <span class="token-type">Vector2</span> ballPosition = { (<span class="token-type">float</span>)screenWidth / <span class="token-num">2</span>, (<span class="token-type">float</span>)screenHeight / <span class="token-num">2</span> };
+
+    <span class="token-kw">while</span> (!<span class="token-fn">WindowShouldClose</span>()) {
+        <span class="token-kw">if</span> (<span class="token-fn">IsKeyDown</span>(KEY_RIGHT)) ballPosition.x += <span class="token-num">4.0f</span>;
+        <span class="token-kw">if</span> (<span class="token-fn">IsKeyDown</span>(KEY_LEFT))  ballPosition.x -= <span class="token-num">4.0f</span>;
+        <span class="token-kw">if</span> (<span class="token-fn">IsKeyDown</span>(KEY_UP))    ballPosition.y -= <span class="token-num">4.0f</span>;
+        <span class="token-kw">if</span> (<span class="token-fn">IsKeyDown</span>(KEY_DOWN))  ballPosition.y += <span class="token-num">4.0f</span>;
+
+        <span class="token-fn">BeginDrawing</span>();
+        <span class="token-fn">ClearBackground</span>(RAYWHITE);
+        <span class="token-fn">DrawCircleV</span>(ballPosition, <span class="token-num">30</span>, MAROON);
+        <span class="token-fn">DrawText</span>(<span class="token-str">"Move the ball with arrow keys"</span>, <span class="token-num">10</span>, <span class="token-num">10</span>, <span class="token-num">20</span>, DARKGRAY);
+        <span class="token-fn">EndDrawing</span>();
+    }
+
+    <span class="token-fn">CloseWindow</span>();
+    <span class="token-kw">return</span> <span class="token-num">0</span>;
+}</code></pre>
+      <p><strong>Linker Flags:</strong> <code>-lraylib</code></p>
+      <a href="../?example=02_raylib_interactive" class="btn-run-ide">Load Raylib Demo in IDE ↗</a>
+
+      <h2>Official Upstream Documentation</h2>
+      <p>Because the Raylib API is identical to native Raylib, consult the comprehensive official reference:</p>
+      <ul>
+        <li><a href="https://www.raylib.com/cheatsheet/cheatsheet.html" target="_blank" rel="noopener noreferrer">Official Raylib Cheatsheet ↗</a></li>
+        <li><a href="https://www.raylib.com/examples.html" target="_blank" rel="noopener noreferrer">Official Raylib Examples ↗</a></li>
+      </ul>
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <p>wasm-c-ide &bull; Zero-Dependency Pure WebAssembly C/C++ Teaching Environment</p>
+  </footer>
+</body>
+</html>

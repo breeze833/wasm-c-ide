@@ -18,6 +18,7 @@ import 'canvas-wasi/style.css';
 
 import { SettingsModal, DEFAULT_RUN_COMMAND } from './components/settings.js';
 import { runMake } from './toolchain/make.js';
+import { ReferenceDrawer, getDocsUrl } from './components/reference.js';
 
 export function checkIsolation() {
   const isIsolated = window.crossOriginIsolated === true;
@@ -65,6 +66,7 @@ export class App {
     this.shellWorker = null;
     this.toolchain = null;
     this.settingsModal = null;
+    this.referenceDrawer = null;
     this.mode = 'c'; // 'c' or 'cpp'
     this.buildSystem = 'sh'; // 'sh' or 'make'
     const savedRunCmd = typeof localStorage !== 'undefined' ? localStorage.getItem('wasm_c_ide_run_command') : null;
@@ -216,6 +218,9 @@ export class App {
 
     // Collapsible & Resizable Workspace Sidebar
     this.setupSidebar();
+
+    // Slide-Out Right Reference Drawer
+    this.setupReferenceDrawer();
 
     // PWA Install Prompt & Connection Status Listeners
     if (globalDeferredInstallPrompt) {
@@ -636,9 +641,18 @@ export class App {
     const btnRun = document.getElementById('btn-run');
     const btnStop = document.getElementById('btn-stop');
     const btnGraphicsWindow = document.getElementById('btn-graphics-window');
+    const btnReference = document.getElementById('btn-reference');
     const btnSettings = document.getElementById('btn-settings');
     const modeSelect = document.getElementById('mode-select');
     const buildSystemSelect = document.getElementById('build-system-select');
+
+    if (btnReference) {
+      btnReference.addEventListener('click', () => {
+        if (this.referenceDrawer) {
+          this.referenceDrawer.toggle();
+        }
+      });
+    }
 
     if (btnGraphicsWindow) {
       btnGraphicsWindow.addEventListener('click', () => {
@@ -1347,6 +1361,33 @@ export class App {
       if (this.editorManager) this.editorManager.layout();
     });
   }
+
+  setupReferenceDrawer() {
+    const mainLayout = document.querySelector('.main-layout');
+    if (!mainLayout) return;
+
+    this.referenceDrawer = new ReferenceDrawer({
+      container: mainLayout,
+      onOpenExample: (filename, content) => this.loadExample(filename, content),
+      onToggle: () => {
+        if (this.editorManager) this.editorManager.layout();
+        if (this.terminal) this.terminal.fit();
+      }
+    });
+  }
+
+  loadExample(filename, content) {
+    const targetPath = `/workspace/${filename}`;
+    if (!this.vfs.exists(targetPath)) {
+      this.vfs.writeFile(targetPath, content, Date.now(), true);
+      if (this.fileTreeUI) {
+        this.fileTreeUI.render();
+      }
+    }
+    this.editorManager.openFile(targetPath);
+    this.tabsUI.render();
+    showToast(`Loaded example: ${filename}`, 'success', 3000);
+  }
 }
 
 export function initApp() {
@@ -1411,6 +1452,12 @@ export function initApp() {
           </svg>
           <span>Canvas</span>
           <span class="canvas-active-dot" id="canvas-active-dot" title="Graphics frame update in background"></span>
+        </button>
+        <button id="btn-reference" class="btn btn-reference" title="API Reference & Cheatsheets (Ctrl+Shift+H / F1)">
+          <svg class="btn-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M1 2.828c.885-.37 2.154-.769 3.388-.893 1.33-.134 2.458.063 3.112.752v9.746c-.935-.53-2.12-.603-3.213-.493-1.18.12-2.37.461-3.287.811V2.828zm7.5-.141c.654-.689 1.782-.886 3.112-.752 1.234.124 2.503.523 3.388.893v9.923c-.918-.35-2.107-.692-3.287-.81-1.094-.111-2.278-.039-3.213.492V2.687zM8 1.783C7.015.936 5.587.81 4.287.94 2.85 1.084 1.353 1.542.454 1.94A.5.5 0 0 0 0 2.404v10.518a.5.5 0 0 0 .66.473c.961-.36 2.37-.777 3.754-.918 1.13-.115 2.148.04 2.898.489.262.157.625.157.888 0 .75-.449 1.768-.604 2.898-.489 1.384.141 2.793.558 3.754.918a.5.5 0 0 0 .66-.473V2.404a.5.5 0 0 0-.454-.464c-.899-.398-2.396-.856-3.833-.999-1.3-.13-2.728-.004-3.713.842z"/>
+          </svg>
+          <span>Docs</span>
         </button>
         <button id="btn-settings" class="btn" title="Project Settings">
           <svg class="btn-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">

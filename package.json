@@ -1,19 +1,20 @@
 {
   "name": "wasm-c-ide",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "private": true,
   "type": "module",
   "scripts": {
     "download:sysroot": "node scripts/download-sysroot.js",
+    "docs:build": "node scripts/build-docs.js",
     "postinstall": "node scripts/download-sysroot.js",
-    "predev": "node scripts/download-sysroot.js",
-    "prebuild": "node scripts/download-sysroot.js",
+    "predev": "node scripts/download-sysroot.js && node scripts/build-docs.js",
+    "prebuild": "node scripts/download-sysroot.js && node scripts/build-docs.js",
     "pretest": "node scripts/download-sysroot.js",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "pack": "vite build && (cd dist && zip -r ../wasm-c-ide.zip .)",
-    "test": "node test/vfs.test.js && node test/shell.test.js && node test/toolchain.test.js && node test/ar.test.js && node test/runtime.test.js && node test/line-editor.test.js && node test/make.test.js && node test/sw.test.js && node test/zoom.test.js && node test/pipeline.test.js && node test/raylib.test.js && node test/graphics.test.js && node test/so.test.js && node test/turtle.test.js && node test/fileio.test.js && node test/detached-terminal.test.js && node test/sidebar.test.js && node test/sqlite.test.js && node test/settings-upgrade.test.js && node test/startup.test.js && node test/compiler-worker.test.js"
+    "test": "node test/vfs.test.js && node test/shell.test.js && node test/toolchain.test.js && node test/ar.test.js && node test/runtime.test.js && node test/line-editor.test.js && node test/make.test.js && node test/sw.test.js && node test/zoom.test.js && node test/pipeline.test.js && node test/raylib.test.js && node test/graphics.test.js && node test/so.test.js && node test/turtle.test.js && node test/fileio.test.js && node test/detached-terminal.test.js && node test/sidebar.test.js && node test/sqlite.test.js && node test/settings-upgrade.test.js && node test/startup.test.js && node test/compiler-worker.test.js && node test/reference-drawer.test.js"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

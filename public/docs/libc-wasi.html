@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>General C Libc &amp; WASI Restrictions - wasm-c-ide</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="highlighter.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a href="index.html" class="brand">
+      <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M1 2.828c.885-.37 2.154-.769 3.388-.893 1.33-.134 2.458.063 3.112.752v9.746c-.935-.53-2.12-.603-3.213-.493-1.18.12-2.37.461-3.287.811V2.828zm7.5-.141c.654-.689 1.782-.886 3.112-.752 1.234.124 2.503.523 3.388.893v9.923c-.918-.35-2.107-.692-3.287-.81-1.094-.111-2.278-.039-3.213.492V2.687zM8 1.783C7.015.936 5.587.81 4.287.94 2.85 1.084 1.353 1.542.454 1.94A.5.5 0 0 0 0 2.404v10.518a.5.5 0 0 0 .66.473c.961-.36 2.37-.777 3.754-.918 1.13-.115 2.148.04 2.898.489.262.157.625.157.888 0 .75-.449 1.768-.604 2.898-.489 1.384.141 2.793.558 3.754.918a.5.5 0 0 0 .66-.473V2.404a.5.5 0 0 0-.454-.464c-.899-.398-2.396-.856-3.833-.999-1.3-.13-2.728-.004-3.713.842z"/>
+      </svg>
+      <span>wasm-c-ide Docs</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link">Home</a>
+      <a href="libc-wasi.html" class="nav-link active">Libc &amp; WASI</a>
+      <a href="turtle.html" class="nav-link">Turtle</a>
+      <a href="canvas.html" class="nav-link">Canvas 2D</a>
+      <a href="raylib.html" class="nav-link">Raylib</a>
+      <a href="sqlite.html" class="nav-link">SQLite 3</a>
+      <a href="../" class="btn-back-ide">
+        <span>Open IDE</span>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+          <path fill-rule="evenodd" d="M14 2.5a.5.5 0 0 0-.5-.5h-6a.5.5 0 0 0 0 1h4.793L2.146 13.146a.5.5 0 0 0 .708.708L13 3.707V8.5a.5.5 0 0 0 1 0v-6z"/>
+        </svg>
+      </a>
+    </div>
+  </header>
+
+  <div class="layout-container">
+    <aside class="sidebar">
+      <div>
+        <div class="sidebar-group-title">Documentation</div>
+        <ul class="sidebar-menu">
+          <li><a href="index.html" class="sidebar-link">Overview</a></li>
+          <li><a href="libc-wasi.html" class="sidebar-link active">General C Libc &amp; WASI</a></li>
+        </ul>
+      </div>
+      <div>
+        <div class="sidebar-group-title">Libraries &amp; APIs</div>
+        <ul class="sidebar-menu">
+          <li><a href="turtle.html" class="sidebar-link">Turtle Graphics (&lt;turtle.h&gt;)</a></li>
+          <li><a href="canvas.html" class="sidebar-link">Canvas 2D &amp; Framebuffer</a></li>
+          <li><a href="raylib.html" class="sidebar-link">Raylib 5.5 WASI</a></li>
+          <li><a href="sqlite.html" class="sidebar-link">SQLite 3 WASI</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <h1>General C Libc &amp; WASI Snapshot Preview 1</h1>
+      <p class="subtitle">Architectural boundaries, supported C/C++ POSIX APIs, and runtime constraints inside the browser WebAssembly container.</p>
+
+      <div class="callout callout-warning">
+        <div class="callout-title">The WASI Preview 1 Model</div>
+        <p>In standard native operating systems (Linux, macOS, Windows), processes have direct access to kernel services via interrupt syscalls. Under WebAssembly Snapshot Preview 1 (<code>wasm32-wasip1</code>), the execution model is capability-based, strictly sandboxed, and executed by a single Web Worker thread.</p>
+      </div>
+
+      <h2>1. Process Control (fork / exec / waitpid)</h2>
+      <p>WebAssembly modules are isolated linear memory containers. There is no host operating system kernel to fork address spaces or spawn detached processes from within user C code.</p>
+      <table>
+        <thead>
+          <tr><th>System Call / API</th><th>Status</th><th>Explanation &amp; Idiomatic Alternative</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>fork()</code>, <code>vfork()</code></td>
+            <td><span class="badge badge-amber">Unsupported</span></td>
+            <td>Linear memory cannot be duplicated asynchronously in standard WebAssembly.</td>
+          </tr>
+          <tr>
+            <td><code>execve()</code>, <code>execl()</code></td>
+            <td><span class="badge badge-amber">Unsupported</span></td>
+            <td>Replacing process image in-place is not permitted by WASI Preview 1.</td>
+          </tr>
+          <tr>
+            <td><code>system()</code>, <code>popen()</code></td>
+            <td><span class="badge badge-amber">Unsupported</span></td>
+            <td>Cannot spawn external subshells from inside user code.</td>
+          </tr>
+          <tr>
+            <td><strong>POSIX Shell Chaining</strong></td>
+            <td><span class="badge badge-emerald">Supported</span></td>
+            <td>Use shell operators (<code>make &amp;&amp; ./a.out</code>, <code>./a.out | grep result</code>) in the terminal (<code>busybox.wasm</code>).</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>2. Signals &amp; Asynchronous Interrupts</h2>
+      <p>Asynchronous POSIX signals (like <code>SIGALRM</code>, <code>SIGKILL</code>, <code>SIGTERM</code>) depend on preemptive OS kernel interrupts, which do not exist in single-threaded WebAssembly runtimes.</p>
+      <ul>
+        <li><code>signal()</code> and <code>sigaction()</code>: No-ops or dummy returns.</li>
+        <li><strong>Interactive Cancellation:</strong> Pressing <kbd>Ctrl+C</kbd> in the xterm terminal terminates the active Web Worker instance immediately, resetting the execution state cleanly.</li>
+      </ul>
+
+      <h2>3. Network &amp; BSD Sockets</h2>
+      <p>Pure WASI Preview 1 does not expose network socket creation:</p>
+      <ul>
+        <li>Headers like <code>&lt;sys/socket.h&gt;</code> and <code>&lt;netdb.h&gt;</code> are not available for direct socket communication.</li>
+        <li>All data sharing should use file storage under <code>/workspace</code> or dedicated host import bridges.</li>
+      </ul>
+
+      <h2>4. Multi-Threading &amp; Pthreads</h2>
+      <p>The toolchain compiles with <code>-DLLVM_ENABLE_THREADS=OFF</code> targeting pure standard WASI Preview 1:</p>
+      <ul>
+        <li>POSIX Threads (<code>&lt;pthread.h&gt;</code>, <code>pthread_create()</code>) are not available.</li>
+        <li>Single-threaded dormant mutexes are implemented in <code>wasi-sdk &gt;= 26</code> libc++, so standard C++ libraries (<code>&lt;vector&gt;</code>, <code>&lt;string&gt;</code>, <code>&lt;map&gt;</code>, <code>&lt;iostream&gt;</code>) compile without error.</li>
+      </ul>
+
+      <h2>5. File I/O &amp; In-Memory VFS</h2>
+      <p>Full standard POSIX file input/output is implemented through <code>WasiHost</code> and backed directly by browser memory:</p>
+      <pre><code><span class="token-prep">#include</span> <span class="token-str">&lt;stdio.h&gt;</span>
+
+<span class="token-kw">int</span> <span class="token-fn">main</span>(<span class="token-kw">void</span>) {
+    <span class="token-type">FILE</span> *f = <span class="token-fn">fopen</span>(<span class="token-str">"data.txt"</span>, <span class="token-str">"w"</span>);
+    <span class="token-kw">if</span> (!f) <span class="token-kw">return</span> <span class="token-num">1</span>;
+    <span class="token-fn">fprintf</span>(f, <span class="token-str">"Testing file I/O in WASI!\n"</span>);
+    <span class="token-fn">fclose</span>(f);
+
+    f = <span class="token-fn">fopen</span>(<span class="token-str">"data.txt"</span>, <span class="token-str">"r"</span>);
+    <span class="token-type">char</span> buf[<span class="token-num">128</span>];
+    <span class="token-kw">if</span> (<span class="token-fn">fgets</span>(buf, <span class="token-kw">sizeof</span>(buf), f)) {
+        <span class="token-fn">printf</span>(<span class="token-str">"Read: %s"</span>, buf);
+    }
+    <span class="token-fn">fclose</span>(f);
+    <span class="token-kw">return</span> <span class="token-num">0</span>;
+}</code></pre>
+      <div class="callout callout-success">
+        <div class="callout-title">Real-Time UI Synchronization</div>
+        <p>When a C program creates or updates files under <code>/workspace</code>, <code>wasm-c-ide</code> immediately synchronizes the in-memory VFS with Monaco editor tabs and the workspace file tree.</p>
+      </div>
+
+      <h2>6. Synchronous Timers &amp; Sleep</h2>
+      <p>Standard sleep functions are supported via WASI <code>poll_oneoff</code> clock event subscriptions, synchronized using <code>Atomics.wait()</code> on <code>SharedArrayBuffer</code>:</p>
+      <ul>
+        <li><code>sleep(unsigned int seconds)</code></li>
+        <li><code>usleep(useconds_t usec)</code></li>
+        <li><code>nanosleep(const struct timespec *req, struct timespec *rem)</code></li>
+      </ul>
+      <p>These functions pause execution accurately without consuming 100% CPU on the worker thread.</p>
+
+      <a href="../?example=01_stdio" class="btn-run-ide">Load Stdio Example in IDE ↗</a>
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <p>wasm-c-ide &bull; Zero-Dependency Pure WebAssembly C/C++ Teaching Environment</p>
+  </footer>
+</body>
+</html>
