@@ -105,6 +105,7 @@ export async function executeGccCommand({
   cmd,
   args,
   cwd = '/workspace',
+  environ = {},
   vfs,
   toolchain,
   mode,
@@ -138,7 +139,7 @@ export async function executeGccCommand({
     // official toolchain (e.g. gcc --help, gcc -v, gcc --version, clang --help)
     if (sources.length === 0 && objects.length === 0) {
       if (toolchain && typeof toolchain.runClang === 'function') {
-        return await toolchain.runClang(cmd, args, { cwd });
+        return await toolchain.runClang(cmd, args, { cwd, environ });
       }
       write(`${cmd || 'gcc'}: fatal error: no input files\r\n`);
       return 1;
@@ -192,7 +193,7 @@ export async function executeGccCommand({
             outResolved,
             effectiveMode,
             compilerFlags,
-            { stage: 'preprocess' }
+            { stage: 'preprocess', cwd, environ }
           );
           if (exitCode !== 0) {
             return exitCode;
@@ -203,7 +204,7 @@ export async function executeGccCommand({
             '-',
             effectiveMode,
             compilerFlags,
-            { stage: 'preprocess' }
+            { stage: 'preprocess', cwd, environ }
           );
           if (exitCode !== 0) {
             return exitCode;
@@ -228,7 +229,7 @@ export async function executeGccCommand({
             '-',
             effectiveMode,
             compilerFlags,
-            { stage: 'assembly' }
+            { stage: 'assembly', cwd, environ }
           );
           if (exitCode !== 0) {
             return exitCode;
@@ -243,7 +244,7 @@ export async function executeGccCommand({
             outResolved,
             effectiveMode,
             compilerFlags,
-            { stage: 'assembly' }
+            { stage: 'assembly', cwd, environ }
           );
           if (exitCode !== 0) {
             return exitCode;
@@ -273,7 +274,7 @@ export async function executeGccCommand({
           objResolved,
           effectiveMode,
           compilerFlags,
-          { stage: 'compile' }
+          { stage: 'compile', cwd, environ }
         );
 
         if (exitCode !== 0) {
@@ -304,7 +305,7 @@ export async function executeGccCommand({
         objResolved,
         effectiveMode,
         compilerFlags,
-        { stage: 'compile' }
+        { stage: 'compile', cwd, environ }
       );
 
       if (exitCode !== 0) {
@@ -574,6 +575,7 @@ export async function executeToolCommand({
   cmd,
   args = [],
   cwd = '/workspace',
+  environ = {},
   vfs,
   toolchain,
   write,
@@ -587,7 +589,7 @@ export async function executeToolCommand({
   }
   try {
     if (toolchain && typeof toolchain.runTool === 'function') {
-      return await toolchain.runTool(cmd, args, { cwd });
+      return await toolchain.runTool(cmd, args, { cwd, environ });
     }
     return 0;
   } finally {
@@ -601,6 +603,7 @@ export async function executeLdCommand({
   cmd = 'wasm-ld',
   args = [],
   cwd = '/workspace',
+  environ = {},
   vfs,
   toolchain,
   write,
@@ -614,7 +617,7 @@ export async function executeLdCommand({
   }
   try {
     if (toolchain && typeof toolchain.runLld === 'function') {
-      return await toolchain.runLld(cmd, args, { cwd });
+      return await toolchain.runLld(cmd, args, { cwd, environ });
     }
     return 0;
   } finally {

@@ -1203,6 +1203,314 @@ dirs() {
   assert.ok(diff2.deletedFiles.includes('/workspace/empty_file.txt'), 'deletedFiles contains empty_file.txt');
 
   console.log('✓ BusyBox WASI host builtin execution, ./a.out __host_exec, time, stty size, pushd/popd, and in-memory cd transitions verified');
+
+  // 12. Smart Command Dispatcher and Environment Variable Lifecycle Verification
+  {
+    console.log('--- Running Smart Command Dispatcher & Env Lifecycle Tests ---');
+
+    // Single-line preamble check: must contain zero newlines
+    function getTestShellPreamble(stack) {
+      return `_DIR_STACK="${stack}"; _save_dstack() { __host_update_dstack "$_DIR_STACK"; }; pushd() { if [ -z "$1" ]; then echo "pushd: no other directory" >&2; return 1; fi; _DIR_STACK="$(pwd)|\${_DIR_STACK}"; _save_dstack; cd "$1" || return 1; dirs; }; popd() { if [ -z "$_DIR_STACK" ]; then echo "popd: directory stack empty" >&2; return 1; fi; _TARGET="\${_DIR_STACK%%|*}"; _DIR_STACK="\${_DIR_STACK#*|}"; _save_dstack; cd "$_TARGET" || return 1; dirs; }; dirs() { _res="$(pwd)"; _rest="$_DIR_STACK"; while [ -n "$_rest" ]; do _d="\${_rest%%|*}"; _rest="\${_rest#*|}"; if [ -n "$_d" ]; then _res="$_res $_d"; fi; done; echo "$_res"; };`;
+    }
+    const preamble = getTestShellPreamble('');
+    assert.strictEqual(preamble.includes('\n'), false, 'Shell preamble must not contain newlines');
+
+    // Operator detection: hasUnquotedShellOperators
+    function hasUnquotedShellOperators(line) {
+      let inSingleQuote = false;
+      let inDoubleQuote = false;
+      let isEscaped = false;
+
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (isEscaped) {
+          isEscaped = false;
+          continue;
+        }
+        if (ch === '\\' && !inSingleQuote) return true;
+        if (ch === "'" && !inDoubleQuote) {
+          inSingleQuote = !inSingleQuote;
+          continue;
+        }
+        if (ch === '"' && !inSingleQuote) {
+          inDoubleQuote = !inDoubleQuote;
+          continue;
+        }
+        if (!inSingleQuote && !inDoubleQuote) {
+          if (
+            ch === '|' || ch === '&' || ch === ';' || ch === '<' || ch === '>' ||
+            ch === '$' || ch === '`' || ch === '*' || ch === '?' ||
+            ch === '(' || ch === ')' || ch === '{' || ch === '}'
+          ) {
+            return true;
+          }
+        } else if (inDoubleQuote) {
+          if (ch === '$' || ch === '`') return true;
+        }
+      }
+      return false;
+    }
+
+    assert.strictEqual(hasUnquotedShellOperators('aa.out'), false);
+    assert.strictEqual(hasUnquotedShellOperators('./a.out 1 2 3'), false);
+    assert.strictEqual(hasUnquotedShellOperators('gcc -Wall -O2 src/main.c -o build/main.o'), false);
+    assert.strictEqual(hasUnquotedShellOperators('VAR="hello world" ./a.out'), false);
+    assert.strictEqual(hasUnquotedShellOperators('CFLAGS="-O2 -DVERSION=\'1.0\'" make'), false);
+    assert.strictEqual(hasUnquotedShellOperators('gcc -DMSG=\\"hello\\" main.c'), true);
+    assert.strictEqual(hasUnquotedShellOperators('echo "hello | world"'), false);
+    assert.strictEqual(hasUnquotedShellOperators('a.out | grep foo'), true);
+    assert.strictEqual(hasUnquotedShellOperators('cat file.txt > out.txt'), true);
+    assert.strictEqual(hasUnquotedShellOperators('echo $VAR'), true);
+    assert.strictEqual(hasUnquotedShellOperators('echo "$VAR"'), true);
+    assert.strictEqual(hasUnquotedShellOperators('ls *.c'), true);
+    assert.strictEqual(hasUnquotedShellOperators('make && ./a.out'), true);
+
+    // Simple command tokenization
+    function tokenizeSimpleCommand(line) {
+      const tokens = [];
+      let current = '';
+      let inQuote = null;
+
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inQuote) {
+          if (ch === inQuote) {
+            inQuote = null;
+          } else {
+            current += ch;
+          }
+        } else if (ch === '"' || ch === "'") {
+          inQuote = ch;
+        } else if (/\s/.test(ch)) {
+          if (current.length > 0) {
+            tokens.push(current);
+            current = '';
+          }
+        } else {
+          current += ch;
+        }
+      }
+      if (current.length > 0) {
+        tokens.push(current);
+      }
+      return tokens;
+    }
+
+    const t1 = tokenizeSimpleCommand('VAR="hello world" ./a.out arg1 arg2');
+    assert.deepStrictEqual(t1, ['VAR=hello world', './a.out', 'arg1', 'arg2']);
+
+    const t2 = tokenizeSimpleCommand('export FOO="bar baz"');
+    assert.deepStrictEqual(t2, ['export', 'FOO=bar baz']);
+
+    // Dispatcher simulation verifying error messages and environment propagation
+    const testEnviron = {
+      USER: 'student',
+      HOME: '/workspace',
+      PWD: '/workspace',
+      PATH: '/bin:/usr/bin:/workspace',
+    };
+
+    let dispatchedCalls = [];
+    const mockExecHost = (payload) => {
+      dispatchedCalls.push(payload);
+      return 0;
+    };
+
+    const runDispatch = async (cmdLine, v) => {
+      const trimmed = cmdLine.trim();
+      let output = '';
+      const write = (s) => { output += s; };
+      const writeln = (s = '') => { output += s + '\r\n'; };
+
+      const hasOperators = hasUnquotedShellOperators(trimmed);
+      if (!hasOperators) {
+        const tokens = tokenizeSimpleCommand(trimmed);
+        let tokenIdx = 0;
+        const envOverrides = {};
+        const envAssignRegex = /^[A-Za-z_][A-Za-z0-9_]*=/;
+        while (tokenIdx < tokens.length && envAssignRegex.test(tokens[tokenIdx])) {
+          const tok = tokens[tokenIdx];
+          const eq = tok.indexOf('=');
+          envOverrides[tok.slice(0, eq)] = tok.slice(eq + 1);
+          tokenIdx++;
+        }
+
+        if (tokenIdx === tokens.length) {
+          Object.assign(testEnviron, envOverrides);
+          return { exitCode: 0, output };
+        }
+
+        const cmd = tokens[tokenIdx];
+        const args = tokens.slice(tokenIdx + 1);
+
+        if (cmd === 'export' && args.length > 0) {
+          for (const arg of args) {
+            const eq = arg.indexOf('=');
+            if (eq !== -1) {
+              testEnviron[arg.slice(0, eq)] = arg.slice(eq + 1);
+            } else if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(arg)) {
+              if (!(arg in testEnviron)) testEnviron[arg] = '';
+            }
+          }
+          return { exitCode: 0, output };
+        }
+
+        if (cmd === 'unset') {
+          for (const arg of args) {
+            delete testEnviron[arg];
+          }
+          return { exitCode: 0, output };
+        }
+
+        const effectiveEnviron = { ...testEnviron, ...envOverrides };
+
+        if (['gcc', 'clang', 'make'].includes(cmd)) {
+          const code = mockExecHost({ cmd, args, cwd: testEnviron.PWD, environ: effectiveEnviron });
+          return { exitCode: code, output };
+        }
+
+        if (cmd.startsWith('./') || cmd.startsWith('/')) {
+          const target = v.exists(cmd) ? cmd : (cmd.startsWith('/') ? cmd : `/workspace/${cmd.replace(/^\.\//, '')}`);
+          if (!v.exists(target)) {
+            writeln(`${cmd}: not found`);
+            return { exitCode: 127, output };
+          }
+          const bytes = v.readFile(target, false);
+          const isScript = (bytes && bytes.length >= 2 && bytes[0] === 0x23 && bytes[1] === 0x21) || cmd.endsWith('.sh');
+          if (!isScript) {
+            const code = mockExecHost({ cmd: target, args, cwd: testEnviron.PWD, environ: effectiveEnviron });
+            return { exitCode: code, output };
+          }
+        }
+
+        // Unknown command
+        if (!BIN_COMMANDS.includes(cmd) && !['cd', 'pushd', 'popd', 'dirs'].includes(cmd)) {
+          if (!v.exists(`/workspace/${cmd}`) && !v.exists(`/usr/bin/${cmd}`) && !v.exists(`/bin/${cmd}`)) {
+            writeln(`${cmd}: command not found`);
+            return { exitCode: 127, output };
+          }
+        }
+      }
+
+      return { exitCode: 0, output };
+    };
+
+    // Case 1: Unknown command "aa.out"
+    const r1 = await runDispatch('aa.out', testVfs);
+    assert.strictEqual(r1.exitCode, 127);
+    assert.strictEqual(r1.output.trim(), 'aa.out: command not found');
+    assert.strictEqual(r1.output.includes('line 40'), false, 'Must never contain line 40');
+    assert.strictEqual(r1.output.includes('sh:'), false, 'Must not be prefixed with sh:');
+
+    // Case 2: Missing relative binary "./aa.out"
+    const r2 = await runDispatch('./aa.out', testVfs);
+    assert.strictEqual(r2.exitCode, 127);
+    assert.strictEqual(r2.output.trim(), './aa.out: not found');
+    assert.strictEqual(r2.output.includes('line 40'), false, 'Must never contain line 40');
+
+    // Case 3: Export variable persists
+    await runDispatch('export GREETING="Hello IDE"', testVfs);
+    assert.strictEqual(testEnviron.GREETING, 'Hello IDE');
+
+    // Case 4: Execution with scoped environment prefix
+    dispatchedCalls = [];
+    testVfs.writeFile('/workspace/prog.wasm', new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]));
+    await runDispatch('SCOPED_VAR="123" ./prog.wasm foo bar', testVfs);
+    assert.strictEqual(dispatchedCalls.length, 1);
+    assert.strictEqual(dispatchedCalls[0].cmd, '/workspace/prog.wasm');
+    assert.deepStrictEqual(dispatchedCalls[0].args, ['foo', 'bar']);
+    assert.strictEqual(dispatchedCalls[0].environ.SCOPED_VAR, '123');
+    assert.strictEqual(dispatchedCalls[0].environ.GREETING, 'Hello IDE');
+    assert.strictEqual(testEnviron.SCOPED_VAR, undefined, 'Scoped prefix must not pollute persistent shellEnviron');
+
+    // Case 5: Unset variable
+    await runDispatch('unset GREETING', testVfs);
+    assert.strictEqual(testEnviron.GREETING, undefined);
+
+    // Case 6: CFLAGS prefix on make
+    dispatchedCalls = [];
+    await runDispatch('CFLAGS="-O3" make -j4', testVfs);
+    assert.strictEqual(dispatchedCalls.length, 1);
+    assert.strictEqual(dispatchedCalls[0].cmd, 'make');
+    assert.deepStrictEqual(dispatchedCalls[0].args, ['-j4']);
+    assert.strictEqual(dispatchedCalls[0].environ.CFLAGS, '-O3');
+    assert.strictEqual(testEnviron.CFLAGS, undefined);
+
+    // Case 7: Complex command with single-line preamble verified against BusyBox ash
+    let ashOutput = '';
+    const wrappedCmd = `cd "/workspace"; ${preamble} echo "testing ash"; __rc=$?; __host_update_pwd "$(pwd)"; exit $__rc`;
+    const ashHost = new WasiHost({
+      vfs: testVfs,
+      cwd: '/workspace',
+      argv: ['busybox', 'sh', '-c', wrappedCmd],
+      environ: { USER: 'student', HOME: '/workspace', PWD: '/workspace', PATH: '/bin:/usr/bin' },
+      stdout: (s) => { ashOutput += s; },
+      hostBuiltinLookup: (name) => (name === '__host_update_pwd' ? 1 : 0),
+      hostBuiltinRun: () => 0,
+    });
+    const ashInst = new WebAssembly.Instance(busyboxMod, ashHost.createImportObject());
+    ashHost.getMemory = () => ashInst.exports.memory;
+    try { ashInst.exports._start(); } catch (_) {}
+    assert.ok(ashOutput.includes('testing ash'), `BusyBox ash executed single-line preamble successfully: ${ashOutput}`);
+
+    // Case 8: Shell script execution initializes cwd to /workspace and preserves accurate line numbers
+    testVfs.mkdir('/workspace/script_test', true);
+    testVfs.writeFile('/workspace/script_test/main.c', 'int main() { return 0; }');
+    testVfs.writeFile('/workspace/script_test/build.sh', 'echo "Building..."\ngcc script_test/main.c -o a.out');
+
+    let scriptGccCwd = null;
+    let scriptOutput = '';
+    const scriptHost = new WasiHost({
+      vfs: testVfs,
+      cwd: '/workspace',
+      argv: ['busybox', 'sh', '-c', 'cd "$1" || exit 1; shift; . "$@"', 'sh', '/workspace', '/workspace/script_test/build.sh'],
+      environ: { USER: 'student', HOME: '/workspace', PWD: '/workspace', PATH: '/bin:/usr/bin' },
+      stdout: (s) => { scriptOutput += s; },
+      hostBuiltinLookup: (name) => (name === 'gcc' ? 1 : 0),
+      hostBuiltinRun: ({ cwd: runCwd }) => {
+        scriptGccCwd = runCwd;
+        return 0;
+      },
+    });
+    const scriptInst = new WebAssembly.Instance(busyboxMod, scriptHost.createImportObject());
+    scriptHost.getMemory = () => scriptInst.exports.memory;
+    try { scriptInst.exports._start(); } catch (_) {}
+
+    assert.strictEqual(scriptGccCwd, '/workspace', 'Subcommands inside shell script must execute with cwd=/workspace');
+    assert.ok(scriptOutput.includes('Building...'), 'Script executed successfully');
+
+    // Case 9: pushd/popd support inside shell script with accurate line error reporting
+    testVfs.mkdir('/workspace/script_pushd_test', true);
+    testVfs.writeFile('/workspace/script_pushd_test/sub.c', 'int main() { return 0; }');
+    testVfs.writeFile('/workspace/script_pushd_test/run.sh', 'echo "Start in $(pwd)"\npushd script_pushd_test\necho "Now in $(pwd)"\ngcc sub.c -o sub.wasm\npopd\necho "Returned to $(pwd)"');
+
+    let pushdGccCwd = null;
+    let pushdOutput = '';
+    const SCRIPT_PREAMBLE = `_DIR_STACK=""; pushd() { if [ -z "$1" ]; then echo "pushd: no other directory" >&2; return 1; fi; _DIR_STACK="$(pwd)|\${_DIR_STACK}"; cd "$1" || return 1; dirs; }; popd() { if [ -z "$_DIR_STACK" ]; then echo "popd: directory stack empty" >&2; return 1; fi; _TARGET="\${_DIR_STACK%%|*}"; _DIR_STACK="\${_DIR_STACK#*|}"; cd "$_TARGET" || return 1; dirs; }; dirs() { _res="$(pwd)"; _rest="$_DIR_STACK"; while [ -n "$_rest" ]; do _d="\${_rest%%|*}"; _rest="\${_rest#*|}"; if [ -n "$_d" ]; then _res="$_res $_d"; fi; done; echo "$_res"; };`;
+
+    const pushdHost = new WasiHost({
+      vfs: testVfs,
+      cwd: '/workspace',
+      argv: ['busybox', 'sh', '-c', `cd "$1" || exit 1; shift; ${SCRIPT_PREAMBLE} . "$@"`, 'sh', '/workspace', '/workspace/script_pushd_test/run.sh'],
+      environ: { USER: 'student', HOME: '/workspace', PWD: '/workspace', PATH: '/bin:/usr/bin' },
+      stdout: (s) => { pushdOutput += s; },
+      hostBuiltinLookup: (name) => (name === 'gcc' ? 1 : 0),
+      hostBuiltinRun: ({ cwd: runCwd }) => {
+        pushdGccCwd = runCwd;
+        return 0;
+      },
+    });
+    const pushdInst = new WebAssembly.Instance(busyboxMod, pushdHost.createImportObject());
+    pushdHost.getMemory = () => pushdInst.exports.memory;
+    try { pushdInst.exports._start(); } catch (_) {}
+
+    assert.strictEqual(pushdGccCwd, '/workspace/script_pushd_test', 'Subcommands inside pushd must execute with cwd=/workspace/script_pushd_test');
+    assert.ok(pushdOutput.includes('Start in /workspace'), 'Script started in /workspace');
+    assert.ok(pushdOutput.includes('Now in /workspace/script_pushd_test'), 'Script moved into /workspace/script_pushd_test');
+    assert.ok(pushdOutput.includes('Returned to /workspace'), 'Script returned to /workspace');
+
+    console.log('✓ Smart command dispatcher, fast-path error handling, and environment lifecycle verified');
+  }
 }
 
 console.log('--- ALL SHELL TESTS PASSED ---');

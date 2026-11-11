@@ -13,7 +13,7 @@ export { ProcExit };
 export class AppInstance {
   constructor(wasiHost, name, ...args) {
     this.argv = [name, ...args];
-    this.environ = { USER: 'student', HOME: '/workspace', PWD: '/workspace' };
+    this.environ = wasiHost.environ || { USER: 'student', HOME: '/workspace', PWD: '/workspace' };
     this.wasiHost = wasiHost;
     this.wasiHost.argv = this.argv;
     this.wasiHost.environ = this.environ;
@@ -272,11 +272,13 @@ export class WasmToolchain {
     await this.init();
     const llvmBox = await this._getLlvmBox();
     const cwd = options.cwd || '/workspace';
+    const environ = { USER: 'student', HOME: '/workspace', PWD: cwd, ...(options.environ || {}) };
 
     const wasiHost = new WasiHost({
       vfs: this.vfs,
       cwd,
       argv: [toolName, ...toolArgs],
+      environ,
       stdout: (str) => {
         if (typeof this.hostWrite === 'function') this.hostWrite(str);
       },
@@ -299,11 +301,13 @@ export class WasmToolchain {
       throw new Error('llvmBox module not initialized');
     }
     const cwd = options.cwd || '/workspace';
+    const environ = { USER: 'student', HOME: '/workspace', PWD: cwd, ...(options.environ || {}) };
 
     const wasiHost = new WasiHost({
       vfs: this.vfs,
       cwd,
       argv: [toolName, ...toolArgs],
+      environ,
       stdout: (str) => {
         if (typeof this.hostWrite === 'function') this.hostWrite(str);
       },
@@ -520,10 +524,13 @@ export class WasmToolchain {
     await this.init();
     const clang = await this._getClang();
     const args = this._buildCompileArgs(sourcePath, objPath, mode, customFlags, options);
+    const cwd = options.cwd || '/workspace';
+    const environ = { USER: 'student', HOME: '/workspace', PWD: cwd, ...(options.environ || {}) };
 
     const wasiHost = new WasiHost({
       vfs: this.vfs,
-      cwd: '/workspace',
+      cwd,
+      environ,
       stdout: (str) => {
         if (typeof this.hostWrite === 'function') this.hostWrite(str);
       },
@@ -547,10 +554,13 @@ export class WasmToolchain {
       throw new Error('llvmBox module not initialized');
     }
     const args = this._buildCompileArgs(sourcePath, objPath, mode, customFlags, options);
+    const cwd = options.cwd || '/workspace';
+    const environ = { USER: 'student', HOME: '/workspace', PWD: cwd, ...(options.environ || {}) };
 
     const wasiHost = new WasiHost({
       vfs: this.vfs,
-      cwd: '/workspace',
+      cwd,
+      environ,
       stdout: (str) => {
         if (typeof this.hostWrite === 'function') this.hostWrite(str);
       },

@@ -80,9 +80,29 @@ export class CompilerClient {
             }
           }
 
+          // Commit created directories back to master VFS
+          if (this.vfs && Array.isArray(msg.createdDirs)) {
+            for (const p of msg.createdDirs) {
+              try {
+                this.vfs.mkdir(p, true, true);
+              } catch (_) {}
+            }
+          }
+
           // Commit deleted files back to master VFS
           if (this.vfs && Array.isArray(msg.deletedFiles)) {
             for (const p of msg.deletedFiles) {
+              try {
+                if (this.vfs.exists(p)) {
+                  this.vfs.remove(p, true, true);
+                }
+              } catch (_) {}
+            }
+          }
+
+          // Commit deleted directories back to master VFS
+          if (this.vfs && Array.isArray(msg.deletedDirs)) {
+            for (const p of msg.deletedDirs) {
               try {
                 if (this.vfs.exists(p)) {
                   this.vfs.remove(p, true, true);
@@ -166,7 +186,7 @@ export class CompilerClient {
   }
 
   async executeCommand(payload) {
-    const { cmd, args = [], cwd = '/workspace', mode = 'c', write, captureStdout } = payload;
+    const { cmd, args = [], cwd = '/workspace', mode = 'c', write, captureStdout, environ = {} } = payload;
 
     if (!this.useWorker) {
       // Fallback for Node.js unit tests
@@ -179,6 +199,7 @@ export class CompilerClient {
           cmd,
           args,
           cwd,
+          environ,
           vfs: this.vfs,
           toolchain: this.inProcessToolchain,
           mode: effectiveMode,
@@ -190,6 +211,7 @@ export class CompilerClient {
           cmd,
           args,
           cwd,
+          environ,
           vfs: this.vfs,
           toolchain: this.inProcessToolchain,
           write: write || this.hostWrite,
@@ -211,6 +233,7 @@ export class CompilerClient {
           cmd: activeTool,
           args,
           cwd,
+          environ,
           vfs: this.vfs,
           toolchain: this.inProcessToolchain,
           write: write || this.hostWrite,
@@ -220,6 +243,7 @@ export class CompilerClient {
         return await runMake({
           args,
           cwd,
+          environ,
           vfs: this.vfs,
           toolchain: this.inProcessToolchain,
           basePath: this.basePath,
@@ -249,6 +273,7 @@ export class CompilerClient {
         cwd,
         mode,
         files,
+        environ,
         basePath: this.basePath,
       });
     });

@@ -152,6 +152,7 @@ export async function runMake({
   args = [],
   targetName = null,
   cwd = '/workspace',
+  environ = {},
   vfs,
   toolchain = null,
   basePath = '/sysroot/wasm',
@@ -197,6 +198,7 @@ export async function runMake({
     vfs,
     cwd: normCwd,
     argv: makeArgs,
+    environ: { USER: 'student', HOME: '/workspace', PWD: normCwd, ...(environ || {}) },
     stdout: writeFn,
     stderr: writeFn,
   });
@@ -232,9 +234,27 @@ export async function runMake({
       if (trimmed.startsWith('rm ') || trimmed === 'rm') {
         const parts = trimmed.split(/\s+/).slice(1).filter((p) => !p.startsWith('-'));
         for (const t of parts) {
-          const norm = resolvePath(t);
-          if (vfs.exists(norm)) {
-            try { vfs.remove(norm, true, true); } catch {}
+          if (t.includes('*') || t.includes('?')) {
+            const hasSlash = t.includes('/');
+            const dirPart = hasSlash ? t.substring(0, t.lastIndexOf('/')) : '.';
+            const pattern = hasSlash ? t.substring(t.lastIndexOf('/') + 1) : t;
+            const targetDir = resolvePath(dirPart);
+            const regex = new RegExp('^' + pattern.replace(/\./g, '\\.').replace(/\*/g, '.*').replace(/\?/g, '.') + '$');
+            if (vfs.exists(targetDir)) {
+              try {
+                const files = vfs.readDir(targetDir);
+                for (const f of files) {
+                  if (regex.test(f.name)) {
+                    try { vfs.remove(normalizePath(`${targetDir}/${f.name}`), true, true); } catch {}
+                  }
+                }
+              } catch {}
+            }
+          } else {
+            const norm = resolvePath(t);
+            if (vfs.exists(norm)) {
+              try { vfs.remove(norm, true, true); } catch {}
+            }
           }
         }
         return 0;

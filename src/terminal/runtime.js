@@ -272,6 +272,7 @@ export class RuntimeManager {
         raylibSharedBuffer: this.raylibSharedBuffer,
         sharedSysrootBuffer,
         argv,
+        environ: options.environ || {},
         stdinBytes,
         files: filesSnapshot,
       });

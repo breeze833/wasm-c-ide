@@ -505,7 +505,7 @@ export class App {
   }
 
   async executeExternalCommand(payload) {
-    let { cmd, args, cwd, stdinData, captureStdout, stdoutRedirect } = payload;
+    let { cmd, args, cwd, stdinData, captureStdout, stdoutRedirect, environ } = payload;
     if (cmd === '__host_exec' && args && args.length > 0) {
       cmd = args[0];
       args = args.slice(1);
@@ -549,6 +549,7 @@ export class App {
         cwd: cwd || '/workspace',
         mode: effectiveMode,
         write: writeFn,
+        environ,
       });
 
       if (this.fileTreeUI) this.fileTreeUI.render();
@@ -621,6 +622,7 @@ export class App {
         vfs: this.vfs,
         stdinBytes: stdinData,
         captureStdout: shouldCapture,
+        environ,
         onStdout: stdoutRedirect ? ((data) => { capturedStdout += data; }) : null,
       });
 

@@ -487,6 +487,24 @@ clean:
   assert.ok(thirdOutput.includes('math.c'), `make must recompile touched src/math.c: ${thirdOutput}`);
   console.log('✓ Incremental rebuild after touching source file verified');
 
+  // Test 7.1: Verify make clean removes build directory and target
+  console.log('Test 7.1: Verify make clean removes build directory and target...');
+  const cleanMakefile = realMakefile + '\nclean:\n\trm -rf build $(TARGET)\n';
+  makeVfs.writeFile('/workspace/Makefile', cleanMakefile, Date.now());
+  assert.strictEqual(makeVfs.exists('/workspace/build'), true, 'build directory exists before clean');
+  assert.strictEqual(makeVfs.exists('/workspace/math.wasm'), true, 'math.wasm exists before clean');
+
+  const exitCodeClean = await runMake({
+    args: ['clean'],
+    cwd: '/workspace',
+    vfs: makeVfs,
+    toolchain: realTc,
+  });
+  assert.strictEqual(exitCodeClean, 0);
+  assert.strictEqual(makeVfs.exists('/workspace/build'), false, 'build directory must be removed by make clean');
+  assert.strictEqual(makeVfs.exists('/workspace/math.wasm'), false, 'math.wasm target must be removed by make clean');
+  console.log('✓ make clean removes build directory and target verified');
+
   // Test 8: loadMakeBinary cache hit resilience (simulates reload)
   console.log('Test 8: Verify loadMakeBinary caching and reload resilience...');
   const mod1 = await loadMakeBinary('/sysroot/wasm', makeVfs);

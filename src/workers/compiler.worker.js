@@ -21,42 +21,59 @@ let isInitialized = false;
 let workerBasePath = '/sysroot/wasm';
 
 function getWorkspaceSnapshot() {
-  const map = new Map();
+  const fileMap = new Map();
+  const dirSet = new Set();
   const all = vfs.getAllFiles('/workspace');
   for (const f of all) {
     if (!f.isDir) {
-      map.set(f.path, {
+      fileMap.set(f.path, {
         mtime: f.mtime,
         length: f.content ? f.content.length : 0,
       });
+    } else {
+      dirSet.add(f.path);
     }
   }
-  return map;
+  return { fileMap, dirSet };
 }
 
-function getWorkspaceDiff(beforeMap) {
+function getWorkspaceDiff(beforeSnapshot) {
   const changedFiles = {};
   const deletedFiles = [];
+  const createdDirs = [];
+  const deletedDirs = [];
   const currentFiles = new Set();
+  const currentDirs = new Set();
 
   const all = vfs.getAllFiles('/workspace');
   for (const f of all) {
     if (!f.isDir) {
       currentFiles.add(f.path);
-      const before = beforeMap.get(f.path);
+      const before = beforeSnapshot.fileMap.get(f.path);
       if (!before || before.mtime !== f.mtime || before.length !== (f.content ? f.content.length : 0)) {
         changedFiles[f.path] = { content: f.content, mtime: f.mtime };
+      }
+    } else {
+      currentDirs.add(f.path);
+      if (!beforeSnapshot.dirSet.has(f.path)) {
+        createdDirs.push(f.path);
       }
     }
   }
 
-  for (const path of beforeMap.keys()) {
+  for (const path of beforeSnapshot.fileMap.keys()) {
     if (!currentFiles.has(path)) {
       deletedFiles.push(path);
     }
   }
 
-  return { changedFiles, deletedFiles };
+  for (const path of beforeSnapshot.dirSet) {
+    if (!currentDirs.has(path)) {
+      deletedDirs.push(path);
+    }
+  }
+
+  return { changedFiles, deletedFiles, createdDirs, deletedDirs };
 }
 
 self.onmessage = async (event) => {
@@ -97,7 +114,7 @@ self.onmessage = async (event) => {
   }
 
   if (msg.type === 'exec') {
-    const { id, cmd, args = [], cwd = '/workspace', mode = 'c', files = {}, deletedFiles = [], basePath } = msg;
+    const { id, cmd, args = [], cwd = '/workspace', mode = 'c', files = {}, deletedFiles = [], basePath, environ = {} } = msg;
 
     if (!isInitialized || !toolchain) {
       self.postMessage({ type: 'done', id, exitCode: 1, error: 'Compiler worker not initialized' });
@@ -143,6 +160,7 @@ self.onmessage = async (event) => {
           cmd,
           args,
           cwd,
+          environ,
           vfs,
           toolchain,
           mode: effectiveMode,
@@ -153,6 +171,7 @@ self.onmessage = async (event) => {
           cmd,
           args,
           cwd,
+          environ,
           vfs,
           toolchain,
           write: writeFn,
@@ -175,6 +194,7 @@ self.onmessage = async (event) => {
           cmd: activeTool,
           args,
           cwd,
+          environ,
           vfs,
           toolchain,
           write: writeFn,
@@ -184,6 +204,7 @@ self.onmessage = async (event) => {
         exitCode = await runMake({
           args,
           cwd,
+          environ,
           vfs,
           toolchain,
           basePath: makeBasePath,
@@ -199,13 +220,15 @@ self.onmessage = async (event) => {
       exitCode = 1;
     }
 
-    const { changedFiles, deletedFiles: diffDeleted } = getWorkspaceDiff(beforeMap);
+    const { changedFiles, deletedFiles: diffDeleted, createdDirs, deletedDirs } = getWorkspaceDiff(beforeMap);
     self.postMessage({
       type: 'done',
       id,
       exitCode,
       changedFiles,
       deletedFiles: diffDeleted,
+      createdDirs,
+      deletedDirs,
     });
   }
 };

@@ -10,7 +10,7 @@ if (typeof self === 'undefined') {
 
 import { LineEditor } from '../terminal/line-editor.js';
 import { VFS, normalizePath } from '../vfs/vfs.js';
-import { mountSysroot } from '../vfs/sysroot.js';
+import { mountSysroot, BIN_COMMANDS } from '../vfs/sysroot.js';
 import { WasiHost, ProcExit } from '../vfs/wasi-host.js';
 import { getWasmModule, saveWasmModule } from '../toolchain/wasm-cache.js';
 
@@ -21,6 +21,57 @@ let isExecuting = false;
 let isInitialized = false;
 let termRows = 24;
 let termCols = 80;
+
+let shellEnviron = {
+  USER: 'student',
+  HOME: '/workspace',
+  PWD: cwd,
+  PATH: '/bin:/usr/bin:/workspace',
+};
+
+const TOOLCHAIN_COMMANDS = new Set([
+  'gcc',
+  'g++',
+  'clang',
+  'clang++',
+  'clang-cpp',
+  'ld',
+  'lld',
+  'wasm-ld',
+  'ld.lld',
+  'make',
+  'ar',
+  'ranlib',
+  'nm',
+  'objdump',
+  'size',
+  'c++filt',
+  'cxxfilt',
+  'strings',
+  'readelf',
+  'strip',
+  'sqlite3',
+]);
+
+const SHELL_BUILTINS = new Set([
+  'cd',
+  'pushd',
+  'popd',
+  'dirs',
+  'alias',
+  'unalias',
+  'type',
+  'help',
+  'exit',
+  'return',
+  'exec',
+  'eval',
+  '.',
+  'source',
+  'set',
+]);
+
+const BIN_COMMANDS_SET = new Set(BIN_COMMANDS);
 
 const vfs = new VFS();
 let busyboxModule = null;
@@ -52,9 +103,9 @@ function showPrompt() {
   write(getPrompt());
 }
 
-function resolvePath(p) {
-  if (!p) return cwd;
-  let target = p.startsWith('/') ? p : `${cwd}/${p}`;
+function resolvePath(p, currentCwd = cwd) {
+  if (!p) return currentCwd;
+  let target = p.startsWith('/') ? p : `${currentCwd}/${p}`;
   return normalizePath(target);
 }
 
@@ -172,45 +223,254 @@ async function loadBusyboxBinary(basePath) {
 let dirStackStr = '';
 
 function getShellPreamble(stack) {
-  return `
-_DIR_STACK="${stack}"
-_save_dstack() {
-  __host_update_dstack "$_DIR_STACK"
+  return `_DIR_STACK="${stack}"; _save_dstack() { __host_update_dstack "$_DIR_STACK"; }; pushd() { if [ -z "$1" ]; then echo "pushd: no other directory" >&2; return 1; fi; _DIR_STACK="$(pwd)|\${_DIR_STACK}"; _save_dstack; cd "$1" || return 1; dirs; }; popd() { if [ -z "$_DIR_STACK" ]; then echo "popd: directory stack empty" >&2; return 1; fi; _TARGET="\${_DIR_STACK%%|*}"; _DIR_STACK="\${_DIR_STACK#*|}"; _save_dstack; cd "$_TARGET" || return 1; dirs; }; dirs() { _res="$(pwd)"; _rest="$_DIR_STACK"; while [ -n "$_rest" ]; do _d="\${_rest%%|*}"; _rest="\${_rest#*|}"; if [ -n "$_d" ]; then _res="$_res $_d"; fi; done; echo "$_res"; };`;
 }
-pushd() {
-  if [ -z "$1" ]; then
-    echo "pushd: no other directory" >&2
-    return 1
-  fi
-  _DIR_STACK="$(pwd)|\${_DIR_STACK}"
-  _save_dstack
-  cd "$1" || return 1
-  dirs
+
+function hasUnquotedShellOperators(line) {
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let isEscaped = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+
+    if (isEscaped) {
+      isEscaped = false;
+      continue;
+    }
+
+    if (ch === '\\' && !inSingleQuote) {
+      return true;
+    }
+
+    if (ch === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote;
+      continue;
+    }
+
+    if (ch === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+      continue;
+    }
+
+    if (!inSingleQuote && !inDoubleQuote) {
+      if (
+        ch === '|' ||
+        ch === '&' ||
+        ch === ';' ||
+        ch === '<' ||
+        ch === '>' ||
+        ch === '$' ||
+        ch === '`' ||
+        ch === '*' ||
+        ch === '?' ||
+        ch === '(' ||
+        ch === ')' ||
+        ch === '{' ||
+        ch === '}'
+      ) {
+        return true;
+      }
+    } else if (inDoubleQuote) {
+      if (ch === '$' || ch === '`') {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
-popd() {
-  if [ -z "$_DIR_STACK" ]; then
-    echo "popd: directory stack empty" >&2
-    return 1
-  fi
-  _TARGET="\${_DIR_STACK%%|*}"
-  _DIR_STACK="\${_DIR_STACK#*|}"
-  _save_dstack
-  cd "$_TARGET" || return 1
-  dirs
+
+function tokenizeSimpleCommand(line) {
+  const tokens = [];
+  let current = '';
+  let inQuote = null;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuote) {
+      if (ch === inQuote) {
+        inQuote = null;
+      } else {
+        current += ch;
+      }
+    } else if (ch === '"' || ch === "'") {
+      inQuote = ch;
+    } else if (/\s/.test(ch)) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = '';
+      }
+    } else {
+      current += ch;
+    }
+  }
+  if (current.length > 0) {
+    tokens.push(current);
+  }
+  return tokens;
 }
-dirs() {
-  _res="$(pwd)"
-  _rest="$_DIR_STACK"
-  while [ -n "$_rest" ]; do
-    _d="\${_rest%%|*}"
-    _rest="\${_rest#*|}"
-    if [ -n "$_d" ]; then
-      _res="$_res $_d"
-    fi
-  done
-  echo "$_res"
+
+function isHostBuiltin(name) {
+  if (
+    name === '__host_update_pwd' ||
+    name === '__host_update_dstack' ||
+    name === '__host_exec' ||
+    name === 'time' ||
+    name === 'clear' ||
+    TOOLCHAIN_COMMANDS.has(name) ||
+    name.startsWith('./') ||
+    name.startsWith('/') ||
+    vfs.exists(`${cwd}/${name}`) ||
+    vfs.exists(`/workspace/${name}`) ||
+    vfs.exists(`/usr/bin/${name}`)
+  ) {
+    return 1;
+  }
+  return 0;
 }
-`;
+
+function handleHostBuiltinRun({ cwd: runCwd, argc, argv, envp }, defaultEnviron) {
+  let cmd = argv[0];
+  let args = argv.slice(1);
+
+  if (cmd === '__host_update_pwd') {
+    const newPwd = args[0] ? args[0].trim() : '';
+    if (newPwd && newPwd !== cwd && (vfs.exists(newPwd) || newPwd === '/')) {
+      cwd = newPwd;
+      shellEnviron.PWD = cwd;
+      self.postMessage({ type: 'cwd_changed', cwd });
+    }
+    return 0;
+  }
+
+  if (cmd === '__host_update_dstack') {
+    dirStackStr = args[0] || '';
+    return 0;
+  }
+
+  if (cmd === '__host_exec') {
+    cmd = args[0];
+    args = args.slice(1);
+  }
+
+  if (cmd === 'clear') {
+    write('\x1b[2J\x1b[H');
+    return 0;
+  }
+
+  const runEnviron = { ...(defaultEnviron || shellEnviron), PWD: runCwd || cwd };
+  if (Array.isArray(envp)) {
+    for (const entry of envp) {
+      if (typeof entry === 'string') {
+        const eqIdx = entry.indexOf('=');
+        if (eqIdx !== -1) {
+          runEnviron[entry.slice(0, eqIdx)] = entry.slice(eqIdx + 1);
+        }
+      }
+    }
+  } else if (envp && typeof envp === 'object') {
+    Object.assign(runEnviron, envp);
+  }
+
+  if (cmd === 'time') {
+    const subCmd = args[0];
+    if (!subCmd) {
+      write('time: missing command\r\n');
+      return 1;
+    }
+    const timeStart = performance.now();
+    let targetCmd = subCmd;
+    let targetArgs = args.slice(1);
+    if (targetCmd === '__host_exec') {
+      targetCmd = targetArgs[0];
+      targetArgs = targetArgs.slice(1);
+    }
+    const code = execHostCommandSync({
+      cmd: targetCmd,
+      args: targetArgs,
+      cwd: runCwd || cwd,
+      environ: runEnviron,
+    });
+    const elapsed = ((performance.now() - timeStart) / 1000).toFixed(3);
+    write(`\r\nreal\t0m${elapsed}s\r\nuser\t0m${elapsed}s\r\nsys\t0m0.000s\r\n`);
+    return code;
+  }
+
+  if (cmd.startsWith('./') || cmd.startsWith('/')) {
+    const targetPath = resolvePath(cmd, runCwd || cwd);
+    if (!vfs.exists(targetPath)) {
+      write(`${cmd}: not found\r\n`);
+      return 127;
+    }
+  }
+
+  return execHostCommandSync({
+    cmd,
+    args,
+    cwd: runCwd || cwd,
+    environ: runEnviron,
+  });
+}
+
+function syncWorkspaceDiff(beforeSnapshot) {
+  const { changedFiles, deletedFiles, createdDirs, deletedDirs } = getWorkspaceDiff(beforeSnapshot);
+  if (
+    Object.keys(changedFiles).length > 0 ||
+    deletedFiles.length > 0 ||
+    createdDirs.length > 0 ||
+    deletedDirs.length > 0
+  ) {
+    self.postMessage({
+      type: 'vfs_sync',
+      changedFiles,
+      deletedFiles,
+      createdDirs,
+      deletedDirs,
+    });
+  }
+}
+
+const SCRIPT_PREAMBLE = `_DIR_STACK=""; pushd() { if [ -z "$1" ]; then echo "pushd: no other directory" >&2; return 1; fi; _DIR_STACK="$(pwd)|\${_DIR_STACK}"; cd "$1" || return 1; dirs; }; popd() { if [ -z "$_DIR_STACK" ]; then echo "popd: directory stack empty" >&2; return 1; fi; _TARGET="\${_DIR_STACK%%|*}"; _DIR_STACK="\${_DIR_STACK#*|}"; cd "$_TARGET" || return 1; dirs; }; dirs() { _res="$(pwd)"; _rest="$_DIR_STACK"; while [ -n "$_rest" ]; do _d="\${_rest%%|*}"; _rest="\${_rest#*|}"; if [ -n "$_d" ]; then _res="$_res $_d"; fi; done; echo "$_res"; };`;
+
+async function runScriptFile(scriptPath, args, environ, isTimed, beforeMap) {
+  const t0 = performance.now();
+  const wasiHost = new WasiHost({
+    vfs,
+    cwd,
+    argv: ['busybox', 'sh', '-c', `cd "$1" || exit 1; shift; ${SCRIPT_PREAMBLE} . "$@"`, 'sh', cwd, scriptPath, ...args],
+    environ,
+    stdout: (str) => write(str),
+    stderr: (str) => write(str),
+    rows: termRows,
+    cols: termCols,
+    hostBuiltinLookup: (name) => isHostBuiltin(name),
+    hostBuiltinRun: (params) => handleHostBuiltinRun(params, environ),
+  });
+
+  const imports = wasiHost.createImportObject();
+  const instance = new WebAssembly.Instance(busyboxModule, imports);
+  wasiHost.getMemory = () => instance.exports.memory;
+
+  let exitCode = 0;
+  try {
+    instance.exports._start();
+  } catch (err) {
+    if (err instanceof ProcExit) {
+      exitCode = err.code;
+    } else {
+      writeln(`\x1b[31mScript error: ${err.message || String(err)}\x1b[0m`);
+      exitCode = 1;
+    }
+  }
+
+  if (isTimed) {
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(3);
+    write(`\r\nreal\t0m${elapsed}s\r\nuser\t0m${elapsed}s\r\nsys\t0m0.000s\r\n`);
+  }
+
+  syncWorkspaceDiff(beforeMap);
+  return exitCode;
 }
 
 function wrapHostExecutables(cmdLine) {
@@ -235,120 +495,199 @@ async function executeCommandLine(toExecute) {
 
   const beforeMap = getWorkspaceSnapshot();
 
-  const isTimed = /^\s*time(\s+|$)/.test(toExecute);
-  const actualCmd = isTimed ? toExecute.replace(/^\s*time\s*/, '') : toExecute;
+  const trimmed = toExecute.trim();
+  if (!trimmed) return;
+
+  const isTimed = /^\s*time(\s+|$)/.test(trimmed);
+  const actualCmd = isTimed ? trimmed.replace(/^\s*time\s*/, '').trim() : trimmed;
+  if (!actualCmd) {
+    if (isTimed) {
+      write('time: missing command\r\n');
+    }
+    return;
+  }
+
+  // Check if command line has unquoted shell constructs (pipes, redirections, expansions, etc.)
+  const hasShellConstructs = hasUnquotedShellOperators(actualCmd);
+
+  if (!hasShellConstructs) {
+    const tokens = tokenizeSimpleCommand(actualCmd);
+    let tokenIdx = 0;
+    const envOverrides = {};
+    const envAssignRegex = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+    while (tokenIdx < tokens.length && envAssignRegex.test(tokens[tokenIdx])) {
+      const token = tokens[tokenIdx];
+      const eqIdx = token.indexOf('=');
+      const key = token.slice(0, eqIdx);
+      const val = token.slice(eqIdx + 1);
+      envOverrides[key] = val;
+      tokenIdx++;
+    }
+
+    // Standalone variable assignments: VAR="val" ...
+    if (tokenIdx === tokens.length) {
+      Object.assign(shellEnviron, envOverrides);
+      shellEnviron.PWD = cwd;
+      return;
+    }
+
+    const cmd = tokens[tokenIdx];
+    const args = tokens.slice(tokenIdx + 1);
+
+    // export VAR="val" or export VAR
+    if (cmd === 'export' && args.length > 0) {
+      for (const arg of args) {
+        const eqIdx = arg.indexOf('=');
+        if (eqIdx !== -1) {
+          const key = arg.slice(0, eqIdx);
+          const val = arg.slice(eqIdx + 1);
+          shellEnviron[key] = val;
+        } else if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(arg)) {
+          if (!(arg in shellEnviron)) {
+            shellEnviron[arg] = '';
+          }
+        }
+      }
+      shellEnviron.PWD = cwd;
+      return;
+    }
+
+    // unset VAR
+    if (cmd === 'unset') {
+      for (const arg of args) {
+        delete shellEnviron[arg];
+      }
+      return;
+    }
+
+    const effectiveEnviron = {
+      ...shellEnviron,
+      ...envOverrides,
+      PWD: cwd,
+    };
+
+    if (cmd === 'clear') {
+      write('\x1b[2J\x1b[H');
+      return;
+    }
+
+    // Toolchain commands (gcc, clang, make, ld, etc.)
+    if (TOOLCHAIN_COMMANDS.has(cmd)) {
+      const t0 = performance.now();
+      const code = execHostCommandSync({
+        cmd,
+        args,
+        cwd,
+        environ: effectiveEnviron,
+      });
+      if (isTimed) {
+        const elapsed = ((performance.now() - t0) / 1000).toFixed(3);
+        write(`\r\nreal\t0m${elapsed}s\r\nuser\t0m${elapsed}s\r\nsys\t0m0.000s\r\n`);
+      }
+      syncWorkspaceDiff(beforeMap);
+      return code;
+    }
+
+    // Shell script execution via "sh script.sh" or "ash script.sh"
+    if ((cmd === 'sh' || cmd === 'ash') && args.length > 0 && !args[0].startsWith('-')) {
+      const scriptPath = resolvePath(args[0]);
+      if (vfs.exists(scriptPath)) {
+        return await runScriptFile(scriptPath, args.slice(1), effectiveEnviron, isTimed, beforeMap);
+      }
+    }
+
+    // Explicit path specified (e.g. ./a.out, /workspace/a.out, ../bin/tool)
+    if (cmd.startsWith('./') || cmd.startsWith('/') || cmd.startsWith('../')) {
+      const targetPath = resolvePath(cmd);
+      if (!vfs.exists(targetPath)) {
+        writeln(`${cmd}: not found`);
+        if (isTimed) {
+          write(`\r\nreal\t0m0.000s\r\nuser\t0m0.000s\r\nsys\t0m0.000s\r\n`);
+        }
+        return 127;
+      }
+
+      const bytes = vfs.readFile(targetPath, false);
+      const isScript = (bytes && bytes.length >= 2 && bytes[0] === 0x23 && bytes[1] === 0x21) || cmd.endsWith('.sh');
+      if (isScript) {
+        return await runScriptFile(targetPath, args, effectiveEnviron, isTimed, beforeMap);
+      } else {
+        const t0 = performance.now();
+        const code = execHostCommandSync({
+          cmd: targetPath,
+          args,
+          cwd,
+          environ: effectiveEnviron,
+        });
+        if (isTimed) {
+          const elapsed = ((performance.now() - t0) / 1000).toFixed(3);
+          write(`\r\nreal\t0m${elapsed}s\r\nuser\t0m${elapsed}s\r\nsys\t0m0.000s\r\n`);
+        }
+        syncWorkspaceDiff(beforeMap);
+        return code;
+      }
+    }
+
+    // Simple command without slashes
+    if (!BIN_COMMANDS_SET.has(cmd) && !SHELL_BUILTINS.has(cmd)) {
+      const workspaceCandidate = resolvePath(cmd);
+      if (vfs.exists(workspaceCandidate)) {
+        const bytes = vfs.readFile(workspaceCandidate, false);
+        const isScript = (bytes && bytes.length >= 2 && bytes[0] === 0x23 && bytes[1] === 0x21) || cmd.endsWith('.sh');
+        if (isScript) {
+          return await runScriptFile(workspaceCandidate, args, effectiveEnviron, isTimed, beforeMap);
+        } else {
+          const t0 = performance.now();
+          const code = execHostCommandSync({
+            cmd: workspaceCandidate,
+            args,
+            cwd,
+            environ: effectiveEnviron,
+          });
+          if (isTimed) {
+            const elapsed = ((performance.now() - t0) / 1000).toFixed(3);
+            write(`\r\nreal\t0m${elapsed}s\r\nuser\t0m${elapsed}s\r\nsys\t0m0.000s\r\n`);
+          }
+          syncWorkspaceDiff(beforeMap);
+          return code;
+        }
+      }
+
+      if (!vfs.exists(`/usr/bin/${cmd}`) && !vfs.exists(`/bin/${cmd}`)) {
+        writeln(`${cmd}: command not found`);
+        if (isTimed) {
+          write(`\r\nreal\t0m0.000s\r\nuser\t0m0.000s\r\nsys\t0m0.000s\r\n`);
+        }
+        return 127;
+      }
+    }
+  }
+
+  // Tier 2: BusyBox ash execution for shell constructs, pipelines, BusyBox applets, and builtins
+  const effectiveEnviron = {
+    ...shellEnviron,
+    PWD: cwd,
+  };
+
   const wrapped = wrapHostExecutables(actualCmd);
   const t0 = performance.now();
 
-  // Prefix with cd "${cwd}" so busybox ash executes in the active directory,
-  // load directory stack functions, and record final working directory and dir stack in-memory
+  // Single-line preamble so ash execution starts at line 1
   const preamble = getShellPreamble(dirStackStr);
-  const wrappedCmd = `cd "${cwd}"\n${preamble}\n${wrapped}\n__rc=$?; __host_update_pwd "$(pwd)"; exit $__rc`;
+  const wrappedCmd = `cd "${cwd}"; ${preamble} ${wrapped}; __rc=$?; __host_update_pwd "$(pwd)"; exit $__rc`;
 
   const wasiHost = new WasiHost({
     vfs,
     cwd,
     argv: ['busybox', 'sh', '-c', wrappedCmd],
-    environ: {
-      USER: 'student',
-      HOME: '/workspace',
-      PWD: cwd,
-      PATH: '/bin:/usr/bin:/workspace',
-    },
+    environ: effectiveEnviron,
     stdout: (str) => write(str),
     stderr: (str) => write(str),
     rows: termRows,
     cols: termCols,
-    hostBuiltinLookup: (name) => {
-      if (
-        name === '__host_update_pwd' ||
-        name === '__host_update_dstack' ||
-        name === '__host_exec' ||
-        name === 'time' ||
-        name === 'make' ||
-        name === 'clear' ||
-        name === 'gcc' ||
-        name === 'clang' ||
-        name === 'g++' ||
-        name === 'clang++' ||
-        name === 'clang-cpp' ||
-        name === 'wasm-ld' ||
-        name === 'ld' ||
-        name === 'lld' ||
-        name === 'ar' ||
-        name === 'ranlib' ||
-        name === 'nm' ||
-        name === 'size' ||
-        name === 'objdump' ||
-        name === 'strings' ||
-        name === 'sqlite3' ||
-        name.startsWith('./') ||
-        name.startsWith('/') ||
-        vfs.exists(`${cwd}/${name}`) ||
-        vfs.exists(`/workspace/${name}`) ||
-        vfs.exists(`/usr/bin/${name}`)
-      ) {
-        return 1;
-      }
-      return 0;
-    },
-    hostBuiltinRun: ({ cwd: runCwd, argc, argv, envp }) => {
-      let cmd = argv[0];
-      let args = argv.slice(1);
-
-      if (cmd === '__host_update_pwd') {
-        const newPwd = args[0] ? args[0].trim() : '';
-        if (newPwd && newPwd !== cwd && (vfs.exists(newPwd) || newPwd === '/')) {
-          cwd = newPwd;
-          self.postMessage({ type: 'cwd_changed', cwd });
-        }
-        return 0;
-      }
-
-      if (cmd === '__host_update_dstack') {
-        dirStackStr = args[0] || '';
-        return 0;
-      }
-
-      if (cmd === '__host_exec') {
-        cmd = args[0];
-        args = args.slice(1);
-      }
-
-      if (cmd === 'clear') {
-        write('\x1b[2J\x1b[H');
-        return 0;
-      }
-
-      if (cmd === 'time') {
-        const subCmd = args[0];
-        if (!subCmd) {
-          write('time: missing command\r\n');
-          return 1;
-        }
-        const timeStart = performance.now();
-        let targetCmd = subCmd;
-        let targetArgs = args.slice(1);
-        if (targetCmd === '__host_exec') {
-          targetCmd = targetArgs[0];
-          targetArgs = targetArgs.slice(1);
-        }
-        const code = execHostCommandSync({
-          cmd: targetCmd,
-          args: targetArgs,
-          cwd: runCwd || cwd,
-        });
-        const elapsed = ((performance.now() - timeStart) / 1000).toFixed(3);
-        write(`\r\nreal\t0m${elapsed}s\r\nuser\t0m${elapsed}s\r\nsys\t0m0.000s\r\n`);
-        return code;
-      }
-
-      return execHostCommandSync({
-        cmd,
-        args,
-        cwd: runCwd || cwd,
-      });
-    },
+    hostBuiltinLookup: (name) => isHostBuiltin(name),
+    hostBuiltinRun: (params) => handleHostBuiltinRun(params, effectiveEnviron),
   });
 
   const imports = wasiHost.createImportObject();
@@ -368,22 +707,7 @@ async function executeCommandLine(toExecute) {
     write(`\r\nreal\t0m${elapsed}s\r\nuser\t0m${elapsed}s\r\nsys\t0m0.000s\r\n`);
   }
 
-  // Synchronize any workspace file and directory modifications
-  const { changedFiles, deletedFiles, createdDirs, deletedDirs } = getWorkspaceDiff(beforeMap);
-  if (
-    Object.keys(changedFiles).length > 0 ||
-    deletedFiles.length > 0 ||
-    createdDirs.length > 0 ||
-    deletedDirs.length > 0
-  ) {
-    self.postMessage({
-      type: 'vfs_sync',
-      changedFiles,
-      deletedFiles,
-      createdDirs,
-      deletedDirs,
-    });
-  }
+  syncWorkspaceDiff(beforeMap);
 }
 
 async function handleTabCompletion() {
@@ -487,6 +811,7 @@ self.onmessage = async (event) => {
 
   if (msg.type === 'init') {
     cwd = msg.cwd || '/workspace';
+    shellEnviron.PWD = cwd;
     if (msg.rows) termRows = msg.rows;
     if (msg.cols) termCols = msg.cols;
     if (msg.sharedBuffer) {
