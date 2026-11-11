@@ -2,6 +2,7 @@
 // Encapsulates Clang, LLD, and Sysroot execution directly backed by VFS via WasiHost
 
 import { Tar } from './tar.js';
+import { createSharedSysrootFromTar } from '../vfs/shared-sysroot.js';
 import { WasiHost, ProcExit, ESUCCESS, normalizePath } from '../vfs/wasi-host.js';
 import { WASM_HOST_IMPORTS } from '../vfs/sysroot.js';
 import { getWasmModule, saveWasmModule } from './wasm-cache.js';
@@ -85,6 +86,21 @@ export class WasmToolchain {
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
+      // Ensure root workspace and system directories exist in VFS
+      if (this.vfs) {
+        this.vfs.mkdir('/workspace', true, true);
+        this.vfs.mkdir('/workspace/src', true, true);
+        this.vfs.mkdir('/workspace/include', true, true);
+        this.vfs.mkdir('/workspace/build', true, true);
+        this.vfs.mkdir('/dev', true, true);
+      }
+
+      if (this.vfs && this.vfs.sharedSysroot) {
+        onProgress('Sysroot shared buffer attached.');
+        this.initialized = true;
+        return;
+      }
+
       onProgress('Fetching standard library sysroot archive (sysroot.tar.gz)...');
       const fetchSysroot = async () => {
         try {
@@ -107,94 +123,7 @@ export class WasmToolchain {
 
       const sysrootTarBuf = await fetchSysroot();
 
-      // Ensure root workspace and system directories exist in VFS
-      if (this.vfs) {
-        this.vfs.mkdir('/workspace', true, true);
-        this.vfs.mkdir('/workspace/src', true, true);
-        this.vfs.mkdir('/workspace/include', true, true);
-        this.vfs.mkdir('/workspace/build', true, true);
-        this.vfs.mkdir('/dev', true, true);
-        this.vfs.mkdir('/usr', true, true);
-        this.vfs.mkdir('/usr/lib', true, true);
-        this.vfs.mkdir('/usr/include', true, true);
-        this.vfs.mkdir('/usr/bin', true, true);
-        this.vfs.mkdir('/bin', true, true);
-        this.vfs.mkdir('/include', true, true);
-        this.vfs.mkdir('/lib', true, true);
-      }
-
-      onProgress('Parsing sysroot tar archive...');
-      const tar = new Tar(sysrootTarBuf);
-      const entries = tar.getEntries();
-      onProgress(`Unpacking sysroot headers and runtime (${entries.length} items)...`);
-      for (const entry of entries) {
-        const cleanName = (entry.filename || '').replace(/^\.?\/+/, '');
-        if (!cleanName) continue;
-        if (entry.type === '5') {
-          if (this.vfs) this.vfs.mkdir('/' + cleanName, true, true);
-        } else if (entry.contents) {
-          if (this.vfs) {
-            this.vfs.writeFile('/' + cleanName, entry.contents, Date.now(), true);
-
-            // Mirror standard libraries to /usr/lib and /lib/wasm32-wasi in VFS
-            if (cleanName.startsWith('lib/wasm32-wasip1/')) {
-              const libName = cleanName.substring('lib/wasm32-wasip1/'.length);
-              if (libName) {
-                this.vfs.writeFile(`/usr/lib/${libName}`, entry.contents, Date.now(), true);
-                this.vfs.writeFile(`/lib/wasm32-wasi/${libName}`, entry.contents, Date.now(), true);
-              }
-            } else if (cleanName.startsWith('lib/wasm32-wasi/')) {
-              const libName = cleanName.substring('lib/wasm32-wasi/'.length);
-              if (libName) {
-                this.vfs.writeFile(`/usr/lib/${libName}`, entry.contents, Date.now(), true);
-                this.vfs.writeFile(`/lib/wasm32-wasip1/${libName}`, entry.contents, Date.now(), true);
-              }
-            }
-
-            // Mirror all C headers to /usr/include and /include so students have complete access
-            if (cleanName.startsWith('include/wasm32-wasip1/')) {
-              const sub = cleanName.substring('include/wasm32-wasip1/'.length);
-              if (sub && !sub.startsWith('c++/')) {
-                this.vfs.writeFile(`/usr/include/${sub}`, entry.contents, Date.now(), true);
-                this.vfs.writeFile(`/include/${sub}`, entry.contents, Date.now(), true);
-              }
-            } else if (cleanName.startsWith('include/')) {
-              const sub = cleanName.substring('include/'.length);
-              if (sub && !sub.startsWith('wasm32-') && !sub.startsWith('c++/')) {
-                this.vfs.writeFile(`/usr/include/${sub}`, entry.contents, Date.now(), true);
-              }
-            }
-          }
-        }
-      }
-
-      // Resolve and unpack symlinks (entry.type === '2')
-      for (const entry of entries) {
-        if (entry.type === '2' && entry.linkname && this.vfs) {
-          const cleanName = (entry.filename || '').replace(/^\.?\/+/, '');
-          if (!cleanName) continue;
-          const lastSlash = cleanName.lastIndexOf('/');
-          const parentDir = lastSlash !== -1 ? cleanName.substring(0, lastSlash) : '';
-          let targetPath = entry.linkname.replace(/^\.?\/+/, '');
-          if (parentDir && !entry.linkname.startsWith('/')) {
-            targetPath = `${parentDir}/${targetPath}`;
-          }
-          const cleanTarget = '/' + targetPath.replace(/^\/+/, '');
-          if (this.vfs.exists(cleanTarget)) {
-            const stat = this.vfs.stat(cleanTarget);
-            if (stat && stat.isDir) {
-              this.vfs.mkdir('/' + cleanName, true, true);
-            } else {
-              const contents = this.vfs.readFile(cleanTarget, false);
-              if (contents) {
-                this.vfs.writeFile('/' + cleanName, contents, Date.now(), true);
-              }
-            }
-          }
-        }
-      }
-
-      // Preload default runtime libraries into VFS concurrently
+      // Preload default runtime libraries into SharedSysroot concurrently
       onProgress('Preloading runtime libraries (libraylib, libturtle, libsqlite3)...');
       const preloadConfigs = [
         {
@@ -234,6 +163,7 @@ export class WasmToolchain {
         },
       ];
 
+      const additionalEntries = [];
       await Promise.all(
         preloadConfigs.map(async (cfg) => {
           try {
@@ -241,15 +171,19 @@ export class WasmToolchain {
             if (res && (res.ok || typeof res.ok === 'undefined')) {
               const buf = await res.arrayBuffer();
               const u8 = new Uint8Array(buf);
-              if (this.vfs) {
-                for (const target of cfg.targets) {
-                  this.vfs.writeFile(target, u8, Date.now(), true);
-                }
+              for (const target of cfg.targets) {
+                additionalEntries.push({ path: target, content: u8, isDir: false });
               }
             }
           } catch {}
         })
       );
+
+      onProgress('Unpacking sysroot headers and runtime into SharedSysroot...');
+      const sharedSysrootBuffer = createSharedSysrootFromTar(sysrootTarBuf, { additionalEntries });
+      if (this.vfs && typeof this.vfs.setSharedSysroot === 'function') {
+        this.vfs.setSharedSysroot(sharedSysrootBuffer);
+      }
 
       onProgress('VFS items populated.');
       this.initialized = true;

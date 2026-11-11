@@ -493,7 +493,11 @@ self.onmessage = async (event) => {
       sharedInt32 = new Int32Array(msg.sharedBuffer);
     }
 
-    mountSysroot(vfs);
+    if (msg.sharedSysrootBuffer) {
+      vfs.setSharedSysroot(msg.sharedSysrootBuffer);
+    } else {
+      mountSysroot(vfs);
+    }
 
     if (msg.dirs) {
       for (const d of msg.dirs) {

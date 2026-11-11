@@ -267,11 +267,16 @@ The repository includes a ready-to-run suite of single-file C programs in the `e
 - **`examples/README.md`**: Step-by-step user compilation and running guide for each example.
 
 ### 10. Virtual File System & Storage
+- **Two-Tier Overlay VFS & SharedSysroot**:
+  - **Shared Read-Only Sysroot (`SharedSysroot`)**: Packs the complete Musl C and LLVM libc++ sysroot headers and precompiled static runtime libraries (~108 MB) into a single contiguous `SharedArrayBuffer` shared across the tri-worker architecture (`compiler.worker.js`, `shell.worker.js`, `runtime.worker.js`).
+  - **Zero Duplicate Heap Overhead**: Eliminates redundant ~108 MB heap duplication per worker thread; all workers read directly from shared memory.
+  - **Hardware & Host EROFS Protection**: System directories (`/usr`, `/include`, `/lib`, `/bin`) are mounted as read-only overlays. Any attempt to write, truncate, delete, or create files within system paths fails with POSIX error `EROFS` (*Read-only file system*).
+  - **Deep Shell Sysroot Exploration**: BusyBox `ash` shell commands (`cat`, `ls`, `grep`) gain complete read access to all real sysroot headers (e.g. `/include/wasm32-wasip1/__struct_timespec.h`).
 - **In-Memory VFS**: Fast hierarchical tree representation shared across the editor, shell, toolchain, and runtime execution worker.
 - **IndexedDB Persistence**: Automatically persists `/workspace` across browser sessions and page refreshes.
 - **Bidirectional Runtime Synchronization**: Changes made to `/workspace` files via C/C++ `fopen`/`fwrite`/`fputs`, C++ `<fstream>`, or SQLite 3 `sqlite3_open`/`sqlite3_step` automatically sync back to VFS in real-time and persist to IndexedDB, updating the file tree and editor tabs.
 - **Zip Import & Export**: One-click export of `/workspace` into a standard `.zip` file using JSZip, and direct zip unpacking into the workspace.
-- **Sysroot & Device Protection**: Read-only protection on system root paths (`/usr`, `/bin`, `/dev`), pre-mounting standard C/C++ headers (`<stdio.h>`, `<stdlib.h>`, `<iostream>`, `<fstream>`, etc.), `<graphics.h>`, `<graphics_canvas.h>`, `<turtle.h>`, `<raylib.h>`, `<sqlite3.h>`, `<sqlite3ext.h>`, runtime static libraries (`libc.a`, `libturtle.a`, `libraylib.a`, `libturtle_raylib.a`, and `libsqlite3.a`), CLI tools (`/usr/bin/sqlite3`), all 70+ BusyBox applets (`/bin/*`), and virtual character devices (`/dev/null`, `/dev/zero`).
+- **Device & Virtual Character Devices**: Pre-mounts `/dev` providing standard virtual character devices `/dev/null` and `/dev/zero` for shell stream redirections.
 
 ### 11. Progressive Web App (PWA) & Offline Execution
 - **Installable Desktop/Mobile App**: Certified PWA with Web App Manifest (`manifest.webmanifest`), dark theme colors, and icons.
@@ -481,9 +486,14 @@ Add a `_headers` file to `public/` (or configure in dashboard):
 ## Documentation & Technical Guides
 
 - [**`SPEC.md`**](./SPEC.md): Technical specification and architectural ground truth defining the unified VFS host, toolchain integration, and windowing system.
-- [**`ide-docs/` (API Documentation Portal)**](./ide-docs/index.html): Public API documentation portal and cheatsheet covering Libc/WASI limits, Turtle graphics, Canvas 2D, Raylib, and SQLite 3.
-- [**`docs/KNOWN_ISSUES.md`**](./docs/KNOWN_ISSUES.md): Documented version gaps, limits, and runtime constraints.
+- [**`docs/SHARED_SYSROOT_VFS.md`**](./docs/SHARED_SYSROOT_VFS.md): Detailed specification of the Two-Tier Overlay VFS, memory-mapped `SharedSysroot` binary format (`SSYS`), and `EROFS` POSIX permissions.
+- [**`docs/DEDICATED_COMPILER_WORKER.md`**](./docs/DEDICATED_COMPILER_WORKER.md): Architecture case study on off-thread LLVM Clang toolchain compilation and 60 FPS UI responsiveness.
+- [**`docs/SHELL_AND_UTILITIES.md`**](./docs/SHELL_AND_UTILITIES.md): BusyBox POSIX shell integration, `wasi_host_spawn` process dispatch, real GNU Make WASI, and SQLite 3 subsystem.
+- [**`docs/GRAPHICS_AND_TURTLE.md`**](./docs/GRAPHICS_AND_TURTLE.md): Decoupled 2D vector canvas, WebGL GLES 2.0 Raylib bridge, Web Audio API, and Turtle graphics.
 - [**`docs/SINGLE_THREAD_FRAME_PACING.md`**](./docs/SINGLE_THREAD_FRAME_PACING.md): Case study on single-threaded WebAssembly graphics, progressive animation pacing, and mathematical derivation of frame cadence metrics.
+- [**`docs/TERMINAL_AND_UI.md`**](./docs/TERMINAL_AND_UI.md): Detached floating terminal mode, ANSI VT100 screen control, synchronous sleep (`poll_oneoff`), `LineEditor`, and sidebar UI.
+- [**`docs/KNOWN_ISSUES.md`**](./docs/KNOWN_ISSUES.md): Documented version gaps, limits, and runtime constraints.
+- [**`ide-docs/` (API Documentation Portal)**](./ide-docs/index.html): Public API documentation portal and cheatsheet covering Libc/WASI limits, Turtle graphics, Canvas 2D, Raylib, and SQLite 3.
 - [**`AGENTS.md`**](./AGENTS.md): Autonomous agent engineering guidelines, milestone tracking, and verification checklists.
 - [**`examples/README.md`**](./examples/README.md): Comprehensive compilation and execution guide for all 10 bundled educational examples.
 

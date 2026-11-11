@@ -3,6 +3,7 @@
 import { VFS } from './vfs/vfs.js';
 import { loadWorkspace, setupAutoSync } from './vfs/storage.js';
 import { mountSysroot, mountSysrootUtilities } from './vfs/sysroot.js';
+import { loadOrBuildSharedSysroot } from './vfs/shared-sysroot.js';
 import { EditorManager } from './editor/editor.js';
 import { TabsUI } from './editor/tabs.js';
 import { FileTreeUI } from './components/filetree.js';
@@ -156,6 +157,13 @@ export class App {
       this.terminal.writeln('\x1b[90m[*] Preparing C/C++ standard library sysroot...\x1b[0m');
     }
     try {
+      const sharedSysrootBuffer = await loadOrBuildSharedSysroot(wasmBasePath, (status) => {
+        if (this.terminal) {
+          this.terminal.writeln(`\x1b[90m[*] ${status}\x1b[0m`);
+        }
+      });
+      this.vfs.setSharedSysroot(sharedSysrootBuffer);
+
       await this.toolchain.init((status) => {
         if (this.terminal) {
           this.terminal.writeln(`\x1b[90m[*] ${status}\x1b[0m`);
@@ -186,6 +194,7 @@ export class App {
         type: 'init',
         cwd: '/workspace',
         sharedBuffer: this.shellSharedBuffer,
+        sharedSysrootBuffer: (this.vfs && this.vfs.sharedSysroot) ? this.vfs.sharedSysroot.buffer : null,
         files: initialFiles,
         basePath: wasmBasePath,
         rows: this.terminal && this.terminal.term ? this.terminal.term.rows : 24,

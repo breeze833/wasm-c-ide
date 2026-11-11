@@ -21,10 +21,14 @@ You are an autonomous senior systems and web engineer implementing the project s
 ├── SPEC.md                    # Technical specification & architectural ground truth
 ├── AGENTS.md                  # Agent operating protocols (this file)
 ├── README.md                  # User-facing project documentation & deployment guides
-├── docs/                      # Project documentation and historical specifications
+├── docs/                      # Project documentation and technical specifications
+│   ├── SHARED_SYSROOT_VFS.md  # Specification for Two-Tier Overlay VFS and SharedSysroot binary format
 │   ├── DEDICATED_COMPILER_WORKER.md # Case study on off-thread compilation worker & tri-worker architecture
-│   ├── KNOWN_ISSUES.md        # Documented toolchain version gaps, limits, and single-threaded frame pacing
+│   ├── SHELL_AND_UTILITIES.md # Specification for BusyBox ash shell, wasi_host_spawn, GNU Make, and SQLite
+│   ├── GRAPHICS_AND_TURTLE.md # Specification for canvas-wasi, raylib-wasi, and libturtle subsystems
+│   ├── TERMINAL_AND_UI.md     # Specification for detached terminal, LineEditor, and workspace UI
 │   ├── SINGLE_THREAD_FRAME_PACING.md # Case study on single-threaded WebAssembly graphics & progressive delays
+│   ├── KNOWN_ISSUES.md        # Documented toolchain version gaps, limits, and single-threaded frame pacing
 │   └── archived/              # Historical technical specifications (v1 baseline through v4)
 │       ├── SPECv1.md
 │       ├── SPECv2.md
@@ -86,6 +90,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── vfs/
 │   │   ├── archive.js         # JSZip project export and import routines
 │   │   ├── raylib-headers.js  # Auto-generated virtual headers module for Raylib 5.5
+│   │   ├── shared-sysroot.js  # Shared read-only sysroot binary builder, reader, and FNV-1a index
 │   │   ├── sqlite-headers.js  # Auto-generated virtual headers module for SQLite 3
 │   │   ├── storage.js         # IndexedDB synchronization and default project seed
 │   │   ├── sysroot.js         # Standard C/C++ sysroot header and binary mount definitions

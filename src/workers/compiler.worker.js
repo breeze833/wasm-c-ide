@@ -66,7 +66,11 @@ self.onmessage = async (event) => {
   if (msg.type === 'init') {
     workerBasePath = msg.basePath || '/sysroot/wasm';
     const basePath = workerBasePath;
-    mountSysroot(vfs);
+    if (msg.sharedSysrootBuffer) {
+      vfs.setSharedSysroot(msg.sharedSysrootBuffer);
+    } else {
+      mountSysroot(vfs);
+    }
 
     toolchain = new WasmToolchain({
       basePath,

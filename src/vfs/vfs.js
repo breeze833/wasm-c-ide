@@ -1,6 +1,8 @@
 // Virtual File System (VFS)
 // Manages hierarchical in-memory storage for /workspace, /usr, /include, and /lib
 
+import { SharedSysrootReader } from './shared-sysroot.js';
+
 export function normalizePath(path) {
   if (!path) return '/';
   const isAbsolute = path.startsWith('/');
@@ -28,6 +30,7 @@ export class VFS {
       mtime: Date.now(),
     };
     this.listeners = new Set();
+    this.sharedSysroot = null;
 
     // Ensure root directories exist
     this.mkdir('/workspace', true, true);
@@ -200,39 +203,67 @@ export class VFS {
     return mtimeMs;
   }
 
+  setSharedSysroot(readerOrBuffer) {
+    if (!readerOrBuffer) {
+      this.sharedSysroot = null;
+      return;
+    }
+    if (readerOrBuffer instanceof SharedSysrootReader) {
+      this.sharedSysroot = readerOrBuffer;
+    } else {
+      this.sharedSysroot = new SharedSysrootReader(readerOrBuffer);
+    }
+  }
+
   readFile(path, asText = true) {
     const norm = normalizePath(path);
     const node = this._resolve(norm);
 
-    if (!node) {
-      throw new Error(`No such file or directory: ${norm}`);
-    }
-    if (node.isDir) {
-      throw new Error(`Is a directory: ${norm}`);
+    if (node) {
+      if (node.isDir) {
+        throw new Error(`Is a directory: ${norm}`);
+      }
+      if (asText) {
+        if (typeof SharedArrayBuffer !== 'undefined' && node.content && node.content.buffer instanceof SharedArrayBuffer) {
+          const unshared = new Uint8Array(node.content.byteLength);
+          unshared.set(node.content);
+          return new TextDecoder().decode(unshared);
+        }
+        return new TextDecoder().decode(node.content);
+      }
+      return node.content;
     }
 
-    if (asText) {
-      return new TextDecoder().decode(node.content);
+    if (this.sharedSysroot && this.sharedSysroot.exists(norm)) {
+      return this.sharedSysroot.readFile(norm, asText);
     }
-    return node.content;
+
+    throw new Error(`No such file or directory: ${norm}`);
   }
 
   exists(path) {
     const norm = normalizePath(path);
-    return this._resolve(norm) !== null;
+    if (this._resolve(norm) !== null) return true;
+    if (this.sharedSysroot && this.sharedSysroot.exists(norm)) return true;
+    return false;
   }
 
   stat(path) {
     const norm = normalizePath(path);
     const node = this._resolve(norm);
-    if (!node) return null;
-
-    return {
-      name: node.name,
-      isDir: node.isDir,
-      size: node.isDir ? 0 : node.content.byteLength,
-      mtime: node.mtime,
-    };
+    if (node) {
+      return {
+        name: node.name,
+        isDir: node.isDir,
+        size: node.isDir ? 0 : (node.content ? node.content.byteLength : 0),
+        mtime: node.mtime,
+      };
+    }
+    if (this.sharedSysroot) {
+      const s = this.sharedSysroot.stat(norm);
+      if (s) return s;
+    }
+    return null;
   }
 
   isDir(path) {
@@ -243,23 +274,33 @@ export class VFS {
   readDir(path) {
     const norm = normalizePath(path);
     const node = this._resolve(norm);
-    if (!node) {
+    const resultMap = new Map();
+
+    if (node && node.isDir) {
+      for (const [name, child] of node.children.entries()) {
+        resultMap.set(name, {
+          name,
+          isDir: child.isDir,
+          size: child.isDir ? 0 : (child.content ? child.content.byteLength : 0),
+          mtime: child.mtime,
+        });
+      }
+    }
+
+    if (this.sharedSysroot && this.sharedSysroot.isDir(norm)) {
+      const sysChildren = this.sharedSysroot.readDir(norm);
+      for (const child of sysChildren) {
+        if (!resultMap.has(child.name)) {
+          resultMap.set(child.name, child);
+        }
+      }
+    }
+
+    if (resultMap.size === 0 && (!node || !node.isDir) && (!this.sharedSysroot || !this.sharedSysroot.isDir(norm))) {
       throw new Error(`No such file or directory: ${norm}`);
     }
-    if (!node.isDir) {
-      throw new Error(`Not a directory: ${norm}`);
-    }
 
-    const results = [];
-    for (const [name, child] of node.children.entries()) {
-      results.push({
-        name,
-        isDir: child.isDir,
-        size: child.isDir ? 0 : child.content.byteLength,
-        mtime: child.mtime,
-      });
-    }
-
+    const results = Array.from(resultMap.values());
     return results.sort((a, b) => {
       if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
       return a.name.localeCompare(b.name);

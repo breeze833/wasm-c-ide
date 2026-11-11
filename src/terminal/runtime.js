@@ -263,11 +263,14 @@ export class RuntimeManager {
         }
       }
 
+      const sharedSysrootBuffer = (options.vfs && options.vfs.sharedSysroot) ? options.vfs.sharedSysroot.buffer : null;
+
       this.worker.postMessage({
         type: 'run',
         wasmBytes,
         sharedBuffer: this.sharedBuffer,
         raylibSharedBuffer: this.raylibSharedBuffer,
+        sharedSysrootBuffer,
         argv,
         stdinBytes,
         files: filesSnapshot,

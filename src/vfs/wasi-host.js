@@ -23,6 +23,8 @@ import {
   wrapWasiPipes
 } from 'busybox-wasi/host';
 
+export const EROFS = 65;
+
 export {
   BaseWasiHost,
   ProcExit,
@@ -162,6 +164,9 @@ export class WasiHost extends BaseWasiHost {
     baseImports.path_remove_directory = (dirfd, path_ptr, path_len) => {
       const pathStr = this.readStr(path_ptr, path_len);
       const fullPath = this.resolvePath(dirfd, pathStr);
+      if (this.vfs && typeof this.vfs._isReadOnly === 'function' && this.vfs._isReadOnly(fullPath)) {
+        return EROFS;
+      }
       if (!this._vfsIsDir(fullPath)) {
         return this._vfsExists(fullPath) ? ENOTDIR : ENOENT;
       }
@@ -193,6 +198,9 @@ export class WasiHost extends BaseWasiHost {
     baseImports.path_create_directory = (dirfd, path_ptr, path_len) => {
       const pathStr = this.readStr(path_ptr, path_len);
       const fullPath = this.resolvePath(dirfd, pathStr);
+      if (this.vfs && typeof this.vfs._isReadOnly === 'function' && this.vfs._isReadOnly(fullPath)) {
+        return EROFS;
+      }
       if (this._vfsExists(fullPath) || this._vfsIsDir(fullPath)) {
         return EEXIST;
       }
@@ -213,6 +221,9 @@ export class WasiHost extends BaseWasiHost {
     baseImports.path_unlink_file = (dirfd, path_ptr, path_len) => {
       const pathStr = this.readStr(path_ptr, path_len);
       const fullPath = this.resolvePath(dirfd, pathStr);
+      if (this.vfs && typeof this.vfs._isReadOnly === 'function' && this.vfs._isReadOnly(fullPath)) {
+        return EROFS;
+      }
       if (this._vfsIsDir(fullPath)) {
         return EISDIR;
       }
@@ -221,6 +232,50 @@ export class WasiHost extends BaseWasiHost {
       }
       this._vfsRemove(fullPath);
       return ESUCCESS;
+    };
+
+    // Ensure path_open enforces read-only safety on system directories
+    const origPathOpen = baseImports.path_open;
+    baseImports.path_open = (dirfd, dirflags, path_ptr, path_len, oflags, fs_rights_base, fs_rights_inheriting, fdflags, opened_fd_ptr) => {
+      const pathStr = this.readStr(path_ptr, path_len);
+      const fullPath = this.resolvePath(dirfd, pathStr);
+
+      if (this.vfs && typeof this.vfs._isReadOnly === 'function' && this.vfs._isReadOnly(fullPath)) {
+        const WASI_O_CREAT = 1;
+        const WASI_O_TRUNC = 8;
+        const WASI_FDFLAG_APPEND = 1;
+        const rightsBig = typeof fs_rights_base === 'bigint' ? fs_rights_base : BigInt(fs_rights_base || 0);
+        const canWrite = (rightsBig === 0n)
+          ? Boolean((oflags & (WASI_O_CREAT | WASI_O_TRUNC)) || (fdflags & WASI_FDFLAG_APPEND))
+          : ((rightsBig & (1n << 6n)) !== 0n);
+
+        if ((oflags & (WASI_O_CREAT | WASI_O_TRUNC)) !== 0 || (fdflags & WASI_FDFLAG_APPEND) !== 0 || canWrite) {
+          return EROFS;
+        }
+      }
+
+      return origPathOpen(dirfd, dirflags, path_ptr, path_len, oflags, fs_rights_base, fs_rights_inheriting, fdflags, opened_fd_ptr);
+    };
+
+    // Ensure path_rename enforces read-only safety on system directories and tracks file movement
+    const origPathRename = baseImports.path_rename;
+    baseImports.path_rename = (old_fd, old_path_ptr, old_path_len, new_fd, new_path_ptr, new_path_len) => {
+      const oldPathStr = this.readStr(old_path_ptr, old_path_len);
+      const oldFull = this.resolvePath(old_fd, oldPathStr);
+      const newPathStr = this.readStr(new_path_ptr, new_path_len);
+      const newFull = this.resolvePath(new_fd, newPathStr);
+      if (this.vfs && typeof this.vfs._isReadOnly === 'function' && (this.vfs._isReadOnly(oldFull) || this.vfs._isReadOnly(newFull))) {
+        return EROFS;
+      }
+      const res = origPathRename(old_fd, old_path_ptr, old_path_len, new_fd, new_path_ptr, new_path_len);
+      if (res === ESUCCESS) {
+        this.deletedFiles.add(oldFull);
+        this.changedFiles.delete(oldFull);
+        if (this._vfsExists(newFull)) {
+          this.changedFiles.set(newFull, this._vfsReadFile(newFull));
+        }
+      }
+      return res;
     };
 
     return wrapWasiPipes(baseImports, this);
@@ -266,5 +321,6 @@ if (typeof module !== 'undefined' && module.exports) {
     ENOSYS,
     ENOTDIR,
     EPERM,
+    EROFS,
   };
 }

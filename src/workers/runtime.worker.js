@@ -10,6 +10,7 @@ if (typeof self === 'undefined') {
 
 import { createRaylibHost } from 'raylib-wasi';
 import { createGraphicsImports } from 'canvas-wasi/worker';
+import { VFS } from '../vfs/vfs.js';
 import { WasiHost, ProcExit, normalizePath, ESUCCESS } from '../vfs/wasi-host.js';
 
 export { ProcExit, normalizePath };
@@ -41,7 +42,7 @@ self.onmessage = async (event) => {
   }
 
   if (msg.type === 'run') {
-    const { wasmBytes, sharedBuffer, argv = ['./a.out'], environ = {}, stdinBytes, raylibSharedBuffer, files = {} } = msg;
+    const { wasmBytes, sharedBuffer, argv = ['./a.out'], environ = {}, stdinBytes, raylibSharedBuffer, files = {}, sharedSysrootBuffer = null } = msg;
 
     if (sharedBuffer) {
       sharedInt32 = new Int32Array(sharedBuffer);
@@ -49,7 +50,7 @@ self.onmessage = async (event) => {
     }
 
     try {
-      const res = await runWasm(wasmBytes, argv, environ, stdinBytes, raylibSharedBuffer, files);
+      const res = await runWasm(wasmBytes, argv, environ, stdinBytes, raylibSharedBuffer, files, sharedSysrootBuffer);
       const changes = {};
       if (res && res.changedFiles) {
         for (const [k, v] of res.changedFiles.entries()) {
@@ -75,7 +76,7 @@ self.onmessage = async (event) => {
   }
 };
 
-export async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibSharedBuffer = null, initialFiles = {}) {
+export async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibSharedBuffer = null, initialFiles = {}, sharedSysrootBuffer = null) {
   let memoryInstance = null;
   let stdinPos = 0;
   const preloadedStdin = stdinBytes ? (stdinBytes instanceof Uint8Array ? stdinBytes : new Uint8Array(stdinBytes)) : null;
@@ -161,22 +162,26 @@ export async function runWasm(wasmBytes, argv, environ, stdinBytes = null, rayli
     return ESUCCESS;
   }
 
-  const fsMap = new Map();
+  const vfs = new VFS();
+  if (sharedSysrootBuffer) {
+    vfs.setSharedSysroot(sharedSysrootBuffer);
+  }
   for (const [k, v] of Object.entries(initialFiles || {})) {
     const norm = normalizePath(k);
     const u8 = typeof v === 'string'
       ? new TextEncoder().encode(v)
       : (v instanceof Uint8Array ? v : new Uint8Array(v));
-    fsMap.set(norm, u8);
+    vfs.writeFile(norm, u8, Date.now(), true);
   }
 
   const wasiHost = new WasiHost({
-    vfs: fsMap,
+    vfs,
     cwd: '/workspace',
     argv: argv || ['./a.out'],
     environ: { USER: 'student', HOME: '/workspace', PWD: '/workspace', ...(environ || {}) },
     preopens: [
       { fd: 3, path: '/workspace', name: '.' },
+      { fd: 4, path: '/', name: '/' },
     ],
     stdin: readStdin,
     stdout: (text) => self.postMessage({ type: 'stdout', data: text }),

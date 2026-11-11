@@ -129,4 +129,26 @@ assert.strictEqual(vfs2.readFile('/workspace/src/a.c'), 'int a = 1;');
 assert.strictEqual(vfs2.readFile('/workspace/include/a.h'), 'extern int a;');
 console.log('✓ Zip round-trip passed');
 
+// Test 6: SharedSysroot Overlay on VFS
+import { buildSharedSysroot } from '../src/vfs/shared-sysroot.js';
+const overlayBuf = buildSharedSysroot([
+  { path: '/include/wasm32-wasip1/time.h', content: '#pragma once\ntypedef long time_t;' },
+  { path: '/usr/include/math.h', content: '#pragma once\ndouble cos(double);' },
+]);
+
+const overlayVfs = new VFS();
+overlayVfs.writeFile('/workspace/test.c', 'int main() { return 0; }');
+overlayVfs.setSharedSysroot(overlayBuf);
+
+assert.strictEqual(overlayVfs.exists('/include/wasm32-wasip1/time.h'), true, 'Overlay file exists');
+assert.strictEqual(overlayVfs.exists('/workspace/test.c'), true, 'Local workspace file exists');
+assert.ok(overlayVfs.readFile('/include/wasm32-wasip1/time.h', true).includes('time_t'), 'Reads overlay file');
+assert.throws(() => {
+  overlayVfs.writeFile('/include/wasm32-wasip1/time.h', 'hack');
+}, /Permission denied/, 'Writing to sysroot overlay is rejected');
+
+const includeEntries = overlayVfs.readDir('/usr/include');
+assert.ok(includeEntries.some(e => e.name === 'math.h'), 'readDir unions overlay entries');
+console.log('✓ SharedSysroot overlay on VFS passed');
+
 console.log('--- ALL VFS TESTS PASSED ---');

@@ -150,7 +150,8 @@ export class CompilerClient {
       };
 
       this.worker.addEventListener('message', readyHandler);
-      this.worker.postMessage({ type: 'init', basePath: this.basePath });
+      const sharedSysrootBuffer = (this.vfs && this.vfs.sharedSysroot) ? this.vfs.sharedSysroot.buffer : null;
+      this.worker.postMessage({ type: 'init', basePath: this.basePath, sharedSysrootBuffer });
     });
 
     return this.initPromise;
