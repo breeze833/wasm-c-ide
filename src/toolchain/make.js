@@ -92,60 +92,6 @@ export async function loadMakeBinary(basePath = '/sysroot/wasm', vfs = null) {
 }
 
 /**
- * Educational Makefile Parser for backward compatibility and static analysis.
- */
-export function parseMakefile(content) {
-  const lines = (content || '').split('\n');
-  const vars = new Map();
-  const targets = new Map(); // targetName -> { prereqs: [], recipes: [] }
-  let currentTarget = null;
-
-  for (let rawLine of lines) {
-    // Variable definition: VAR = VAL
-    const varMatch = rawLine.match(/^([A-Za-z0-9_]+)\s*=\s*(.*)$/);
-    if (varMatch && !rawLine.startsWith('\t')) {
-      vars.set(varMatch[1], varMatch[2].trim());
-      currentTarget = null;
-      continue;
-    }
-
-    // Substitute variables $(VAR) across the line
-    let expandedLine = rawLine;
-    for (const [k, v] of vars.entries()) {
-      expandedLine = expandedLine.split(`$(${k})`).join(v);
-    }
-
-    // Recipe line (starts with tab)
-    if (rawLine.startsWith('\t')) {
-      if (currentTarget) {
-        let recipe = expandedLine.substring(1).trim();
-        currentTarget.recipes.push(recipe);
-      }
-      continue;
-    }
-
-    // Target line: target: prereq1 prereq2 | order_only
-    const targetMatch = expandedLine.match(/^([A-Za-z0-9_./%-]+)\s*:\s*(.*)$/);
-    if (targetMatch) {
-      const name = targetMatch[1].trim();
-      let prereqStr = targetMatch[2].trim();
-
-      const prereqs = prereqStr
-        .split('|')[0] // discard order-only separator
-        .split(/\s+/)
-        .map((p) => p.trim())
-        .filter(Boolean);
-
-      const targetObj = { prereqs, recipes: [] };
-      targets.set(name, targetObj);
-      currentTarget = targetObj;
-    }
-  }
-
-  return { vars, targets };
-}
-
-/**
  * Executes GNU Make via WebAssembly (make-wasi) against the in-memory VFS.
  */
 export async function runMake({

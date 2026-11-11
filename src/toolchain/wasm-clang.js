@@ -1,9 +1,8 @@
 // WebAssembly Clang and LLD Driver
 // Encapsulates Clang, LLD, and Sysroot execution directly backed by VFS via WasiHost
 
-import { Tar } from './tar.js';
 import { createSharedSysrootFromTar } from '../vfs/shared-sysroot.js';
-import { WasiHost, ProcExit, ESUCCESS, normalizePath } from '../vfs/wasi-host.js';
+import { WasiHost, ProcExit, normalizePath } from '../vfs/wasi-host.js';
 import { WASM_HOST_IMPORTS } from '../vfs/sysroot.js';
 import { getWasmModule, saveWasmModule } from './wasm-cache.js';
 
@@ -477,7 +476,6 @@ export class WasmToolchain {
     args.push(
       '-internal-isystem', '/lib/clang/19/include',
       '-internal-isystem', '/lib/clang/19.1.0/include',
-      '-internal-isystem', '/lib/clang/8.0.1/include',
       '-internal-isystem', '/include/wasm32-wasip1',
       '-internal-isystem', '/include',
       '-internal-isystem', '/usr/include',

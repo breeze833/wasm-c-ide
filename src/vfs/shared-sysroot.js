@@ -447,14 +447,29 @@ export function createSharedSysrootFromTar(tarBuffer, options = {}) {
   }
 
   // Custom virtual headers & library stubs from sysroot.js
+  // Only inject custom headers or stubs that are not already present in sysroot.tar.gz
+  const existingPaths = new Set(fileEntries.map(e => e.path));
+
   for (const [filename, content] of Object.entries(STANDARD_C_HEADERS)) {
-    fileEntries.push({ path: `/usr/include/${filename}`, content, isDir: false });
+    const p = `/usr/include/${filename}`;
+    if (!existingPaths.has(p)) {
+      fileEntries.push({ path: p, content, isDir: false });
+      existingPaths.add(p);
+    }
   }
   for (const [filename, content] of Object.entries(STANDARD_CPP_HEADERS)) {
-    fileEntries.push({ path: `/usr/include/${filename}`, content, isDir: false });
+    const p = `/usr/include/${filename}`;
+    if (!existingPaths.has(p)) {
+      fileEntries.push({ path: p, content, isDir: false });
+      existingPaths.add(p);
+    }
   }
   for (const lib of STANDARD_LIBS) {
-    fileEntries.push({ path: `/usr/lib/${lib}`, content: `!<arch>\n/* ${lib} wasi-libc */\n`, isDir: false });
+    const p = `/usr/lib/${lib}`;
+    if (!existingPaths.has(p)) {
+      fileEntries.push({ path: p, content: `!<arch>\n/* ${lib} wasi-libc */\n`, isDir: false });
+      existingPaths.add(p);
+    }
   }
   fileEntries.push({
     path: '/usr/lib/wasm-host-imports.txt',

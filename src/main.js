@@ -10,15 +10,12 @@ import { FileTreeUI } from './components/filetree.js';
 import { showToast } from './components/toast.js';
 import { TerminalManager } from './terminal/terminal.js';
 import { RuntimeManager } from './terminal/runtime.js';
+import { LineEditor } from './terminal/line-editor.js';
 import { CompilerClient } from './toolchain/compiler-client.js';
-import { WasmToolchain } from './toolchain/wasm-clang.js';
-import { executeGccCommand, executeToolCommand, executeLdCommand } from './toolchain/driver.js';
-import { executeArCommand } from './toolchain/ar.js';
 import { GraphicsWindowUI } from 'canvas-wasi';
 import 'canvas-wasi/style.css';
 
 import { SettingsModal, DEFAULT_RUN_COMMAND } from './components/settings.js';
-import { runMake } from './toolchain/make.js';
 import { ReferenceDrawer, getDocsUrl } from './components/reference.js';
 
 export function checkIsolation() {
@@ -26,6 +23,18 @@ export function checkIsolation() {
   console.log(`[Wasm C IDE] Cross-Origin Isolation: ${isIsolated ? 'ENABLED' : 'DISABLED'}`);
   return isIsolated;
 }
+
+// Shell synchronous stdin control indices & states
+const SHELL_STDIN_STATE_IDX = 4;
+const SHELL_STDIN_LEN_IDX = 5;
+const SHELL_STDIN_READ_POS_IDX = 6;
+
+const SHELL_STDIN_STATE_IDLE = 0;
+const SHELL_STDIN_STATE_WAITING = 1;
+const SHELL_STDIN_STATE_READY = 2;
+const SHELL_STDIN_STATE_EOF = -1;
+
+const SHELL_STDIN_DATA_OFFSET = 32;
 
 // Synchronously register PWA install prompt listener at module evaluation to prevent race conditions
 let globalDeferredInstallPrompt = null;
@@ -157,6 +166,11 @@ export class App {
       this.terminal.writeln('\x1b[90m[*] Preparing C/C++ standard library sysroot...\x1b[0m');
     }
     try {
+      // Eagerly mount standalone utilities (sqlite3, make, busybox) concurrently
+      mountSysrootUtilities(this.vfs, wasmBasePath).catch((err) => {
+        console.warn('Failed to pre-mount sysroot utilities:', err);
+      });
+
       const sharedSysrootBuffer = await loadOrBuildSharedSysroot(wasmBasePath, (status) => {
         if (this.terminal) {
           this.terminal.writeln(`\x1b[90m[*] ${status}\x1b[0m`);
@@ -262,6 +276,10 @@ export class App {
         if (this.runtimeManager && this.runtimeManager.handleTerminalInput(inputData)) {
           return;
         }
+        // If shell worker is active and waiting for stdin (cat, read, etc.), route to shell stdin handler
+        if (this.isShellWaitingForStdin && this.handleShellStdinInput(inputData)) {
+          return;
+        }
         if (this.shellWorker) {
           this.shellWorker.postMessage({ type: 'input', data: inputData });
         }
@@ -304,14 +322,21 @@ export class App {
     });
     this.runtimeManager.setGraphicsWindow(this.graphicsWindow);
 
-    // Setup SharedArrayBuffer for synchronous host process execution in shell worker
+    // Setup SharedArrayBuffer for synchronous host process execution & stdin in shell worker
     if (typeof SharedArrayBuffer !== 'undefined') {
-      this.shellSharedBuffer = new SharedArrayBuffer(1024);
+      this.shellSharedBuffer = new SharedArrayBuffer(8192);
       this.shellSharedInt32 = new Int32Array(this.shellSharedBuffer);
+      this.shellSharedUint8 = new Uint8Array(this.shellSharedBuffer);
     } else {
       this.shellSharedBuffer = null;
       this.shellSharedInt32 = null;
+      this.shellSharedUint8 = null;
     }
+
+    this.isShellWaitingForStdin = false;
+    this.shellLineEditor = new LineEditor({
+      write: (str) => this.terminal.write(str),
+    });
 
     // Instantiate Shell Worker as ES Module worker
     this.shellWorker = new Worker(
@@ -325,6 +350,18 @@ export class App {
 
       if (msg.type === 'term_write') {
         this.terminal.write(msg.data);
+        return;
+      }
+
+      if (msg.type === 'stdin_request') {
+        this.isShellWaitingForStdin = true;
+        if (this.shellLineEditor) this.shellLineEditor.reset();
+        return;
+      }
+
+      if (msg.type === 'command_done') {
+        this.isShellWaitingForStdin = false;
+        if (this.shellLineEditor) this.shellLineEditor.reset();
         return;
       }
 
@@ -582,14 +619,16 @@ export class App {
       }
 
       let wasmBytes = this.vfs.readFile(execPath, false);
-      if (
+      const isStubOrInvalid = (
         !wasmBytes ||
-        wasmBytes.length < 4 ||
+        wasmBytes.length <= 8 ||
         wasmBytes[0] !== 0x00 ||
         wasmBytes[1] !== 0x61 ||
         wasmBytes[2] !== 0x73 ||
         wasmBytes[3] !== 0x6d
-      ) {
+      );
+
+      if (isStubOrInvalid) {
         // On-demand fetch fallback for prebuilt binaries like sqlite3
         if (cmd === 'sqlite3' || execPath.endsWith('/sqlite3')) {
           try {
@@ -610,7 +649,7 @@ export class App {
 
       if (
         !wasmBytes ||
-        wasmBytes.length < 4 ||
+        wasmBytes.length <= 8 ||
         wasmBytes[0] !== 0x00 ||
         wasmBytes[1] !== 0x61 ||
         wasmBytes[2] !== 0x73 ||
@@ -818,9 +857,99 @@ export class App {
     if (this.graphicsWindow && this.graphicsWindow.isOpen()) {
       this.graphicsWindow.close();
     }
+    if (this.isShellWaitingForStdin) {
+      this.isShellWaitingForStdin = false;
+      if (this.shellLineEditor) this.shellLineEditor.reset();
+      if (this.shellSharedInt32) {
+        Atomics.store(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, SHELL_STDIN_STATE_EOF);
+        Atomics.notify(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, 1);
+      }
+    }
     if (this.shellWorker) {
       this.shellWorker.postMessage({ type: 'interrupt' });
     }
+  }
+
+  handleShellStdinInput(key) {
+    if (!this.isShellWaitingForStdin) {
+      return false;
+    }
+
+    // Ctrl-C (\x03)
+    if (key === '\x03') {
+      this.terminal.writeln('^C');
+      this.isShellWaitingForStdin = false;
+      if (this.shellLineEditor) this.shellLineEditor.reset();
+      if (this.shellSharedInt32) {
+        Atomics.store(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, SHELL_STDIN_STATE_EOF);
+        Atomics.notify(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, 1);
+      }
+      if (this.shellWorker) {
+        this.shellWorker.postMessage({ type: 'interrupt' });
+      }
+      return true;
+    }
+
+    // Ctrl-D (EOT: \x04)
+    if (key === '\x04') {
+      const currentBuf = this.shellLineEditor.getBuffer();
+      if (currentBuf.length > 0) {
+        // Flush line buffer without trailing newline
+        this.shellLineEditor.reset();
+
+        if (this.shellSharedInt32 && this.shellSharedUint8) {
+          const encoded = new TextEncoder().encode(currentBuf);
+          const toWrite = Math.min(encoded.length, this.shellSharedBuffer.byteLength - SHELL_STDIN_DATA_OFFSET);
+
+          this.shellSharedUint8.set(encoded.subarray(0, toWrite), SHELL_STDIN_DATA_OFFSET);
+          Atomics.store(this.shellSharedInt32, SHELL_STDIN_LEN_IDX, toWrite);
+          Atomics.store(this.shellSharedInt32, SHELL_STDIN_READ_POS_IDX, 0);
+
+          Atomics.store(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, SHELL_STDIN_STATE_READY);
+          Atomics.notify(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, 1);
+        }
+
+        this.isShellWaitingForStdin = false;
+        return true;
+      }
+
+      // Empty buffer: signal EOF
+      if (this.shellSharedInt32) {
+        Atomics.store(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, SHELL_STDIN_STATE_EOF);
+        Atomics.notify(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, 1);
+      }
+
+      this.isShellWaitingForStdin = false;
+      return true;
+    }
+
+    // Enter
+    if (key === '\r' || key === '\n') {
+      this.terminal.writeln('');
+      const lineText = this.shellLineEditor.getBuffer();
+      this.shellLineEditor.commitHistory(lineText);
+      this.shellLineEditor.reset();
+      const lineWithNewline = lineText + '\n';
+
+      if (this.shellSharedInt32 && this.shellSharedUint8) {
+        const encoded = new TextEncoder().encode(lineWithNewline);
+        const toWrite = Math.min(encoded.length, this.shellSharedBuffer.byteLength - SHELL_STDIN_DATA_OFFSET);
+
+        this.shellSharedUint8.set(encoded.subarray(0, toWrite), SHELL_STDIN_DATA_OFFSET);
+        Atomics.store(this.shellSharedInt32, SHELL_STDIN_LEN_IDX, toWrite);
+        Atomics.store(this.shellSharedInt32, SHELL_STDIN_READ_POS_IDX, 0);
+
+        Atomics.store(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, SHELL_STDIN_STATE_READY);
+        Atomics.notify(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, 1);
+      }
+
+      this.isShellWaitingForStdin = false;
+      return true;
+    }
+
+    // All other keys: delegate to shellLineEditor (arrows, backspace, delete, home/end, printable chars)
+    this.shellLineEditor.feed(key);
+    return true;
   }
 
   setupZoomControls() {

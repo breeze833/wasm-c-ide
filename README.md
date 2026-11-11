@@ -88,6 +88,8 @@ This IDE is specifically engineered for **students and systems programming educa
   - **Directory Stack Subsystem (`pushd`, `popd`, `dirs`)**: Full pedagogical support across both interactive prompt sessions and shell scripts (`build.sh`) with in-memory directory stack serialization, automatic CWD guest initialization, and zero line-number offset.
   - **Environment Variable Lifecycle**: Full persistence for `export VAR="val"`, `unset VAR`, and scoped command prefixes (e.g. `CFLAGS="-O2" make`, `VAR="val" ./a.out`) seamlessly propagated across all worker threads (`compiler.worker.js`, `runtime.worker.js`, and script execution).
   - **Direct Script Execution**: Run `./build.sh` or `/workspace/script.sh` in Script Bootstrap Mode with automatic guest CWD initialization (`/workspace`), accurate file-relative error reporting, and `pushd`/`popd` support without artificial preamble line offsets.
+  - **Synchronous Shell Stdin (`cat > file`)**: Commands reading from standard input run interactively, capturing keyboard input in xterm, echoing characters, and closing cleanly on `Ctrl-D` EOF without losing entered data.
+  - **POSIX Heredocs & Multi-Line Scripting (`cat <<EOF`)**: Multi-line heredocs and open control constructs accumulate under the secondary continuation prompt (`> `); early termination via `Ctrl-D` synthesizes closing delimiters to prevent trailing script control sequences from leaking into user output.
   - **Interactive EOF (`Ctrl-D`)**: Flushes buffer or signals EOF to input loops (`scanf`, `cin`, `getchar`).
   - **Glob Pattern Expansion**: Expands `*` and `?` wildcards against the VFS file tree (e.g., `ls build/*`, `gcc src/*.c`).
   - **Advanced File Operations**: `mv` and `cp` support directory destinations (`mv a.out src/`), multi-source operands (`mv a.c b.c src/`), atomic file replacement, and recursive directory copying (`cp -r src backup/`).
@@ -234,7 +236,7 @@ This IDE is specifically engineered for **students and systems programming educa
   - The public `turtle_begin(ctx)` macro expands to `(<backend>_turtle_init(ctx) && turtle_begin_core())` provided by `<turtle_backend_canvas_wasi.h>` or `<turtle_backend_raylib.h>`, ensuring compile/link failures if a program links against the incorrect backend archive.
 - **Automated In-Tree Asset Compilation**:
   - `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and uses the in-tree WebAssembly toolchain (`llvm-box.wasm` + `ar.js`) to compile both WebAssembly static archives with zero host compiler dependencies (`clang`, `llvm-ar`, or `make`).
-  - Copies user headers to `public/sysroot/include/turtle/` and auto-generates `src/vfs/turtle-headers.js` to ensure zero drift between physical headers and the in-browser virtual sysroot.
+  - Copies user headers to `public/sysroot/include/turtle/` and bundles them directly into `sysroot.tar.gz` to ensure zero drift between physical headers and the in-browser virtual sysroot.
 - **Standard Linker Flag Specification**:
   - Linker flags are explicitly configured in the Project Settings Linker Flags field or passed on the terminal CLI:
     - Turtle with Canvas-WASI: `-lturtle`

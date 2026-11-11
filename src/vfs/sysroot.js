@@ -1,8 +1,25 @@
 // Sysroot initialization for standard C/C++ headers in /usr/include
+import fs from 'node:fs';
+import path from 'node:path';
 import { GRAPHICS_H, GRAPHICS_CANVAS_H } from 'canvas-wasi/headers';
-import { TURTLE_HEADERS } from './turtle-headers.js';
-import { RAYLIB_HEADERS } from './raylib-headers.js';
-import { SQLITE_HEADERS } from './sqlite-headers.js';
+
+// Helper to read custom headers from public/sysroot/include when running in Node.js (e.g. tests)
+function readDiskHeader(relPath) {
+  if (typeof process !== 'undefined' && process?.versions?.node && typeof fs?.readFileSync === 'function') {
+    try {
+      const candidates = [
+        path.resolve(process.cwd(), 'public/sysroot/include', relPath),
+        path.resolve(process.cwd(), '../public/sysroot/include', relPath),
+      ];
+      for (const cand of candidates) {
+        if (fs.existsSync(cand)) {
+          return fs.readFileSync(cand, 'utf-8');
+        }
+      }
+    } catch {}
+  }
+  return '';
+}
 
 export const STANDARD_C_HEADERS = {
   'stdio.h': `/* Minimal WASI / Musl stdio.h */
@@ -599,18 +616,37 @@ int closedir(DIR *dirp);
 
   'graphics.h': GRAPHICS_H,
   'graphics_canvas.h': GRAPHICS_CANVAS_H,
-  'turtle.h': TURTLE_HEADERS['turtle.h'],
-  'turtle_backend_canvas_wasi.h': TURTLE_HEADERS['turtle_backend_canvas_wasi.h'],
-  'turtle_backend_raylib.h': TURTLE_HEADERS['turtle_backend_raylib.h'],
-  'raylib.h': RAYLIB_HEADERS['raylib.h'],
-  'raymath.h': RAYLIB_HEADERS['raymath.h'],
-  'rlgl.h': RAYLIB_HEADERS['rlgl.h'],
-  'raygui.h': RAYLIB_HEADERS['raygui.h'],
-  'sqlite3.h': SQLITE_HEADERS['sqlite3.h'],
-  'sqlite3ext.h': SQLITE_HEADERS['sqlite3ext.h'],
 };
 
-export { TURTLE_HEADERS, RAYLIB_HEADERS, SQLITE_HEADERS };
+export const TURTLE_HEADERS = new Proxy({}, {
+  get(target, prop) {
+    if (typeof prop !== 'string') return undefined;
+    if (!(prop in target)) {
+      target[prop] = readDiskHeader(`turtle/${prop}`) || readDiskHeader(prop);
+    }
+    return target[prop];
+  }
+});
+
+export const RAYLIB_HEADERS = new Proxy({}, {
+  get(target, prop) {
+    if (typeof prop !== 'string') return undefined;
+    if (!(prop in target)) {
+      target[prop] = readDiskHeader(`raylib/${prop}`) || readDiskHeader(prop);
+    }
+    return target[prop];
+  }
+});
+
+export const SQLITE_HEADERS = new Proxy({}, {
+  get(target, prop) {
+    if (typeof prop !== 'string') return undefined;
+    if (!(prop in target)) {
+      target[prop] = readDiskHeader(`sqlite/${prop}`) || readDiskHeader(prop);
+    }
+    return target[prop];
+  }
+});
 
 export const STANDARD_CPP_HEADERS = {
   'cstdio': `// Minimal C++ cstdio header
@@ -1410,6 +1446,20 @@ export function mountSysroot(vfs) {
   // Mount C++ headers
   for (const [filename, content] of Object.entries(STANDARD_CPP_HEADERS)) {
     vfs.writeFile(`/usr/include/${filename}`, content, Date.now(), true);
+  }
+
+  // Mount custom subsystem headers if available on disk (in Node.js / test environments).
+  // In production (browser), these are provided automatically via SharedSysroot (sysroot.tar.gz).
+  const customHeaders = [
+    'turtle.h', 'turtle_backend_canvas_wasi.h', 'turtle_backend_raylib.h',
+    'raylib.h', 'raymath.h', 'rlgl.h', 'raygui.h',
+    'sqlite3.h', 'sqlite3ext.h',
+  ];
+  for (const h of customHeaders) {
+    const content = readDiskHeader(h) || readDiskHeader(`turtle/${h}`) || readDiskHeader(`raylib/${h}`) || readDiskHeader(`sqlite/${h}`);
+    if (content) {
+      vfs.writeFile(`/usr/include/${h}`, content, Date.now(), true);
+    }
   }
 
   // Mount /usr/lib static libraries

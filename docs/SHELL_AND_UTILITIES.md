@@ -147,6 +147,25 @@ When `Ctrl+C` (`\x03`) is received:
 
 ---
 
+### 1.8 Synchronous Terminal Stdin Coordination & Interactive Commands
+When commands reading from standard input (such as `cat > file`, `sh`, or `sqlite3`) run inside the shell worker:
+- **SharedArrayBuffer Stdin Bridge**: When `fd_read` on stdin (fd 0) occurs in a sub-process, `shell.worker.js` requests input from the main thread via the `stdin_request` message protocol.
+- **Terminal Keystroke Capture**: `main.js` transitions terminal input routing to the active shell stdin coordinator, capturing keyboard strokes, echoing them to `xterm.js`, and handling line editing (Backspace, Enter).
+- **Line Delivery**: Upon pressing <kbd>Enter</kbd>, the encoded line (with `\n`) is copied into the shared buffer, and the waiting `fd_read` consumes it synchronously.
+- **EOF Handling (<kbd>Ctrl-D</kbd>)**: Pressing <kbd>Ctrl-D</kbd> on an empty input line delivers `STATE_EOF` (`0` bytes read), signalling EOF cleanly to the command (e.g. Closing `cat > file` or exiting interactive shells).
+
+---
+
+### 1.9 POSIX Heredoc Parsing, Multi-Line Accumulation & Safe Delimiter Closure
+- **Interactive Multi-Line Buffering**:
+  When a shell command contains an unquoted or quoted heredoc (`<<DELIM`, `<<'DELIM'`, `<<-DELIM`), the shell detects the pending delimiter via `findHeredocs` and enters multi-line buffering mode instead of executing immediately.
+- **Secondary Prompt (`PS2`)**:
+  While heredocs or compound multi-line constructs remain unclosed, `shell.worker.js` displays the secondary continuation prompt (`> `). Each entered line is appended to `multiLineBuffer`.
+- **Safe Delimiter Closure on Early EOF (<kbd>Ctrl-D</kbd>)**:
+  If the user presses <kbd>Ctrl-D</kbd> without entering the terminating delimiter, `closePendingHeredocs()` synthesizes the terminating delimiter before appending the shell environment cleanup preamble (`__rc=$?; __host_update_pwd "$(pwd)"; exit $__rc`). This strictly prevents the trailing shell control commands from leaking into the unclosed heredoc body and corrupting user output.
+
+---
+
 ## 2. Real GNU Make WASI Integration (`make-wasi`)
 
 `wasm-c-ide` embeds real GNU Make 4.4.1 compiled targeting `wasm32-wasip1` (`make.wasm`) without mock interpreters:

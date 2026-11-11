@@ -213,10 +213,24 @@ export class VFS {
     } else {
       this.sharedSysroot = new SharedSysrootReader(readerOrBuffer);
     }
+
+    // Free heap memory by clearing early-boot mock nodes in system paths now backed by SharedSysroot
+    for (const sysDir of ['/usr/include', '/usr/lib', '/include', '/bin']) {
+      const node = this._resolve(sysDir);
+      if (node && node.isDir && node.children) {
+        node.children.clear();
+      }
+    }
   }
 
   readFile(path, asText = true) {
     const norm = normalizePath(path);
+
+    // If SharedSysroot is mounted, it serves as the single source of truth for immutable system directories
+    if (this.sharedSysroot && (norm.startsWith('/usr/') || norm.startsWith('/include/') || norm.startsWith('/lib/') || norm.startsWith('/bin/')) && this.sharedSysroot.exists(norm)) {
+      return this.sharedSysroot.readFile(norm, asText);
+    }
+
     const node = this._resolve(norm);
 
     if (node) {

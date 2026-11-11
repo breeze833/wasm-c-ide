@@ -145,6 +145,8 @@ Detailed technical specifications, binary layouts, memory protocols, and case st
 | **In-Code Standard File I/O** | `fopen`, `fread`, `fwrite`, `fseek`, `fclose`, and `std::fstream` operate seamlessly via unified `WasiHost`. |
 | **Interactive `scanf` & `Ctrl-D` EOF** | Runtime worker standard input blocks via `SharedArrayBuffer` until Enter; `Ctrl-D` sends EOF cleanly. |
 | **Pipelines & Redirections** | Command pipelines (`|`) and stream redirections (`<`, `>`, `>>`) execute deterministically across stages. |
+| **Synchronous Shell Stdin (`cat > file`)** | Commands reading from shell stdin wait synchronously for user input in xterm, echo keystrokes, and terminate cleanly on `Ctrl-D` EOF without losing entered data. |
+| **POSIX Heredoc & Multi-Line Scripting (`cat <<EOF`)** | Multi-line commands and heredocs accumulate under secondary prompt (`> `); early `Ctrl-D` termination synthesizes closing delimiters and prevents shell cleanup preamble leakage. |
 | **Virtual Character Devices (`/dev/null`, `/dev/zero`)** | Shell stream redirections (`> /dev/null`, `< /dev/null`, `/dev/zero`) operate without allocating physical VFS storage; `ls /dev` lists virtual character devices `null` and `zero`. |
 | **Static Archiver (`ar rcs`)** | Built-in `ar` creates archives directly in VFS; `wasm-ld` links against them without errors. |
 | **Permanent Sysroot Bundling** | Raylib 5.5, Raylib turtle, and SQLite development files (`raylib.h`, `turtle.h`, `sqlite3.h`, `libraylib.a`, `libturtle.a`, `libsqlite3.a`) mount in sysroot by default. |

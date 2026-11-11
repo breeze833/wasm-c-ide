@@ -1343,8 +1343,18 @@ dirs() {
         const cmd = tokens[tokenIdx];
         const args = tokens.slice(tokenIdx + 1);
 
-        if (cmd === 'export' && args.length > 0) {
+        if (cmd === 'export') {
+          if (args.length === 0 || (args.length === 1 && args[0] === '-p')) {
+            const keys = Object.keys(testEnviron).sort();
+            for (const key of keys) {
+              const val = testEnviron[key];
+              const escapedVal = String(val).replace(/'/g, "'\\''");
+              writeln(`export ${key}='${escapedVal}'`);
+            }
+            return { exitCode: 0, output };
+          }
           for (const arg of args) {
+            if (arg === '-p') continue;
             const eq = arg.indexOf('=');
             if (eq !== -1) {
               testEnviron[arg.slice(0, eq)] = arg.slice(eq + 1);
@@ -1411,6 +1421,14 @@ dirs() {
     // Case 3: Export variable persists
     await runDispatch('export GREETING="Hello IDE"', testVfs);
     assert.strictEqual(testEnviron.GREETING, 'Hello IDE');
+
+    // Case 3b: Export without arguments lists exported variables
+    const rExport = await runDispatch('export', testVfs);
+    assert.strictEqual(rExport.exitCode, 0);
+    assert(rExport.output.includes("export GREETING='Hello IDE'"), 'export output must contain export GREETING');
+    const rExportP = await runDispatch('export -p', testVfs);
+    assert.strictEqual(rExportP.exitCode, 0);
+    assert(rExportP.output.includes("export GREETING='Hello IDE'"), 'export -p output must contain export GREETING');
 
     // Case 4: Execution with scoped environment prefix
     dispatchedCalls = [];
@@ -1508,6 +1526,138 @@ dirs() {
     assert.ok(pushdOutput.includes('Start in /workspace'), 'Script started in /workspace');
     assert.ok(pushdOutput.includes('Now in /workspace/script_pushd_test'), 'Script moved into /workspace/script_pushd_test');
     assert.ok(pushdOutput.includes('Returned to /workspace'), 'Script returned to /workspace');
+
+    // Case 10: BusyBox ash executing 'cat > /workspace/a.txt' with stdin handler
+    const inputLines = "line 1\nline 2\nline 3\n";
+    let inputPos = 0;
+    const inputBytes = new TextEncoder().encode(inputLines);
+
+    function simulatedStdin(iovs, iovs_len, nread_out, host) {
+      let totalRead = 0;
+      for (let i = 0; i < iovs_len; i++) {
+        const bufPtr = host.memU32()[(iovs >> 2) + i * 2];
+        const bufLen = host.memU32()[(iovs >> 2) + i * 2 + 1];
+        const available = inputBytes.length - inputPos;
+        if (available > 0) {
+          const toCopy = Math.min(bufLen, available);
+          host.memU8().set(inputBytes.subarray(inputPos, inputPos + toCopy), bufPtr);
+          inputPos += toCopy;
+          totalRead += toCopy;
+          break;
+        }
+      }
+      host.memU32()[nread_out >> 2] = totalRead;
+      return 0; // ESUCCESS
+    }
+
+    const catHost = new WasiHost({
+      vfs: testVfs,
+      cwd: '/workspace',
+      argv: ['busybox', 'sh', '-c', 'cat > /workspace/a.txt'],
+      environ: { USER: 'student', HOME: '/workspace', PWD: '/workspace', PATH: '/bin:/usr/bin' },
+      stdin: simulatedStdin,
+    });
+    const catInst = new WebAssembly.Instance(busyboxMod, catHost.createImportObject());
+    catHost.getMemory = () => catInst.exports.memory;
+    try { catInst.exports._start(); } catch (_) {}
+
+    assert.strictEqual(testVfs.exists('/workspace/a.txt'), true, 'a.txt must exist');
+    const aContent = testVfs.readFile('/workspace/a.txt');
+    assert.strictEqual(aContent, inputLines, 'a.txt content must match input lines');
+
+    // Case 11: Multi-line heredoc execution (cat <<EOF and cat <<EOF > file.txt)
+    let heredocOut = '';
+    const heredocScript = 'cat <<EOF\nhello heredoc line 1\nhello heredoc line 2\nEOF';
+    const wrappedHeredoc = `cd "/workspace"; _DIR_STACK="";\n${heredocScript}\n__rc=$?; exit $__rc`;
+    const heredocHost = new WasiHost({
+      vfs: testVfs,
+      cwd: '/workspace',
+      argv: ['busybox', 'sh', '-c', wrappedHeredoc],
+      environ: { USER: 'student', HOME: '/workspace', PWD: '/workspace', PATH: '/bin:/usr/bin' },
+      stdout: (s) => { heredocOut += s; },
+    });
+    const heredocInst = new WebAssembly.Instance(busyboxMod, heredocHost.createImportObject());
+    heredocHost.getMemory = () => heredocInst.exports.memory;
+    try { heredocInst.exports._start(); } catch (_) {}
+    assert.strictEqual(heredocOut, 'hello heredoc line 1\nhello heredoc line 2\n');
+
+    const heredocFileScript = 'cat <<EOF > /workspace/heredoc.txt\nline 1 in file\nline 2 in file\nEOF';
+    const wrappedFileHeredoc = `cd "/workspace"; _DIR_STACK="";\n${heredocFileScript}\n__rc=$?; exit $__rc`;
+    const heredocFileHost = new WasiHost({
+      vfs: testVfs,
+      cwd: '/workspace',
+      argv: ['busybox', 'sh', '-c', wrappedFileHeredoc],
+      environ: { USER: 'student', HOME: '/workspace', PWD: '/workspace', PATH: '/bin:/usr/bin' },
+    });
+    const heredocFileInst = new WebAssembly.Instance(busyboxMod, heredocFileHost.createImportObject());
+    heredocFileHost.getMemory = () => heredocFileInst.exports.memory;
+    try { heredocFileInst.exports._start(); } catch (_) {}
+    assert.strictEqual(testVfs.exists('/workspace/heredoc.txt'), true, 'heredoc.txt must exist');
+    assert.strictEqual(testVfs.readFile('/workspace/heredoc.txt'), 'line 1 in file\nline 2 in file\n');
+
+    // Case 12: Heredoc terminated by Ctrl-D without typing delimiter (auto-close without trailing preamble leak)
+    let unclosedHeredocOut = '';
+    const unclosedLines = ['cat <<EOF', 'line alpha', 'line beta'];
+    function findHeredocsTest(line) {
+      const heredocs = [];
+      let inSingle = false, inDouble = false, isEscaped = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (isEscaped) { isEscaped = false; continue; }
+        if (ch === '\\' && !inSingle) { isEscaped = true; continue; }
+        if (ch === "'" && !inDouble) { inSingle = !inSingle; continue; }
+        if (ch === '"' && !inSingle) { inDouble = !inDouble; continue; }
+        if (!inSingle && !inDouble) {
+          if (ch === '#' && (i === 0 || /\s/.test(line[i - 1]))) break;
+          if (ch === '<' && line[i + 1] === '<' && line[i + 2] !== '<' && (i === 0 || line[i - 1] !== '<')) {
+            let idx = i + 2;
+            let stripTabs = false;
+            if (line[idx] === '-') { stripTabs = true; idx++; }
+            while (idx < line.length && (line[idx] === ' ' || line[idx] === '\t')) idx++;
+            let word = '';
+            while (idx < line.length && !/[\s;|<>&()]/.test(line[idx])) { word += line[idx]; idx++; }
+            const cleanDelim = word.replace(/^(['"])(.*)\1$/, '$2').replace(/^\\/, '');
+            if (cleanDelim.length > 0) heredocs.push({ delim: cleanDelim, stripTabs });
+            i = idx - 1;
+          }
+        }
+      }
+      return heredocs;
+    }
+
+    function closePendingHeredocsTest(lines) {
+      const pending = [];
+      for (const line of lines) {
+        if (pending.length > 0) {
+          const cur = pending[0];
+          const checkLine = cur.stripTabs ? line.replace(/^\t+/, '') : line;
+          if (checkLine === cur.delim) pending.shift();
+        } else {
+          for (const h of findHeredocsTest(line)) pending.push(h);
+        }
+      }
+      const res = [...lines];
+      for (const h of pending) res.push(h.delim);
+      return res.join('\n');
+    }
+
+    const closedScript = closePendingHeredocsTest(unclosedLines);
+    const wrappedUnclosed = `cd "/workspace"; _DIR_STACK="";\n${closedScript}\n__rc=$?; __host_update_pwd "$(pwd)"; exit $__rc`;
+    const unclosedHost = new WasiHost({
+      vfs: testVfs,
+      cwd: '/workspace',
+      argv: ['busybox', 'sh', '-c', wrappedUnclosed],
+      environ: { USER: 'student', HOME: '/workspace', PWD: '/workspace', PATH: '/bin:/usr/bin' },
+      stdout: (s) => { unclosedHeredocOut += s; },
+      hostBuiltinLookup: (name) => (name === '__host_update_pwd' ? 1 : 0),
+      hostBuiltinRun: () => 0,
+    });
+    const unclosedInst = new WebAssembly.Instance(busyboxMod, unclosedHost.createImportObject());
+    unclosedHost.getMemory = () => unclosedInst.exports.memory;
+    try { unclosedInst.exports._start(); } catch (_) {}
+
+    assert.strictEqual(unclosedHeredocOut, 'line alpha\nline beta\n');
+    assert.strictEqual(unclosedHeredocOut.includes('__rc='), false, 'Output must never leak __rc= or __host_update_pwd');
 
     console.log('✓ Smart command dispatcher, fast-path error handling, and environment lifecycle verified');
   }

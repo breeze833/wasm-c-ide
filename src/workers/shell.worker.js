@@ -11,7 +11,7 @@ if (typeof self === 'undefined') {
 import { LineEditor } from '../terminal/line-editor.js';
 import { VFS, normalizePath } from '../vfs/vfs.js';
 import { mountSysroot, BIN_COMMANDS } from '../vfs/sysroot.js';
-import { WasiHost, ProcExit } from '../vfs/wasi-host.js';
+import { WasiHost, ProcExit, ESUCCESS } from '../vfs/wasi-host.js';
 import { getWasmModule, saveWasmModule } from '../toolchain/wasm-cache.js';
 
 const CACHE_KEY = 'busybox-1.38.0';
@@ -21,6 +21,7 @@ let isExecuting = false;
 let isInitialized = false;
 let termRows = 24;
 let termCols = 80;
+let multiLineBuffer = [];
 
 let shellEnviron = {
   USER: 'student',
@@ -69,6 +70,8 @@ const SHELL_BUILTINS = new Set([
   '.',
   'source',
   'set',
+  'export',
+  'unset',
 ]);
 
 const BIN_COMMANDS_SET = new Set(BIN_COMMANDS);
@@ -77,8 +80,76 @@ const vfs = new VFS();
 let busyboxModule = null;
 
 let sharedInt32 = null;
+let sharedUint8 = null;
 const CONTROL_IDX = 0; // 0 = idle, 1 = waiting, 2 = done
 const RESULT_IDX = 1;  // exitCode
+
+// Synchronous stdin control for shell applets (cat, read, etc.)
+const STDIN_STATE_IDX = 4;
+const STDIN_LEN_IDX = 5;
+const STDIN_READ_POS_IDX = 6;
+
+const STDIN_STATE_IDLE = 0;
+const STDIN_STATE_WAITING = 1;
+const STDIN_STATE_READY = 2;
+const STDIN_STATE_EOF = -1;
+
+const STDIN_DATA_OFFSET = 32;
+
+function readStdin(iovs, iovs_len, nread_out, host) {
+  let totalRead = 0;
+
+  for (let i = 0; i < iovs_len; i++) {
+    const bufPtr = host.memU32()[(iovs >> 2) + i * 2];
+    const bufLen = host.memU32()[(iovs >> 2) + i * 2 + 1];
+
+    let available = 0;
+    let curLen = 0;
+    let curPos = 0;
+
+    if (sharedInt32) {
+      curLen = Atomics.load(sharedInt32, STDIN_LEN_IDX);
+      curPos = Atomics.load(sharedInt32, STDIN_READ_POS_IDX);
+      available = curLen - curPos;
+    }
+
+    if (available <= 0 && sharedInt32) {
+      // Set state to WAITING before notifying host to prevent race
+      Atomics.store(sharedInt32, STDIN_STATE_IDX, STDIN_STATE_WAITING);
+
+      // Notify main thread that shell/applet is waiting for stdin input
+      self.postMessage({ type: 'stdin_request' });
+
+      // Block worker until main thread issues Atomics.notify()
+      Atomics.wait(sharedInt32, STDIN_STATE_IDX, STDIN_STATE_WAITING);
+
+      const state = Atomics.load(sharedInt32, STDIN_STATE_IDX);
+      if (state === STDIN_STATE_EOF) {
+        break;
+      }
+
+      curLen = Atomics.load(sharedInt32, STDIN_LEN_IDX);
+      curPos = Atomics.load(sharedInt32, STDIN_READ_POS_IDX);
+      available = curLen - curPos;
+    }
+
+    if (available > 0 && sharedInt32 && sharedUint8) {
+      curPos = Atomics.load(sharedInt32, STDIN_READ_POS_IDX);
+      const toCopy = Math.min(bufLen, available);
+      const target = host.memU8().subarray(bufPtr, bufPtr + toCopy);
+      const source = sharedUint8.subarray(STDIN_DATA_OFFSET + curPos, STDIN_DATA_OFFSET + curPos + toCopy);
+
+      target.set(source);
+      Atomics.add(sharedInt32, STDIN_READ_POS_IDX, toCopy);
+      totalRead += toCopy;
+    }
+
+    if (totalRead > 0) break;
+  }
+
+  host.memU32()[nread_out >> 2] = totalRead;
+  return ESUCCESS;
+}
 
 const shellEditor = new LineEditor({
   write: (str) => write(str),
@@ -98,9 +169,13 @@ function getPrompt() {
   return `\x1b[1;32mide\x1b[0m:\x1b[1;34m${displayCwd}\x1b[0m$ `;
 }
 
+function getActivePrompt() {
+  return multiLineBuffer.length > 0 ? '> ' : getPrompt();
+}
+
 function showPrompt() {
   shellEditor.reset();
-  write(getPrompt());
+  write(getActivePrompt());
 }
 
 function resolvePath(p, currentCwd = cwd) {
@@ -226,6 +301,103 @@ function getShellPreamble(stack) {
   return `_DIR_STACK="${stack}"; _save_dstack() { __host_update_dstack "$_DIR_STACK"; }; pushd() { if [ -z "$1" ]; then echo "pushd: no other directory" >&2; return 1; fi; _DIR_STACK="$(pwd)|\${_DIR_STACK}"; _save_dstack; cd "$1" || return 1; dirs; }; popd() { if [ -z "$_DIR_STACK" ]; then echo "popd: directory stack empty" >&2; return 1; fi; _TARGET="\${_DIR_STACK%%|*}"; _DIR_STACK="\${_DIR_STACK#*|}"; _save_dstack; cd "$_TARGET" || return 1; dirs; }; dirs() { _res="$(pwd)"; _rest="$_DIR_STACK"; while [ -n "$_rest" ]; do _d="\${_rest%%|*}"; _rest="\${_rest#*|}"; if [ -n "$_d" ]; then _res="$_res $_d"; fi; done; echo "$_res"; };`;
 }
 
+function findHeredocs(line) {
+  const heredocs = [];
+  let inSingle = false;
+  let inDouble = false;
+  let isEscaped = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (isEscaped) { isEscaped = false; continue; }
+    if (ch === '\\' && !inSingle) { isEscaped = true; continue; }
+    if (ch === "'" && !inDouble) { inSingle = !inSingle; continue; }
+    if (ch === '"' && !inSingle) { inDouble = !inDouble; continue; }
+
+    if (!inSingle && !inDouble) {
+      if (ch === '#' && (i === 0 || /\s/.test(line[i - 1]))) break;
+      if (ch === '<' && line[i + 1] === '<' && line[i + 2] !== '<' && (i === 0 || line[i - 1] !== '<')) {
+        let idx = i + 2;
+        let stripTabs = false;
+        if (line[idx] === '-') { stripTabs = true; idx++; }
+        while (idx < line.length && (line[idx] === ' ' || line[idx] === '\t')) idx++;
+        let word = '';
+        while (idx < line.length && !/[\s;|<>&()]/.test(line[idx])) { word += line[idx]; idx++; }
+        const cleanDelim = word.replace(/^(['"])(.*)\1$/, '$2').replace(/^\\/, '');
+        if (cleanDelim.length > 0) heredocs.push({ delim: cleanDelim, stripTabs });
+        i = idx - 1;
+      }
+    }
+  }
+  return heredocs;
+}
+
+function getPendingHeredocs(lines) {
+  const pending = [];
+  for (const line of lines) {
+    if (pending.length > 0) {
+      const cur = pending[0];
+      const checkLine = cur.stripTabs ? line.replace(/^\t+/, '') : line;
+      if (checkLine === cur.delim) {
+        pending.shift();
+      }
+    } else {
+      const found = findHeredocs(line);
+      for (const h of found) pending.push(h);
+    }
+  }
+  return pending;
+}
+
+function checkHeredocPending(lines) {
+  return getPendingHeredocs(lines).length > 0;
+}
+
+function closePendingHeredocs(lines) {
+  const pending = getPendingHeredocs(lines);
+  if (pending.length === 0) {
+    return lines.join('\n');
+  }
+  const result = [...lines];
+  for (const h of pending) {
+    result.push(h.delim);
+  }
+  return result.join('\n');
+}
+
+function checkSyntaxEof(fullText) {
+  if (!busyboxModule) return false;
+  let err = '';
+  let code = 0;
+  const host = new WasiHost({
+    vfs,
+    cwd,
+    argv: ['busybox', 'sh', '-n', '-c', fullText],
+    stdout: () => {},
+    stderr: (s) => err += s,
+  });
+  const inst = new WebAssembly.Instance(busyboxModule, host.createImportObject());
+  host.getMemory = () => inst.exports.memory;
+  try { inst.exports._start(); } catch (e) { code = (e && typeof e.code === 'number') ? e.code : 0; }
+  return code !== 0 && (err.includes('unexpected end of file') || err.includes('unterminated quoted string'));
+}
+
+function isCommandIncomplete(lines) {
+  if (lines.length === 0) return false;
+  if (checkHeredocPending(lines)) return true;
+
+  const lastLine = lines[lines.length - 1];
+  let backslashes = 0;
+  for (let i = lastLine.length - 1; i >= 0 && lastLine[i] === '\\'; i--) {
+    backslashes++;
+  }
+  if (backslashes % 2 === 1) return true;
+
+  if (/(?:\||\|\||&&)\s*$/.test(lastLine)) return true;
+
+  return checkSyntaxEof(lines.join('\n'));
+}
+
 function hasUnquotedShellOperators(line) {
   let inSingleQuote = false;
   let inDoubleQuote = false;
@@ -267,7 +439,8 @@ function hasUnquotedShellOperators(line) {
         ch === '(' ||
         ch === ')' ||
         ch === '{' ||
-        ch === '}'
+        ch === '}' ||
+        ch === '\n'
       ) {
         return true;
       }
@@ -440,6 +613,7 @@ async function runScriptFile(scriptPath, args, environ, isTimed, beforeMap) {
     cwd,
     argv: ['busybox', 'sh', '-c', `cd "$1" || exit 1; shift; ${SCRIPT_PREAMBLE} . "$@"`, 'sh', cwd, scriptPath, ...args],
     environ,
+    stdin: readStdin,
     stdout: (str) => write(str),
     stderr: (str) => write(str),
     rows: termRows,
@@ -474,17 +648,40 @@ async function runScriptFile(scriptPath, args, environ, isTimed, beforeMap) {
 }
 
 function wrapHostExecutables(cmdLine) {
-  return cmdLine.replace(/(^|[;&|]\s*|\btime\s+)(\.{1,2}\/[^\s;&|<>]+|\/[^\s;&|<>]+)/g, (match, prefix, target) => {
-    const resolved = resolvePath(target);
-    if (vfs.exists(resolved)) {
-      const bytes = vfs.readFile(resolved, false);
-      if (bytes && bytes.length >= 2 && bytes[0] === 0x23 && bytes[1] === 0x21) {
-        // Starts with #! -> script, let ash handle it directly
-        return match;
+  const lines = cmdLine.split('\n');
+  const pending = [];
+  const resultLines = [];
+
+  for (const line of lines) {
+    if (pending.length > 0) {
+      resultLines.push(line);
+      const cur = pending[0];
+      const checkLine = cur.stripTabs ? line.replace(/^\t+/, '') : line;
+      if (checkLine === cur.delim) {
+        pending.shift();
+      }
+    } else {
+      const wrappedLine = line.replace(/(^|[;&|\n]\s*|\btime\s+)(\.{1,2}\/[^\s;&|<>]+|\/[^\s;&|<>]+)/g, (match, prefix, target) => {
+        const resolved = resolvePath(target);
+        if (vfs.exists(resolved)) {
+          const bytes = vfs.readFile(resolved, false);
+          if (bytes && bytes.length >= 2 && bytes[0] === 0x23 && bytes[1] === 0x21) {
+            // Starts with #! -> script, let ash handle it directly
+            return match;
+          }
+        }
+        return `${prefix}__host_exec ${target}`;
+      });
+      resultLines.push(wrappedLine);
+
+      const found = findHeredocs(line);
+      for (const h of found) {
+        pending.push(h);
       }
     }
-    return `${prefix}__host_exec ${target}`;
-  });
+  }
+
+  return resultLines.join('\n');
 }
 
 async function executeCommandLine(toExecute) {
@@ -535,9 +732,20 @@ async function executeCommandLine(toExecute) {
     const cmd = tokens[tokenIdx];
     const args = tokens.slice(tokenIdx + 1);
 
-    // export VAR="val" or export VAR
-    if (cmd === 'export' && args.length > 0) {
+    // export [VAR="val"] [VAR] or export / export -p (print all)
+    if (cmd === 'export') {
+      if (args.length === 0 || (args.length === 1 && args[0] === '-p')) {
+        const keys = Object.keys(shellEnviron).sort();
+        for (const key of keys) {
+          const val = shellEnviron[key];
+          const escapedVal = String(val).replace(/'/g, "'\\''");
+          write(`export ${key}='${escapedVal}'\r\n`);
+        }
+        return 0;
+      }
+
       for (const arg of args) {
+        if (arg === '-p') continue;
         const eqIdx = arg.indexOf('=');
         if (eqIdx !== -1) {
           const key = arg.slice(0, eqIdx);
@@ -550,7 +758,7 @@ async function executeCommandLine(toExecute) {
         }
       }
       shellEnviron.PWD = cwd;
-      return;
+      return 0;
     }
 
     // unset VAR
@@ -670,18 +878,20 @@ async function executeCommandLine(toExecute) {
     PWD: cwd,
   };
 
-  const wrapped = wrapHostExecutables(actualCmd);
+  const closedCmd = closePendingHeredocs(actualCmd.split('\n'));
+  const wrapped = wrapHostExecutables(closedCmd);
   const t0 = performance.now();
 
   // Single-line preamble so ash execution starts at line 1
   const preamble = getShellPreamble(dirStackStr);
-  const wrappedCmd = `cd "${cwd}"; ${preamble} ${wrapped}; __rc=$?; __host_update_pwd "$(pwd)"; exit $__rc`;
+  const wrappedCmd = `cd "${cwd}"; ${preamble}\n${wrapped}\n__rc=$?; __host_update_pwd "$(pwd)"; exit $__rc`;
 
   const wasiHost = new WasiHost({
     vfs,
     cwd,
     argv: ['busybox', 'sh', '-c', wrappedCmd],
     environ: effectiveEnviron,
+    stdin: readStdin,
     stdout: (str) => write(str),
     stderr: (str) => write(str),
     rows: termRows,
@@ -737,7 +947,7 @@ async function handleTabCompletion() {
     } else if (matches.length > 1) {
       writeln('');
       writeln(matches.map((m) => m.name + (m.isDir ? '/' : '')).join('  '));
-      write(getPrompt() + shellEditor.getBuffer());
+      write(getActivePrompt() + shellEditor.getBuffer());
       if (shellEditor.getCursor() < shellEditor.getBuffer().length) {
         write('\b'.repeat(shellEditor.getBuffer().length - shellEditor.getCursor()));
       }
@@ -753,13 +963,26 @@ async function handleKey(key) {
   // Enter
   if (key === '\r' || key === '\n') {
     writeln('');
-    const toExecute = shellEditor.getBuffer().trim();
-    if (toExecute.length > 0) {
-      shellEditor.commitHistory(toExecute);
-    }
+    const line = shellEditor.getBuffer();
     shellEditor.reset();
 
+    if (multiLineBuffer.length === 0 && line.trim().length === 0) {
+      showPrompt();
+      return;
+    }
+
+    multiLineBuffer.push(line);
+
+    if (isCommandIncomplete(multiLineBuffer)) {
+      write('> ');
+      return;
+    }
+
+    const toExecute = multiLineBuffer.join('\n').trim();
+    multiLineBuffer = [];
+
     if (toExecute.length > 0) {
+      shellEditor.commitHistory(toExecute);
       isExecuting = true;
       try {
         await executeCommandLine(toExecute);
@@ -769,6 +992,7 @@ async function handleKey(key) {
         }
       } finally {
         isExecuting = false;
+        self.postMessage({ type: 'command_done' });
         showPrompt();
       }
       return;
@@ -786,6 +1010,7 @@ async function handleKey(key) {
 
   // Ctrl+C
   if (key === '\x03') {
+    multiLineBuffer = [];
     writeln('^C');
     showPrompt();
     return;
@@ -794,8 +1019,30 @@ async function handleKey(key) {
   // Ctrl+D (EOF on empty prompt)
   if (key === '\x04') {
     if (shellEditor.getBuffer().length === 0) {
-      writeln('exit');
-      showPrompt();
+      if (multiLineBuffer.length > 0) {
+        writeln('');
+        const toExecute = closePendingHeredocs(multiLineBuffer).trim();
+        multiLineBuffer = [];
+        if (toExecute.length > 0) {
+          shellEditor.commitHistory(toExecute);
+          isExecuting = true;
+          try {
+            await executeCommandLine(toExecute);
+          } catch (err) {
+            if (err.message !== 'Interrupted') {
+              writeln(`Error: ${err.message}`);
+            }
+          } finally {
+            isExecuting = false;
+            self.postMessage({ type: 'command_done' });
+            showPrompt();
+          }
+          return;
+        }
+      } else {
+        writeln('exit');
+        showPrompt();
+      }
     }
     return;
   }
@@ -816,6 +1063,7 @@ self.onmessage = async (event) => {
     if (msg.cols) termCols = msg.cols;
     if (msg.sharedBuffer) {
       sharedInt32 = new Int32Array(msg.sharedBuffer);
+      sharedUint8 = new Uint8Array(msg.sharedBuffer);
     }
 
     if (msg.sharedSysrootBuffer) {
@@ -863,7 +1111,26 @@ self.onmessage = async (event) => {
   }
 
   if (msg.type === 'input') {
-    await handleKey(msg.data);
+    const inputData = msg.data;
+    if (inputData.length > 1 && (inputData.includes('\r') || inputData.includes('\n'))) {
+      let i = 0;
+      while (i < inputData.length) {
+        if (inputData[i] === '\x1b') {
+          let j = i + 1;
+          while (j < inputData.length && !/[a-zA-Z~]/.test(inputData[j])) {
+            j++;
+          }
+          if (j < inputData.length) j++;
+          await handleKey(inputData.substring(i, j));
+          i = j;
+        } else {
+          await handleKey(inputData[i]);
+          i++;
+        }
+      }
+    } else {
+      await handleKey(inputData);
+    }
     return;
   }
 
@@ -891,6 +1158,11 @@ self.onmessage = async (event) => {
   }
 
   if (msg.type === 'interrupt') {
+    multiLineBuffer = [];
+    if (sharedInt32) {
+      Atomics.store(sharedInt32, STDIN_STATE_IDX, STDIN_STATE_EOF);
+      Atomics.notify(sharedInt32, STDIN_STATE_IDX, 1);
+    }
     if (isExecuting) {
       isExecuting = false;
       writeln('\r\n\x1b[31m[Process interrupted]\x1b[0m');

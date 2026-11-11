@@ -89,12 +89,9 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   └── wasm-clang.js      # LLVM multicall, streaming compiler, and direct VFS driver
 │   ├── vfs/
 │   │   ├── archive.js         # JSZip project export and import routines
-│   │   ├── raylib-headers.js  # Auto-generated virtual headers module for Raylib 5.5
 │   │   ├── shared-sysroot.js  # Shared read-only sysroot binary builder, reader, and FNV-1a index
-│   │   ├── sqlite-headers.js  # Auto-generated virtual headers module for SQLite 3
 │   │   ├── storage.js         # IndexedDB synchronization and default project seed
 │   │   ├── sysroot.js         # Standard C/C++ sysroot header and binary mount definitions
-│   │   ├── turtle-headers.js  # Auto-generated virtual headers module for libturtle
 │   │   ├── vfs.js             # In-memory virtual filesystem with path normalization
 │   │   └── wasi-host.js       # Unified Platform Host fusing WASI Preview 1, MemoryPipe, and component bridges
 │   └── workers/
@@ -251,7 +248,7 @@ Agents executing this project should proceed milestone-by-milestone:
   - Backend headers (`turtle_backend_canvas_wasi.h` and `turtle_backend_raylib.h`) wrap initialization in `#define turtle_begin(ctx) (<backend>_turtle_init(ctx) && turtle_begin_core())` to strictly prevent linking against incorrect backend archives.
 - **Automated In-Tree Compilation & Zero-Drift Header Sync**:
   - `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and builds both WASI static libraries using the in-tree `llvm-box.wasm` WebAssembly toolchain (`WasmToolchain`) and `buildArchive` (`ar.js`), removing host toolchain requirements (`clang`, `llvm-ar`, `make`).
-  - Copies user headers to `public/sysroot/include/turtle/` and auto-generates `src/vfs/turtle-headers.js` imported by `src/vfs/sysroot.js`, eliminating manual header duplication and string fallbacks.
+  - Copies user headers to `public/sysroot/include/turtle/` and bundles them directly into `sysroot.tar.gz`, eliminating manual header duplication and string fallbacks.
 - Bundled example programs: `06_turtle_canvas.c` and `07_turtle_raylib.c`.
 
 ### Milestone 14: Raylib Module Decoupling (`raylib-wasi`) & Architecture Unification
@@ -352,7 +349,7 @@ Agents executing this project should proceed milestone-by-milestone:
   - Convert nanosecond timeouts to millisecond durations and sleep synchronously via `Atomics.wait()` on `SharedArrayBuffer` when cross-origin isolated.
   - Powers standard POSIX `nanosleep(&ts, NULL)`, `usleep()`, `sleep()`, and turtle `delay_ms()` accurately without 100% CPU busy looping.
 - **Permanent Sysroot Bundling & Settings Simplification**:
-  - Auto-generate `src/vfs/raylib-headers.js` from `raylib.h`, `raymath.h`, `rlgl.h`, `raygui.h` in `scripts/download-sysroot.js`.
+  - Bundle Raylib headers (`raylib.h`, `raymath.h`, `rlgl.h`, `raygui.h`) directly into `sysroot.tar.gz` and `public/sysroot/include/` in `scripts/download-sysroot.js`.
   - Mount Raylib and Raylib-turtle headers (`raylib.h`, `raymath.h`, `rlgl.h`, `raygui.h`, `turtle_backend_raylib.h`) permanently in `/usr/include/` during `mountSysroot(vfs)`.
   - Mount and preload `libraylib.a` and `libturtle_raylib.a` in `/usr/lib/` and `/lib/wasm32-wasip1/` out of the box.
   - Remove `#setting-raylib` checkbox from Project Settings; users explicitly specify linker flags (`-lraylib`, `-lturtle_raylib -lraylib`).
@@ -391,8 +388,7 @@ Agents executing this project should proceed milestone-by-milestone:
 ### Milestone 24: SQLite 3 WASI Embedded Database & CLI Subsystem (`sqlite-wasi`)
 - Integrate zero-dependency embedded relational database engine SQLite 3 (version 3.54.1) targeting `wasm32-wasip1` from [`breeze833/sqlite-wasi`](https://github.com/breeze833/sqlite-wasi).
 - Bundled sysroot headers & static library:
-  - Dynamically fetch or mount `/usr/include/sqlite3.h` and `/usr/include/sqlite3ext.h`.
-  - Auto-generate `src/vfs/sqlite-headers.js` in `scripts/download-sysroot.js`.
+  - Dynamically fetch and mount `/usr/include/sqlite3.h` and `/usr/include/sqlite3ext.h` directly into `sysroot.tar.gz` and `public/sysroot/include/`.
   - Mount precompiled static library `libsqlite3.a` in `/usr/lib/` and `/lib/wasm32-wasip1/`.
   - User programs compile and link cleanly using standard `-lsqlite3` without additional flags or host bridges.
 - Standalone CLI binary (`/usr/bin/sqlite3`):
@@ -502,6 +498,18 @@ Agents executing this project should proceed milestone-by-milestone:
   - Adds dependency `"make-wasi"` to `package.json`.
 - Comprehensive Automated Test Suite:
   - Updates `test/make.test.js` covering automatic variables (`$@`, `$<`, `$^`), order-only prerequisites (`|`), pattern rules (`build/%.o: src/%.c`), conditionals (`ifeq`), `include` directives, `-k` (keep-going), `-n` (dry-run), error propagation, and end-to-end C compilation into WebAssembly binaries.
+
+### Milestone 32: Direct Sysroot Header Unification, Synchronous Shell Stdin & POSIX Heredocs
+- Direct Sysroot Header Unification:
+  - Repack all third-party and custom headers (Raylib, Raygui, Turtle, SQLite) directly into `sysroot.tar.gz` and `public/sysroot/include/` via `scripts/download-sysroot.js`.
+  - Remove virtual string-embedded header modules (`raylib-headers.js`, `sqlite-headers.js`, `turtle-headers.js`), simplifying `sysroot.js` and reducing JavaScript bundle size.
+- Synchronous Shell Stdin & Interactive Input Routing:
+  - Implement interactive stdin bridging (`stdin_request` / `stdin_buffer`) between `shell.worker.js` and `main.js`.
+  - Interactive commands like `cat > file` and `sqlite3` prompt in xterm, echo characters, and cleanly capture multi-line keyboard input until `Ctrl-D` sends EOF.
+- POSIX Heredoc & Multi-Line Buffer Accumulation (`cat <<EOF`):
+  - Detect pending heredocs and multi-line continuations via `findHeredocs` and `isCommandIncomplete`.
+  - Accumulate heredoc lines with secondary prompt (`> `).
+  - Synthesize missing closing delimiters when aborted early with `Ctrl-D`, preventing shell trailing control commands (`__rc=$?...`) from leaking into stdout.
 
 ---
 
