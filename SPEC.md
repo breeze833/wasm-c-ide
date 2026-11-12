@@ -104,6 +104,7 @@ Detailed technical specifications, binary layouts, memory protocols, and case st
 | **Graphics Canvas, Raylib & Turtle** | Decoupled 2D vector canvas, WebGL GLES 2.0 bridge, Web Audio API, `libturtle` backends, and frame pacing | [`docs/GRAPHICS_AND_TURTLE.md`](./docs/GRAPHICS_AND_TURTLE.md) |
 | **Frame Pacing & Animation Delays** | Mathematical analysis of single-threaded WebAssembly frame production, `Atomics.wait()`, and progressive delays | [`docs/SINGLE_THREAD_FRAME_PACING.md`](./docs/SINGLE_THREAD_FRAME_PACING.md) |
 | **Terminal, LineEditor & UI** | Detached 80x24 VT100 window, ANSI control, synchronous sleep (`poll_oneoff`), `LineEditor`, resizable sidebar, and settings | [`docs/TERMINAL_AND_UI.md`](./docs/TERMINAL_AND_UI.md) |
+| **Editor & Reference Services** | Decision on removing partial hover providers, avoiding language tooling uncanny valley, and centralizing in Reference Drawer | [`docs/EDITOR_AND_REFERENCE_DESIGN.md`](./docs/EDITOR_AND_REFERENCE_DESIGN.md) |
 | **Platform Host & Upstream Contracts** | Reference host contracts for WASI Preview 1, BusyBox bridge, canvas-wasi, and raylib-wasi | [`src/vfs/wasi-host.js`](./src/vfs/wasi-host.js) |
 | **Known Issues & Constraints** | Documented version limits, browser quirks, and environment restrictions | [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) |
 
@@ -175,7 +176,6 @@ Detailed technical specifications, binary layouts, memory protocols, and case st
 | **Slide-Out Right Reference Drawer UI** | Clicking `#btn-reference` or pressing `Ctrl+Shift+H` / `F1` toggles the slide-out drawer on the right without occluding the editor or disrupting terminal output. |
 | **Offline Documentation Invariant** | In offline PWA mode, the reference drawer renders all tabs (Libc/WASI limits, Turtle, Canvas, Raylib, and SQLite) instantly with zero network requests. |
 | **Pristine Upstream Headers Invariant** | Upstream headers (`raylib.h`, `sqlite3.h`) remain 100% byte-for-byte identical to upstream without manual docstring edits or patch drift. |
-| **Monaco Custom Header Hover Tooltips** | Hovering over functions declared in custom sysroot headers (`turtle_forward`, `graphics_fill_rect`, `raylib_turtle_init`) displays detailed prototypes, parameter explanations, and coordinate notes parsed from header docstrings. |
 | **Libc & WASI Restrictions Guidance** | The General C Libc tab clearly documents unavailable syscalls (`fork`, `exec`, `sockets`, `pthreads`) and demonstrates idiomatic WASI alternatives (`poll_oneoff`, `WasiHost` VFS file I/O). |
 | **1-Click Example Template Loading** | Clicking "Load Example" from any reference tab prompts cleanly if the active tab is unsaved, opens the corresponding C example in a new editor tab, and synchronizes with the file tree. |
 | **External Documentation Link Safety** | Clicking external links to the public documentation site, Raylib cheatsheet, or SQLite reference opens in a new browser tab with `rel="noopener noreferrer"`, preserving active IDE state and avoiding navigation loss. |

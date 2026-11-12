@@ -156,7 +156,6 @@ globalThis.__btnReferenceMock.id = 'btn-reference';
 
 // Dynamic import of tested components
 const { ReferenceDrawer, getDocsUrl } = await import('../src/components/reference.js');
-const { CUSTOM_API_DOCS, registerCustomApiHoverProviders } = await import('../src/editor/hover-provider.js');
 const { buildDocs } = await import('../scripts/build-docs.js');
 
 console.log('--- Running Reference Drawer & Documentation Subsystem Unit Tests ---');
@@ -261,48 +260,7 @@ console.log('--- Running Reference Drawer & Documentation Subsystem Unit Tests -
   console.log('✓ Drawer open, close, and toggle transitions verified');
 }
 
-// Test 5: Custom API Hover Provider Tooltips
-{
-  assert.ok(CUSTOM_API_DOCS.turtle_forward, 'CUSTOM_API_DOCS must contain turtle_forward');
-  assert.ok(CUSTOM_API_DOCS.graphics_present, 'CUSTOM_API_DOCS must contain graphics_present');
-  assert.ok(CUSTOM_API_DOCS.canvas_fill_rect, 'CUSTOM_API_DOCS must contain canvas_fill_rect');
-  assert.ok(CUSTOM_API_DOCS.graphics_wait_frame, 'CUSTOM_API_DOCS must contain graphics_wait_frame');
-
-  // Verify documentation contents
-  assert.ok(CUSTOM_API_DOCS.turtle_forward.doc.includes('current heading'), 'turtle_forward doc should explain heading movement');
-  assert.ok(CUSTOM_API_DOCS.graphics_present.doc.includes('0xAABBGGRR'), 'graphics_present doc should explain 0xAABBGGRR');
-
-  // Mock Monaco registration
-  const registeredLanguages = [];
-  const mockMonaco = {
-    Range: class { constructor(sl, sc, el, ec) { this.sl = sl; } },
-    languages: {
-      CompletionItemKind: { Function: 1 },
-      registerHoverProvider(lang, provider) {
-        registeredLanguages.push({ type: 'hover', lang, provider });
-      },
-      registerCompletionItemProvider(lang, provider) {
-        registeredLanguages.push({ type: 'completion', lang, provider });
-      }
-    }
-  };
-
-  registerCustomApiHoverProviders(mockMonaco);
-  assert.strictEqual(registeredLanguages.filter(r => r.type === 'hover').length, 2, 'Should register hover for c and cpp');
-  assert.strictEqual(registeredLanguages.filter(r => r.type === 'completion').length, 2, 'Should register completions for c and cpp');
-
-  // Test hover evaluation
-  const hoverProvider = registeredLanguages.find(r => r.type === 'hover' && r.lang === 'c').provider;
-  const mockModel = {
-    getWordAtPosition: () => ({ word: 'turtle_forward', startColumn: 1, endColumn: 15 })
-  };
-  const hoverResult = hoverProvider.provideHover(mockModel, { lineNumber: 1, column: 5 });
-  assert.ok(hoverResult, 'Hover result should be returned');
-  assert.ok(hoverResult.contents[0].value.includes('turtle_forward'), 'Hover should contain function signature');
-  console.log('✓ Monaco Hover & Autocomplete Providers verified for custom sysroot headers');
-}
-
-// Test 6: Standalone Documentation Generator (ide-docs/ -> dist/docs/)
+// Test 5: Standalone Documentation Generator (ide-docs/ -> dist/docs/)
 {
   buildDocs();
 

@@ -300,8 +300,6 @@ The repository includes a ready-to-run suite of single-file C programs in the `e
     5. **SQLite 3 WASI (`<sqlite3.h>`)**: Transient in-memory databases (`:memory:`), persistent VFS files (`/workspace/*.db`), core C statement preparation and query execution, and terminal interactive CLI syntax.
   - **Real-Time Search Filter**: Rapidly filters API functions, concepts, and keywords across the active tab.
   - **1-Click Pedagogical Example Loading**: Seamlessly loads starter templates (`01_stdio.c` through `10_raylib_gui_audio.c`) into Monaco editor tabs and the workspace file tree.
-- **Monaco Hover & Autocomplete Tooltips**:
-  - Custom Monaco hover provider (`src/editor/hover-provider.js`) parsing function declarations and parameter documentation for custom sysroot headers (`<turtle.h>`, `<graphics.h>`, `<graphics_canvas.h>`), providing contextual IntelliSense tooltips during editing.
 - **Standalone User Documentation Portal (`ide-docs/` -> `dist/docs/`)**:
   - Fully static, multi-page reference site compiled into `dist/docs/` and `public/docs/` via `npm run docs:build`.
   - Zero-dependency client-side syntax highlighter (`highlighter.js`) with pre-rendered tokens for zero-FOUC rendering.

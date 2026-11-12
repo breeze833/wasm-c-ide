@@ -69,3 +69,4 @@ The `LineEditor` (`src/terminal/line-editor.js`) provides a unified, prompt-safe
   5. *SQLite 3 WASI Quick Reference* (C API functions, CLI syntax, and database schemas).
 - **1-Click Example Loading**: Direct "Load Example" buttons open bundled educational examples into the Monaco editor and file tree.
 - **Standalone Documentation Portal**: Static Markdown and HTML documentation built in `public/docs/` and `dist/docs/`, accessible online or offline with zero backend requirements.
+- **Intentional Reference Model vs. Ambient Popups**: To eliminate student confusion and prevent false negative signals regarding standard C library support, ambient editor hover providers are removed in favor of this dedicated Reference Drawer. See [`docs/EDITOR_AND_REFERENCE_DESIGN.md`](./EDITOR_AND_REFERENCE_DESIGN.md) for the detailed design rationale.

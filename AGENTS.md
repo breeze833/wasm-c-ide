@@ -27,6 +27,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── SHELL_AND_UTILITIES.md # Specification for BusyBox ash shell, wasi_host_spawn, GNU Make, and SQLite
 │   ├── GRAPHICS_AND_TURTLE.md # Specification for canvas-wasi, raylib-wasi, and libturtle subsystems
 │   ├── TERMINAL_AND_UI.md     # Specification for detached terminal, LineEditor, and workspace UI
+│   ├── EDITOR_AND_REFERENCE_DESIGN.md # Design decision on removing partial hover providers & Reference Drawer
 │   ├── SINGLE_THREAD_FRAME_PACING.md # Case study on single-threaded WebAssembly graphics & progressive delays
 │   ├── KNOWN_ISSUES.md        # Documented toolchain version gaps, limits, and single-threaded frame pacing
 │   └── archived/              # Historical technical specifications (v1 baseline through v4)
@@ -72,7 +73,6 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   └── toast.js           # Non-blocking notification toasts
 │   ├── editor/
 │   │   ├── editor.js          # Monaco editor instance controller and save actions
-│   │   ├── hover-provider.js  # Monaco hover & autocomplete provider for custom headers
 │   │   ├── monaco-setup.js    # Monaco worker environment setup
 │   │   └── tabs.js            # Tab bar manager and dirty mark (*) tracking
 │   ├── terminal/
@@ -115,7 +115,7 @@ You are an autonomous senior systems and web engineer implementing the project s
     ├── make.test.js           # Makefile parsing and incremental build tests
     ├── pipeline.test.js       # Command pipeline (|) and file redirection (<, >, >>) tests
     ├── raylib.test.js         # Raylib graphics compilation, input sync, and canvas UI tests
-    ├── reference-drawer.test.js # In-IDE Reference Drawer, Monaco hover tooltips, and public docs tests
+    ├── reference-drawer.test.js # In-IDE Reference Drawer and standalone public docs tests
     ├── runtime.test.js        # SharedArrayBuffer Atomics protocol and Ctrl-D EOF tests
     ├── settings-upgrade.test.js # Project Settings save/generate decoupling and passive upgrade tests
     ├── shell.test.js          # Shell argument parsing, globs, pushd/popd, mv/cp, and direct scripts
@@ -586,7 +586,6 @@ Before marking any task complete, agents must verify:
 | **Slide-Out Right Reference Drawer UI** | Clicking `#btn-reference` or pressing `Ctrl+Shift+H` / `F1` toggles the slide-out drawer on the right without occluding the editor or disrupting terminal output. |
 | **Offline Documentation Invariant** | In offline PWA mode, the reference drawer renders all tabs (Libc/WASI limits, Turtle, Canvas, Raylib, and SQLite) instantly with zero network requests. |
 | **Pristine Upstream Headers Invariant** | Upstream headers (`raylib.h`, `sqlite3.h`) remain 100% byte-for-byte identical to upstream without manual docstring edits or patch drift. |
-| **Monaco Custom Header Hover Tooltips** | Hovering over functions declared in custom sysroot headers (`turtle_forward`, `graphics_fill_rect`, `raylib_turtle_init`) displays detailed prototypes, parameter explanations, and coordinate notes parsed from header docstrings. |
 | **Libc & WASI Restrictions Guidance** | The General C Libc tab clearly documents unavailable syscalls (`fork`, `exec`, `sockets`, `pthreads`) and demonstrates idiomatic WASI alternatives (`poll_oneoff`, `WasiHost` VFS file I/O). |
 | **1-Click Example Template Loading** | Clicking "Load Example" from any reference tab prompts cleanly if the active tab is unsaved, opens the corresponding C example in a new editor tab, and synchronizes with the file tree. |
 | **External Documentation Link Safety** | Clicking external links to the public documentation site, Raylib cheatsheet, or SQLite reference opens in a new browser tab with `rel="noopener noreferrer"`, preserving active IDE state and avoiding navigation loss. |
