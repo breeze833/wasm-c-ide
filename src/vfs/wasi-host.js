@@ -23,7 +23,7 @@ import {
   wrapWasiPipes
 } from 'busybox-wasi/host';
 
-export const EROFS = 65;
+import { EROFS } from 'vfs-wasi';
 
 export {
   BaseWasiHost,
@@ -40,7 +40,8 @@ export {
   ENOENT,
   ENOSYS,
   ENOTDIR,
-  EPERM
+  EPERM,
+  EROFS
 };
 
 export class WasiHost extends BaseWasiHost {

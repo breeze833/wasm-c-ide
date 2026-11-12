@@ -26,9 +26,13 @@
     "make-wasi": "https://github.com/breeze833/make-wasi/releases/download/latest/make-wasi-4.4.1.tgz",
     "monaco-editor": "^0.52.2",
     "raylib-wasi": "https://github.com/breeze833/raylib-wasi/releases/download/latest/raylib-wasi-5.5.0.tgz",
-    "sqlite-wasi": "https://github.com/breeze833/sqlite-wasi/releases/download/v3.54.1/sqlite-wasi-3.54.1.tgz"
+    "sqlite-wasi": "https://github.com/breeze833/sqlite-wasi/releases/download/v3.54.1/sqlite-wasi-3.54.1.tgz",
+    "vfs-wasi": "https://github.com/breeze833/vfs-wasi/releases/download/latest/vfs-wasi-0.1.0.tgz"
   },
   "devDependencies": {
     "vite": "^6.2.0"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
   }
 }

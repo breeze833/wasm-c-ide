@@ -1,5 +1,8 @@
 # Architectural Specification: Shared Read-Only Sysroot (`SharedSysroot`) & Two-Tier Overlay VFS
 
+> [!NOTE]
+> The Two-Tier Overlay Virtual File System engine, contiguous `SSYS` binary format, and WASI Preview 1 filesystem provider are decoupled and published as the standalone modular package [**`breeze833/vfs-wasi`**](https://github.com/breeze833/vfs-wasi). This document specifies its integration within `wasm-c-ide`.
+
 This document details the architectural specification, binary format, and runtime protocols for the **Shared Read-Only Sysroot (`SharedSysroot`)** and the **Two-Tier Overlay Virtual File System (VFS)** in `wasm-c-ide`.
 
 ---

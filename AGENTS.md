@@ -511,6 +511,13 @@ Agents executing this project should proceed milestone-by-milestone:
   - Accumulate heredoc lines with secondary prompt (`> `).
   - Synthesize missing closing delimiters when aborted early with `Ctrl-D`, preventing shell trailing control commands (`__rc=$?...`) from leaking into stdout.
 
+### Milestone 33: Two-Tier Overlay Virtual File System Modularization (`vfs-wasi`)
+- Modularize the Two-Tier Overlay Virtual File System, contiguous `SSYS` binary format, and WASI Preview 1 filesystem provider into standalone package [`breeze833/vfs-wasi`](https://github.com/breeze833/vfs-wasi).
+- Add dependency `"vfs-wasi"` to `package.json`.
+- Refactor `src/vfs/vfs.js` to inherit from `OverlayVFS` from `vfs-wasi`, retaining backward-compatible signatures and system root initialization.
+- Refactor `src/vfs/shared-sysroot.js` to delegate binary parsing, indexing, and `SharedSysrootReader` to `vfs-wasi`, retaining IDE-specific sysroot unpacking and library preloading.
+- Refactor `src/vfs/wasi-host.js` to re-export `EROFS` from `vfs-wasi`.
+
 ---
 
 ## 4. Verification & Testing Checklist

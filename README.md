@@ -270,7 +270,8 @@ The repository includes a ready-to-run suite of single-file C programs in the `e
 - **`examples/README.md`**: Step-by-step user compilation and running guide for each example.
 
 ### 10. Virtual File System & Storage
-- **Two-Tier Overlay VFS & SharedSysroot**:
+- **Two-Tier Overlay VFS & SharedSysroot (`vfs-wasi`)**:
+  - **Modular Architecture**: Powered by [`breeze833/vfs-wasi`](https://github.com/breeze833/vfs-wasi), providing a zero-dependency Two-Tier Virtual File System and WASI Preview 1 filesystem provider.
   - **Shared Read-Only Sysroot (`SharedSysroot`)**: Packs the complete Musl C and LLVM libc++ sysroot headers and precompiled static runtime libraries (~108 MB) into a single contiguous `SharedArrayBuffer` shared across the tri-worker architecture (`compiler.worker.js`, `shell.worker.js`, `runtime.worker.js`).
   - **Zero Duplicate Heap Overhead**: Eliminates redundant ~108 MB heap duplication per worker thread; all workers read directly from shared memory.
   - **Hardware & Host EROFS Protection**: System directories (`/usr`, `/include`, `/lib`, `/bin`) are mounted as read-only overlays. Any attempt to write, truncate, delete, or create files within system paths fails with POSIX error `EROFS` (*Read-only file system*).
