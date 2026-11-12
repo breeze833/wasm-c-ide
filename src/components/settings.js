@@ -21,21 +21,44 @@ export async function upgradeSystemFiles() {
     console.warn('[Upgrade] Failed to clear CacheStorage:', err);
   }
 
-  // 3. Update Service Worker registration if active
+  // 3. Unregister and update Service Worker registration if active
   try {
     if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
-      const reg = await navigator.serviceWorker.getRegistration();
-      if (reg) {
-        await reg.update().catch(() => {});
+      if (typeof navigator.serviceWorker.getRegistrations === 'function') {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        if (regs && regs.length > 0) {
+          await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+        }
+      }
+      if (typeof navigator.serviceWorker.getRegistration === 'function') {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) {
+          if (typeof reg.update === 'function') {
+            await reg.update().catch(() => {});
+          }
+          if (typeof reg.unregister === 'function') {
+            await reg.unregister().catch(() => {});
+          }
+        }
       }
     }
   } catch (err) {
-    console.warn('[Upgrade] Failed to update Service Worker registration:', err);
+    console.warn('[Upgrade] Failed to update/unregister Service Worker registration:', err);
   }
 
-  // 4. Reload page to fetch fresh system assets
+  // 4. Reload page to fetch fresh system assets (using cache-busting timestamp to bypass browser HTTP disk cache)
   if (typeof window !== 'undefined' && window.location) {
-    window.location.reload();
+    try {
+      if (typeof window.location.replace === 'function' && window.location.href) {
+        const url = new URL(window.location.href);
+        url.searchParams.set('_upgrade', String(Date.now()));
+        window.location.replace(url.toString());
+        return;
+      }
+    } catch (_) {}
+    if (typeof window.location.reload === 'function') {
+      window.location.reload();
+    }
   }
 }
 

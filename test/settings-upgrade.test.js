@@ -238,6 +238,33 @@ console.log('--- Running Project Settings Upgrade System Unit Tests ---');
   assert.strictEqual(swUpdated, true, 'upgradeSystemFiles must trigger ServiceWorker update');
   assert.strictEqual(reloadCalled, true, 'upgradeSystemFiles must trigger window.location.reload()');
 
+  // Test 4: Verify cache-busting window.location.replace and ServiceWorker unregister
+  let replacedUrl = null;
+  let swUnregistered = false;
+  globalThis.window = {
+    location: {
+      href: 'http://localhost:5173/index.html',
+      replace: (url) => {
+        replacedUrl = url;
+      }
+    }
+  };
+  globalThis.navigator.serviceWorker = {
+    getRegistrations: async () => [
+      {
+        unregister: async () => {
+          swUnregistered = true;
+          return true;
+        }
+      }
+    ]
+  };
+
+  await upgradeSystemFiles();
+  assert.strictEqual(swUnregistered, true, 'upgradeSystemFiles must unregister active ServiceWorkers');
+  assert.ok(replacedUrl && replacedUrl.includes('_upgrade='), 'upgradeSystemFiles must call replace with _upgrade timestamp');
+  console.log('✓ upgradeSystemFiles cache-busting replace and ServiceWorker unregister verified');
+
   // Cleanup globals
   delete globalThis.document;
   delete globalThis.caches;

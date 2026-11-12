@@ -159,7 +159,7 @@ This IDE is specifically engineered for **students and systems programming educa
 - **Passive System Upgrade**:
   - Accessible via the **System Upgrade** button in the Project Settings modal header.
   - Presents a two-stage confirmation dialog explaining that compiler caches and Service Worker caches will be refreshed while keeping user `/workspace` files completely untouched.
-  - Purges the `wasm_cache` IndexedDB and Service Worker `CacheStorage`, then reloads the page to fetch the latest toolchain and runtime assets.
+  - Purges the `wasm_cache` IndexedDB, clears Service Worker `CacheStorage`, unregisters active Service Workers, and triggers a cache-busting reload (`?_upgrade=<timestamp>`) to fetch fresh assets without stale browser HTTP disk cache locks.
 
 ### 5. Execution Sandbox, Synchronous Stdin & In-Code File I/O
 - **Dedicated Runtime Web Worker**: User executables run in an isolated WebAssembly execution sandbox with complete WASI Preview 1 filesystem emulation.

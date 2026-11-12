@@ -55,7 +55,7 @@ The `LineEditor` (`src/terminal/line-editor.js`) provides a unified, prompt-safe
   ```bash
   ./a.out --verbose --iterations 10
   ```
-- **System Upgrade & Cache Clear**: "Update System Files" button clears cached WebAssembly binaries in IndexedDB and re-fetches the latest toolchain and runtime assets.
+- **System Upgrade & Cache Clear**: "Update System Files" button clears cached WebAssembly binaries in IndexedDB, purges Service Worker `CacheStorage`, unregisters active Service Workers, and triggers a cache-busting reload (`?_upgrade=<timestamp>`) to fetch fresh assets without stale browser HTTP disk cache locks.
 
 ---
 

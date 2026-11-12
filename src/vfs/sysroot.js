@@ -1517,7 +1517,7 @@ export async function mountSysrootUtilities(vfs, basePath = '/sysroot/wasm') {
   await Promise.all(
     SYSROOT_UTILITIES.map(async (util) => {
       try {
-        const res = await fetch(`${basePath}/${util.file}`);
+        const res = await fetch(`${basePath}/${util.file}`, { cache: 'no-cache' });
         if (res && (res.ok || typeof res.ok === 'undefined')) {
           const buf = await res.arrayBuffer();
           vfs.writeFile(util.target, new Uint8Array(buf), Date.now(), true);

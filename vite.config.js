@@ -11,10 +11,34 @@ function serveSysrootMiddleware(req, res, next) {
       const ext = path.extname(filePath);
       const contentType = ext === '.wasm' ? 'application/wasm' : 'application/octet-stream';
       const stat = fs.statSync(filePath);
+      const etag = `W/"${stat.size.toString(16)}-${stat.mtimeMs.toString(16)}"`;
+      const lastModified = stat.mtime.toUTCString();
+
+      // Check conditional request headers for instant 304 Not Modified
+      const ifNoneMatch = req.headers['if-none-match'];
+      const ifModifiedSince = req.headers['if-modified-since'];
+      if (
+        (ifNoneMatch && ifNoneMatch === etag) ||
+        (ifModifiedSince && new Date(ifModifiedSince).getTime() >= Math.floor(stat.mtimeMs))
+      ) {
+        res.writeHead(304, {
+          'ETag': etag,
+          'Last-Modified': lastModified,
+          'Cache-Control': 'no-cache, must-revalidate',
+          'Cross-Origin-Opener-Policy': 'same-origin',
+          'Cross-Origin-Embedder-Policy': 'require-corp',
+          'Cross-Origin-Resource-Policy': 'cross-origin',
+        });
+        res.end();
+        return;
+      }
+
       res.writeHead(200, {
         'Content-Type': contentType,
         'Content-Length': stat.size,
-        'Cache-Control': 'public, max-age=31536000, immutable',
+        'ETag': etag,
+        'Last-Modified': lastModified,
+        'Cache-Control': 'no-cache, must-revalidate',
         'Cross-Origin-Opener-Policy': 'same-origin',
         'Cross-Origin-Embedder-Policy': 'require-corp',
         'Cross-Origin-Resource-Policy': 'cross-origin',
