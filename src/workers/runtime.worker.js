@@ -12,7 +12,7 @@ import { createRaylibHost } from 'raylib-wasi';
 import { createGraphicsImports } from 'canvas-wasi/worker';
 import { createStdinReader } from 'stdin-wasi/worker';
 import { VFS } from '../vfs/vfs.js';
-import { WasiHost, ProcExit, normalizePath, ESUCCESS } from '../vfs/wasi-host.js';
+import { WasiHost, ProcExit, normalizePath } from '../vfs/wasi-host.js';
 
 export { ProcExit, normalizePath };
 

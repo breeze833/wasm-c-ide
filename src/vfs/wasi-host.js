@@ -303,25 +303,3 @@ export class WasiHost extends BaseWasiHost {
     };
   }
 }
-
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = {
-    WasiHost,
-    BaseWasiHost,
-    MemoryPipe,
-    createBusyboxBridge,
-    wrapWasiPipes,
-    ProcExit,
-    normalizePath,
-    ESUCCESS,
-    EBADF,
-    EEXIST,
-    EINVAL,
-    EISDIR,
-    ENOENT,
-    ENOSYS,
-    ENOTDIR,
-    EPERM,
-    EROFS,
-  };
-}

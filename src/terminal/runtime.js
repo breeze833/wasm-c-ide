@@ -104,10 +104,6 @@ export class RuntimeManager {
 
       if (this.stdinHost) {
         this.stdinHost.reset();
-      } else if (this.sharedInt32) {
-        Atomics.store(this.sharedInt32, 0, 0);
-        Atomics.store(this.sharedInt32, 1, 0);
-        Atomics.store(this.sharedInt32, 2, 0);
       }
 
       if (this.inputCoordinator) {
@@ -288,14 +284,6 @@ export class RuntimeManager {
 
         if (this.stdinHost) {
           this.stdinHost.sendInput(currentBuf);
-        } else if (this.sharedInt32 && this.sharedUint8) {
-          const encoded = new TextEncoder().encode(currentBuf);
-          const toWrite = Math.min(encoded.length, this.sharedBuffer.byteLength - 16);
-          this.sharedUint8.set(encoded.subarray(0, toWrite), 16);
-          Atomics.store(this.sharedInt32, 1, toWrite);
-          Atomics.store(this.sharedInt32, 2, 0);
-          Atomics.store(this.sharedInt32, 0, 2);
-          Atomics.notify(this.sharedInt32, 0, 1);
         }
 
         this.isWaitingForStdin = false;
@@ -305,9 +293,6 @@ export class RuntimeManager {
       // Empty buffer: signal EOF
       if (this.stdinHost) {
         this.stdinHost.sendEof();
-      } else if (this.sharedInt32) {
-        Atomics.store(this.sharedInt32, 0, -1);
-        Atomics.notify(this.sharedInt32, 0, 1);
       }
 
       this.isWaitingForStdin = false;
@@ -324,14 +309,6 @@ export class RuntimeManager {
 
       if (this.stdinHost) {
         this.stdinHost.sendInput(lineWithNewline);
-      } else if (this.sharedInt32 && this.sharedUint8) {
-        const encoded = new TextEncoder().encode(lineWithNewline);
-        const toWrite = Math.min(encoded.length, this.sharedBuffer.byteLength - 16);
-        this.sharedUint8.set(encoded.subarray(0, toWrite), 16);
-        Atomics.store(this.sharedInt32, 1, toWrite);
-        Atomics.store(this.sharedInt32, 2, 0);
-        Atomics.store(this.sharedInt32, 0, 2);
-        Atomics.notify(this.sharedInt32, 0, 1);
       }
 
       this.isWaitingForStdin = false;
@@ -353,9 +330,6 @@ export class RuntimeManager {
 
     if (this.stdinHost) {
       this.stdinHost.sendEof();
-    } else if (this.sharedInt32) {
-      Atomics.store(this.sharedInt32, 0, -1);
-      Atomics.notify(this.sharedInt32, 0, 1);
     }
 
     if (this.graphicsWindow && typeof this.graphicsWindow.close === 'function') {
