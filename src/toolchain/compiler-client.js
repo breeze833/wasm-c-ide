@@ -4,7 +4,6 @@
 import { normalizePath } from '../vfs/vfs.js';
 import { WasmToolchain } from './wasm-clang.js';
 import { executeGccCommand, executeLdCommand, executeToolCommand } from './driver.js';
-import { executeArCommand } from './ar.js';
 import { runMake } from './make.js';
 
 export class CompilerClient {
@@ -217,16 +216,7 @@ export class CompilerClient {
           write: write || this.hostWrite,
         });
       }
-      if (cmd === 'ar' || cmd === 'ranlib') {
-        return await executeArCommand({
-          args,
-          cwd,
-          vfs: this.vfs,
-          toolchain: this.inProcessToolchain,
-          write: write || this.hostWrite,
-        });
-      }
-      if (['nm', 'objdump', 'size', 'c++filt', 'cxxfilt', 'strings', 'readelf', 'strip'].includes(cmd)) {
+      if (['ar', 'ranlib', 'nm', 'objdump', 'size', 'c++filt', 'cxxfilt', 'strings', 'readelf', 'strip'].includes(cmd)) {
         const toolMap = { 'c++filt': 'cxxfilt', 'readelf': 'readobj' };
         const activeTool = toolMap[cmd] || cmd;
         return await executeToolCommand({

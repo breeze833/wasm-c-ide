@@ -105,7 +105,7 @@ This IDE is specifically engineered for **students and systems programming educa
     - `[✓] System ready.`
   - Keystrokes and interrupts are guarded during startup to prevent input corruption, and the welcome banner and interactive shell prompt (`ide:~$ `) appear strictly after all VFS items are populated.
 - **Unified Terminal Line Editor (`LineEditor`)**:
-  - Centralized line-editing subsystem (`src/terminal/line-editor.js`) mediating all interactive text input across the shell and running WebAssembly binaries (`sqlite3`, `scanf`, `fgets`).
+  - Centralized prompt-safe line-editing subsystem (powered by modular [`ansi-line-editor`](https://github.com/breeze833/ansi-line-editor)) mediating all interactive text input across the shell and running WebAssembly binaries (`sqlite3`, `scanf`, `fgets`).
   - **Prompt-Safe Relative Redrawing**: Dynamically repositions cursor relative to user buffer and emits suffix clearing (`\x1b[K`), leaving preceding application prompts (`sqlite> `, `ide:~$ `) completely intact during editing and history traversal.
   - **In-Line Navigation & History**: Supports Left/Right arrows, Home/End, Backspace, Delete, Ctrl+A/E, and Ctrl+K/U. Up/Down arrows traverse command history while preserving uncommitted scratch edits.
   - **Contextual History Isolation**: Segregates history stacks by context (`'shell'` vs `'sqlite3'`), keeping bash commands and SQL statements cleanly separated.
@@ -235,7 +235,7 @@ This IDE is specifically engineered for **students and systems programming educa
 - **Link-Time Backend Resolution**:
   - The public `turtle_begin(ctx)` macro expands to `(<backend>_turtle_init(ctx) && turtle_begin_core())` provided by `<turtle_backend_canvas_wasi.h>` or `<turtle_backend_raylib.h>`, ensuring compile/link failures if a program links against the incorrect backend archive.
 - **Automated In-Tree Asset Compilation**:
-  - `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and uses the in-tree WebAssembly toolchain (`llvm-box.wasm` + `ar.js`) to compile both WebAssembly static archives with zero host compiler dependencies (`clang`, `llvm-ar`, or `make`).
+  - `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and uses the in-tree WebAssembly toolchain (`llvm-box.wasm` with bundled `ar`) to compile both WebAssembly static archives with zero host compiler dependencies (`clang`, `llvm-ar`, or `make`).
   - Copies user headers to `public/sysroot/include/turtle/` and bundles them directly into `sysroot.tar.gz` to ensure zero drift between physical headers and the in-browser virtual sysroot.
 - **Standard Linker Flag Specification**:
   - Linker flags are explicitly configured in the Project Settings Linker Flags field or passed on the terminal CLI:

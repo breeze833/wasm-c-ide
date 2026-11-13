@@ -10,7 +10,7 @@ import { FileTreeUI } from './components/filetree.js';
 import { showToast } from './components/toast.js';
 import { TerminalManager } from './terminal/terminal.js';
 import { RuntimeManager } from './terminal/runtime.js';
-import { LineEditor } from './terminal/line-editor.js';
+import { LineEditor } from 'ansi-line-editor';
 import { CompilerClient } from './toolchain/compiler-client.js';
 import { GraphicsWindowUI } from 'canvas-wasi';
 import 'canvas-wasi/style.css';

@@ -8,7 +8,7 @@ if (typeof self === 'undefined') {
   }
 }
 
-import { LineEditor } from '../terminal/line-editor.js';
+import { LineEditor } from 'ansi-line-editor';
 import { VFS, normalizePath } from '../vfs/vfs.js';
 import { mountSysroot, BIN_COMMANDS } from '../vfs/sysroot.js';
 import { WasiHost, ProcExit, ESUCCESS } from '../vfs/wasi-host.js';

@@ -10,7 +10,6 @@ import { execSync } from 'node:child_process';
 import { Tar } from '../src/toolchain/tar.js';
 import { VFS } from '../src/vfs/vfs.js';
 import { mountSysroot } from '../src/vfs/sysroot.js';
-import { buildArchive } from '../src/toolchain/ar.js';
 import { GRAPHICS_H, GRAPHICS_CANVAS_H } from 'canvas-wasi/headers';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -266,22 +265,16 @@ async function downloadTurtleAssets() {
   code = await tc.compile('/workspace/src/hal_raylib.c', '/workspace/build/hal_raylib.o', 'c', ['-I/workspace/include']);
   if (code !== 0) throw new Error(`Failed to compile hal_raylib.c: exit code ${code}`);
 
-  // Build static archives
-  const turtleObj = vfs.readFile('/workspace/build/turtle.o', false);
-  const halCanvasObj = vfs.readFile('/workspace/build/hal_canvas.o', false);
-  const halRaylibObj = vfs.readFile('/workspace/build/hal_raylib.o', false);
-
-  const canvasArchive = buildArchive([
-    { name: 'turtle.o', data: turtleObj },
-    { name: 'hal.o', data: halCanvasObj }
-  ]);
+  // Build static archives using llvm-box ar
+  code = await tc.runTool('ar', ['rcs', '/workspace/build/libturtle.a', '/workspace/build/turtle.o', '/workspace/build/hal_canvas.o']);
+  if (code !== 0) throw new Error(`Failed to create libturtle.a: exit code ${code}`);
+  const canvasArchive = vfs.readFile('/workspace/build/libturtle.a', false);
   fs.writeFileSync(libCanvasWasiPath, canvasArchive);
   fs.writeFileSync(libTurtlePath, canvasArchive);
 
-  const raylibArchive = buildArchive([
-    { name: 'turtle.o', data: turtleObj },
-    { name: 'hal.o', data: halRaylibObj }
-  ]);
+  code = await tc.runTool('ar', ['rcs', '/workspace/build/libturtle_raylib.a', '/workspace/build/turtle.o', '/workspace/build/hal_raylib.o']);
+  if (code !== 0) throw new Error(`Failed to create libturtle_raylib.a: exit code ${code}`);
+  const raylibArchive = vfs.readFile('/workspace/build/libturtle_raylib.a', false);
   fs.writeFileSync(libRaylibTurtlePath, raylibArchive);
 
   console.log('[sysroot] Installed libturtle.a & libturtle_canvas-wasi.a');

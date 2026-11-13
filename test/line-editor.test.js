@@ -1,6 +1,6 @@
 // Unit tests for unified prompt-safe LineEditor
 import assert from 'node:assert';
-import { LineEditor } from '../src/terminal/line-editor.js';
+import { LineEditor } from 'ansi-line-editor';
 
 console.log('--- Running LineEditor Unit Tests ---');
 

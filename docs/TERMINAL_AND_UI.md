@@ -27,7 +27,7 @@ This document details the user interface components, terminal emulator subsystem
 
 ## 2. Contextual Line Editor (`LineEditor`)
 
-The `LineEditor` (`src/terminal/line-editor.js`) provides a unified, prompt-safe input engine for both the BusyBox shell and user programs (`scanf`, `fgets`, `cin`, `getchar`).
+The `LineEditor` (powered by the modular [`ansi-line-editor`](https://github.com/breeze833/ansi-line-editor) package) provides a unified, prompt-safe input engine for both the BusyBox shell and user programs (`scanf`, `fgets`, `cin`, `getchar`).
 
 ### 2.1 Core Capabilities
 - **Inline Editing**: In-place cursor movement (Left/Right arrows), Home/End (`Ctrl+A` / `Ctrl+E`), backspace, and delete.

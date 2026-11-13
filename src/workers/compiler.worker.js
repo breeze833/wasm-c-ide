@@ -12,7 +12,6 @@ import { VFS, normalizePath } from '../vfs/vfs.js';
 import { mountSysroot } from '../vfs/sysroot.js';
 import { WasmToolchain } from '../toolchain/wasm-clang.js';
 import { executeGccCommand, executeLdCommand, executeToolCommand } from '../toolchain/driver.js';
-import { executeArCommand } from '../toolchain/ar.js';
 import { runMake } from '../toolchain/make.js';
 
 const vfs = new VFS();
@@ -176,15 +175,7 @@ self.onmessage = async (event) => {
           toolchain,
           write: writeFn,
         });
-      } else if (cmd === 'ar' || cmd === 'ranlib') {
-        exitCode = await executeArCommand({
-          args,
-          cwd,
-          vfs,
-          toolchain,
-          write: writeFn,
-        });
-      } else if (['nm', 'objdump', 'size', 'c++filt', 'cxxfilt', 'strings', 'readelf', 'strip'].includes(cmd)) {
+      } else if (['ar', 'ranlib', 'nm', 'objdump', 'size', 'c++filt', 'cxxfilt', 'strings', 'readelf', 'strip'].includes(cmd)) {
         const toolMap = {
           'c++filt': 'cxxfilt',
           'readelf': 'readobj',

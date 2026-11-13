@@ -3,7 +3,7 @@
 
 import { InputCoordinator } from 'canvas-wasi';
 import { createAudioReceiver } from 'raylib-wasi';
-import { LineEditor } from './line-editor.js';
+import { LineEditor } from 'ansi-line-editor';
 
 const CONTROL_STATE_IDX = 0;
 const CONTROL_LEN_IDX = 1;

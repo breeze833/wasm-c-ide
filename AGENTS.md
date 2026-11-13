@@ -76,11 +76,9 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   ├── monaco-setup.js    # Monaco worker environment setup
 │   │   └── tabs.js            # Tab bar manager and dirty mark (*) tracking
 │   ├── terminal/
-│   │   ├── line-editor.js     # Unified terminal line-editing engine with relative prompt-safe cursor redrawing
 │   │   ├── terminal.js        # xterm.js wrapper and command injection bridge
 │   │   └── runtime.js         # Host-side runtime manager and SharedArrayBuffer coordinator
 │   ├── toolchain/
-│   │   ├── ar.js              # POSIX ar static library archiver and wasm object symbol extractor
 │   │   ├── compiler-client.js # Host-side manager and differential VFS sync for compiler worker
 │   │   ├── driver.js          # gcc / clang command parser and execution coordinator
 │   │   ├── make.js            # Incremental Makefile runner evaluating mtimes
@@ -247,7 +245,7 @@ Agents executing this project should proceed milestone-by-milestone:
   - `turtle.h` declares `bool turtle_begin_core(void)`.
   - Backend headers (`turtle_backend_canvas_wasi.h` and `turtle_backend_raylib.h`) wrap initialization in `#define turtle_begin(ctx) (<backend>_turtle_init(ctx) && turtle_begin_core())` to strictly prevent linking against incorrect backend archives.
 - **Automated In-Tree Compilation & Zero-Drift Header Sync**:
-  - `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and builds both WASI static libraries using the in-tree `llvm-box.wasm` WebAssembly toolchain (`WasmToolchain`) and `buildArchive` (`ar.js`), removing host toolchain requirements (`clang`, `llvm-ar`, `make`).
+  - `scripts/download-sysroot.js` clones `libturtle` into `build/libturtle` and builds both WASI static libraries using the in-tree `llvm-box.wasm` WebAssembly toolchain (`WasmToolchain` with bundled `ar`), removing host toolchain requirements (`clang`, `llvm-ar`, `make`).
   - Copies user headers to `public/sysroot/include/turtle/` and bundles them directly into `sysroot.tar.gz`, eliminating manual header duplication and string fallbacks.
 - Bundled example programs: `06_turtle_canvas.c` and `07_turtle_raylib.c`.
 

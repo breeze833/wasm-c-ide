@@ -167,7 +167,7 @@ console.log('--- Running Startup Loading & VFS Indication Unit Tests ---');
   assert.ok(mainSrc.includes('handleShellStdinInput(key)'), 'main.js must implement handleShellStdinInput');
 
   // Functional test of handleShellStdinInput logic using mock App context
-  const { LineEditor } = await import('../src/terminal/line-editor.js');
+  const { LineEditor } = await import('ansi-line-editor');
   const sharedBuf = new SharedArrayBuffer(8192);
   const sharedI32 = new Int32Array(sharedBuf);
   const sharedU8 = new Uint8Array(sharedBuf);
