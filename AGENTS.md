@@ -89,7 +89,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   ├── archive.js         # JSZip project export and import routines
 │   │   ├── shared-sysroot.js  # Shared read-only sysroot binary builder, reader, and FNV-1a index
 │   │   ├── storage.js         # IndexedDB synchronization and default project seed
-│   │   ├── sysroot.js         # Standard C/C++ sysroot header and binary mount definitions
+│   │   ├── sysroot.js         # System utilities, toolchain command stubs, and host import definitions
 │   │   ├── vfs.js             # In-memory virtual filesystem with path normalization
 │   │   └── wasi-host.js       # Unified Platform Host fusing WASI Preview 1, MemoryPipe, and component bridges
 │   └── workers/
@@ -102,7 +102,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── icons/                 # PWA application icons (192, 512, svg)
 │   └── sysroot/               # Downloaded on-demand via scripts/download-sysroot.js (git-ignored)
 │       ├── wasm/              # Prebuilt llvm-box.wasm, libraylib.a, libturtle.a, libturtle_raylib.a, libsqlite3.a, sqlite3.wasm, sysroot.tar.gz
-│       └── include/           # Minimal fallback libc headers, raylib headers & turtle headers
+│       └── include/           # Subsystem C headers (raylib, turtle, sqlite, canvas)
 └── test/
     ├── ar.test.js             # Static archiver creation, extraction, table, and wasm-ld linkage tests
     ├── compiler-worker.test.js # Dedicated compiler worker, CompilerClient, and off-thread execution tests
@@ -307,7 +307,7 @@ Agents executing this project should proceed milestone-by-milestone:
 ### Milestone 18: Strict Link-Time Symbol Resolution & Host Whitelist Enforcement
 - Eliminate blanket `--allow-undefined` in `WasmToolchain.link()` (`src/toolchain/wasm-clang.js`) for executable binaries.
 - Implement host imports whitelist via `--allow-undefined-file=/usr/lib/wasm-host-imports.txt`:
-  - Mount `/usr/lib/wasm-host-imports.txt` during sysroot initialization (`src/vfs/sysroot.js`) containing the 37 host functions provided by `canvas-wasi` (`graphics_*` and `canvas_*`).
+  - Mount `/usr/lib/wasm-host-imports.txt` during sysroot initialization (`src/vfs/sysroot.js`) containing the 38 host functions provided by `canvas-wasi` (`graphics_*` and `canvas_*`).
   - Fall back to generating `/usr/lib/wasm-host-imports.txt` on-the-fly in `wasm-clang.js` if missing during isolated toolchain executions.
 - Enforce standard Unix linker behavior:
   - Missing library flags (`-lraylib`, `-lturtle`, `-lm`), omitted object files in multi-file projects, or typos in function calls immediately produce link-time errors: `wasm-ld: error: <file>.o: undefined symbol: <name>`.
@@ -529,6 +529,12 @@ Agents executing this project should proceed milestone-by-milestone:
   - Generic `clang-wasi` driver does not enforce educational flags. Pure C teaching mode (`mode: 'c'`) explicitly injects `-std=c11 -pedantic-errors -Wall -Wextra` at the worker/client layer (`compiler.worker.js`, `compiler-client.js`).
 - Codebase Simplification:
   - Eliminates ~800 lines of duplicated argument parsing, stage routing, and tool execution logic from `wasm-c-ide`.
+
+### Milestone 35: Elimination of Mock C/C++ Headers and Single-Source Sysroot
+- Eliminate legacy string-embedded mock headers (`STANDARD_C_HEADERS` and `STANDARD_CPP_HEADERS`) and custom header proxies (`TURTLE_HEADERS`, `RAYLIB_HEADERS`, `SQLITE_HEADERS`) from `src/vfs/sysroot.js`.
+- Remove fallback header injection loops from `src/vfs/shared-sysroot.js`.
+- Single Source of Truth: All standard libc, libc++, Raylib, SQLite, Turtle, and Canvas C/C++ headers are exclusively sourced from `SharedSysroot` (`sysroot.tar.gz`), eliminating header divergence, type mismatches with `-pedantic-errors`, and ~1,300 lines of redundant code.
+- Refactor `src/vfs/sysroot.js` to focus strictly on system commands (`BIN_COMMANDS`, `USR_BIN_COMMANDS`), static library stubs (`STANDARD_LIBS`), host imports (`WASM_HOST_IMPORTS`), and CLI utilities (`mountSysrootUtilities`).
 
 ---
 

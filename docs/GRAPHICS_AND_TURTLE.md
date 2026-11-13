@@ -34,9 +34,9 @@ Graphics in `wasm-c-ide` are decoupled across execution sandboxes to maintain 60
 `canvas-wasi` provides two zero-dependency C programming models:
 1. **Software 32-bit RGBA Framebuffer (`<graphics.h>`)**:
    - Pixel buffer layout: little-endian `0xAABBGGRR` (Red = byte 0, Green = byte 1, Blue = byte 2, Alpha = byte 3).
-   - Functions: `graphics_init(w, h, title)`, `graphics_present(buf, w, h)`, `graphics_wait_frame(fps)`, `graphics_close()`.
+   - Functions (8 total): `graphics_init(w, h, title)`, `graphics_present(pixels)`, `graphics_present_rgba(rgba, w, h)`, `graphics_wait_frame(fps)`, `graphics_should_close()`, `graphics_close()`, `graphics_get_mouse(&x, &y, &btn, &wheel)`, `graphics_is_key_down(key)`.
 2. **HTML5 2D Vector Primitives (`<graphics_canvas.h>`)**:
-   - Canvas 2D API: `canvas_begin_path()`, `canvas_arc()`, `canvas_fill()`, `canvas_stroke()`, `canvas_rotate()`, etc.
+   - Canvas 2D API (30 total): Frame presentation (`canvas_present`), rectangles & clearing (`canvas_clear_rect`, `canvas_fill_rect`, `canvas_stroke_rect`), path drawing (`canvas_begin_path`, `canvas_close_path`, `canvas_move_to`, `canvas_line_to`, `canvas_arc`, `canvas_fill`, `canvas_stroke`), styling & colors (`canvas_set_fill_style`, `canvas_set_stroke_style`, `canvas_set_fill_rgb`, `canvas_set_line_width`, `canvas_set_line_cap`), typography (`canvas_fill_text`, `canvas_stroke_text`, `canvas_set_font`), matrix transforms (`canvas_save`, `canvas_restore`, `canvas_translate`, `canvas_rotate`, `canvas_scale`), and pixel-level manipulation (`canvas_get_image_data`, `canvas_put_image_data`, `canvas_get_pixels`, `canvas_put_pixels`, `canvas_get_pixel`, `canvas_set_pixel`).
    - Retained Blitting: Preserves drawing surfaces across frames without flashing or flickering.
 
 ---

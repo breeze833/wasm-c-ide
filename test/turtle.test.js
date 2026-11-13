@@ -7,7 +7,7 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import { VFS } from '../src/vfs/vfs.js';
-import { mountSysroot, TURTLE_HEADERS } from '../src/vfs/sysroot.js';
+import { mountSysroot } from '../src/vfs/sysroot.js';
 import { SettingsModal } from '../src/components/settings.js';
 import { WasmToolchain } from '../src/toolchain/wasm-clang.js';
 import { executeGccCommand } from '../src/toolchain/driver.js';
@@ -38,15 +38,14 @@ console.log('✓ Precompiled libturtle static archives and headers verified');
 const vfs = new VFS();
 mountSysroot(vfs);
 
-assert.strictEqual(vfs.exists('/usr/include/turtle.h'), true, '/usr/include/turtle.h must exist by default');
-assert.strictEqual(vfs.exists('/usr/include/turtle_backend_canvas_wasi.h'), true);
-assert.strictEqual(vfs.exists('/usr/include/turtle_backend_raylib.h'), true, 'turtle_backend_raylib.h must be mounted by default in sysroot');
-assert.strictEqual(vfs.exists('/usr/include/turtle_hal.h'), false, 'turtle_hal.h internal header must not be mounted in /usr/include');
 assert.strictEqual(vfs.exists('/usr/lib/libturtle.a'), true);
 assert.strictEqual(vfs.exists('/usr/lib/libturtle_canvas-wasi.a'), true);
 assert.strictEqual(vfs.exists('/usr/lib/libturtle_raylib.a'), true);
+assert.strictEqual(fs.existsSync('public/sysroot/include/turtle/turtle.h'), true);
+assert.strictEqual(fs.existsSync('public/sysroot/include/turtle/turtle_backend_canvas_wasi.h'), true);
+assert.strictEqual(fs.existsSync('public/sysroot/include/turtle/turtle_backend_raylib.h'), true);
 
-const turtleHContent = vfs.readFile('/usr/include/turtle.h');
+const turtleHContent = fs.readFileSync('public/sysroot/include/turtle/turtle.h', 'utf-8');
 assert.strictEqual(turtleHContent.includes('turtle_begin'), true);
 assert.strictEqual(turtleHContent.includes('turtle_forward'), true);
 assert.strictEqual(turtleHContent.includes('turtle_turn'), true);

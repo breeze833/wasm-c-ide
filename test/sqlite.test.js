@@ -70,12 +70,13 @@ async function executeWasiProgram(wasmBytes, argv, vfs) {
   const vfs = new VFS();
   mountSysroot(vfs);
 
-  assert(vfs.exists('/usr/include/sqlite3.h'), '/usr/include/sqlite3.h must exist');
-  assert(vfs.exists('/usr/include/sqlite3ext.h'), '/usr/include/sqlite3ext.h must exist');
   assert(vfs.exists('/usr/lib/libsqlite3.a'), '/usr/lib/libsqlite3.a stub must exist');
   assert(vfs.exists('/usr/bin/sqlite3'), '/usr/bin/sqlite3 command stub must exist');
 
-  const hContent = vfs.readFile('/usr/include/sqlite3.h', true);
+  assert(fs.existsSync('public/sysroot/include/sqlite/sqlite3.h'), 'sqlite3.h must exist');
+  assert(fs.existsSync('public/sysroot/include/sqlite/sqlite3ext.h'), 'sqlite3ext.h must exist');
+
+  const hContent = fs.readFileSync('public/sysroot/include/sqlite/sqlite3.h', 'utf-8');
   assert(hContent.includes('sqlite3_open'), 'sqlite3.h must declare sqlite3_open');
   assert(hContent.includes('sqlite3_exec'), 'sqlite3.h must declare sqlite3_exec');
   assert(hContent.includes('SQLITE_VERSION'), 'sqlite3.h must define SQLITE_VERSION');

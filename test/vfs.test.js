@@ -1,6 +1,6 @@
 // Unit tests for VFS and Zip archive
 import { VFS, normalizePath } from '../src/vfs/vfs.js';
-import { STANDARD_C_HEADERS, mountSysroot } from '../src/vfs/sysroot.js';
+import { mountSysroot } from '../src/vfs/sysroot.js';
 import JSZip from 'jszip';
 import assert from 'node:assert';
 
@@ -39,9 +39,9 @@ console.log('✓ VFS basic operations passed');
 // Test 3: Read-only protection on /usr, /bin, and /dev, and sysroot mounting
 mountSysroot(vfs);
 assert.strictEqual(vfs.exists('/dev'), true);
-assert.strictEqual(vfs.exists('/usr/include/stdio.h'), true);
 assert.strictEqual(vfs.exists('/usr/lib/libc.a'), true);
 assert.strictEqual(vfs.exists('/usr/lib/crt1.o'), true);
+assert.strictEqual(vfs.exists('/usr/lib/wasm-host-imports.txt'), true);
 assert.strictEqual(vfs.exists('/bin/ls'), true);
 assert.strictEqual(vfs.exists('/bin/sh'), true);
 assert.strictEqual(vfs.exists('/usr/bin/gcc'), true);

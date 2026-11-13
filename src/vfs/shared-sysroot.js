@@ -15,8 +15,6 @@ import {
 import { normalizePath } from './vfs.js';
 import { Tar } from '../toolchain/tar.js';
 import {
-  STANDARD_C_HEADERS,
-  STANDARD_CPP_HEADERS,
   STANDARD_LIBS,
   WASM_HOST_IMPORTS,
   BIN_COMMANDS,
@@ -106,24 +104,9 @@ export function createSharedSysrootFromTar(tarBuffer, options = {}) {
     }
   }
 
-  // Custom virtual headers & library stubs from sysroot.js
-  // Only inject custom headers or stubs that are not already present in sysroot.tar.gz
+  // Library stubs and host imports from sysroot.js
   const existingPaths = new Set(fileEntries.map(e => e.path));
 
-  for (const [filename, content] of Object.entries(STANDARD_C_HEADERS)) {
-    const p = `/usr/include/${filename}`;
-    if (!existingPaths.has(p)) {
-      fileEntries.push({ path: p, content, isDir: false });
-      existingPaths.add(p);
-    }
-  }
-  for (const [filename, content] of Object.entries(STANDARD_CPP_HEADERS)) {
-    const p = `/usr/include/${filename}`;
-    if (!existingPaths.has(p)) {
-      fileEntries.push({ path: p, content, isDir: false });
-      existingPaths.add(p);
-    }
-  }
   for (const lib of STANDARD_LIBS) {
     const p = `/usr/lib/${lib}`;
     if (!existingPaths.has(p)) {

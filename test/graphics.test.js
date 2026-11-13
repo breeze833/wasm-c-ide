@@ -6,28 +6,24 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import { VFS } from '../src/vfs/vfs.js';
-import { mountSysroot, STANDARD_C_HEADERS } from '../src/vfs/sysroot.js';
+import { mountSysroot } from '../src/vfs/sysroot.js';
 import { InputCoordinator } from 'canvas-wasi';
+import { GRAPHICS_H, GRAPHICS_CANVAS_H } from 'canvas-wasi/headers';
 import { WasmToolchain } from '../src/toolchain/wasm-clang.js';
 import { executeGccCommand } from '../src/toolchain/driver.js';
 
 console.log('--- Running Generic Graphics Canvas Unit Tests ---');
 
-// Test 1: Verify graphics.h is present in STANDARD_C_HEADERS and mounted to /usr/include/graphics.h
-const vfs = new VFS();
-mountSysroot(vfs);
-assert.strictEqual(typeof STANDARD_C_HEADERS['graphics.h'], 'string', 'graphics.h must be in STANDARD_C_HEADERS');
-assert.strictEqual(vfs.exists('/usr/include/graphics.h'), true, '/usr/include/graphics.h must exist after mountSysroot');
-
-const headerContent = vfs.readFile('/usr/include/graphics.h');
-assert.strictEqual(headerContent.includes('graphics_init'), true);
-assert.strictEqual(headerContent.includes('graphics_present'), true);
-assert.strictEqual(headerContent.includes('graphics_present_rgba'), true);
-assert.strictEqual(headerContent.includes('graphics_should_close'), true);
-assert.strictEqual(headerContent.includes('graphics_close'), true);
-assert.strictEqual(headerContent.includes('graphics_wait_frame'), true);
-assert.strictEqual(headerContent.includes('graphics_get_mouse'), true);
-assert.strictEqual(headerContent.includes('graphics_is_key_down'), true);
+// Test 1: Verify graphics.h presence and signatures from canvas-wasi/headers
+assert.strictEqual(typeof GRAPHICS_H, 'string', 'GRAPHICS_H must be a string');
+assert.strictEqual(GRAPHICS_H.includes('graphics_init'), true);
+assert.strictEqual(GRAPHICS_H.includes('graphics_present'), true);
+assert.strictEqual(GRAPHICS_H.includes('graphics_present_rgba'), true);
+assert.strictEqual(GRAPHICS_H.includes('graphics_should_close'), true);
+assert.strictEqual(GRAPHICS_H.includes('graphics_close'), true);
+assert.strictEqual(GRAPHICS_H.includes('graphics_wait_frame'), true);
+assert.strictEqual(GRAPHICS_H.includes('graphics_get_mouse'), true);
+assert.strictEqual(GRAPHICS_H.includes('graphics_is_key_down'), true);
 console.log('✓ graphics.h presence and API signatures verified');
 
 // Test 2: Verify GraphicsWindowUI uses id="graphics-canvas" and id="graphics-popup-canvas"
@@ -317,20 +313,18 @@ assert.strictEqual(closeReceived, true, 'graphics_close must be called');
 console.log('✓ Runtime execution and frame presentation verified');
 
 // Test 6: Verify graphics_canvas.h presence and API signatures
-assert.strictEqual(typeof STANDARD_C_HEADERS['graphics_canvas.h'], 'string', 'graphics_canvas.h must be in STANDARD_C_HEADERS');
-assert.strictEqual(vfs.exists('/usr/include/graphics_canvas.h'), true, '/usr/include/graphics_canvas.h must exist after mountSysroot');
-const canvasHeaderContent = vfs.readFile('/usr/include/graphics_canvas.h');
-assert.strictEqual(canvasHeaderContent.includes('#include <graphics.h>'), true);
-assert.strictEqual(canvasHeaderContent.includes('canvas_present'), true);
-assert.strictEqual(canvasHeaderContent.includes('canvas_fill_rect'), true);
-assert.strictEqual(canvasHeaderContent.includes('canvas_stroke_rect'), true);
-assert.strictEqual(canvasHeaderContent.includes('canvas_clear_rect'), true);
-assert.strictEqual(canvasHeaderContent.includes('canvas_arc'), true);
-assert.strictEqual(canvasHeaderContent.includes('canvas_fill_text'), true);
-assert.strictEqual(canvasHeaderContent.includes('canvas_set_fill_style'), true);
-assert.strictEqual(canvasHeaderContent.includes('canvas_set_font'), true);
-assert.strictEqual(canvasHeaderContent.includes('canvas_save'), true);
-assert.strictEqual(canvasHeaderContent.includes('canvas_restore'), true);
+assert.strictEqual(typeof GRAPHICS_CANVAS_H, 'string', 'GRAPHICS_CANVAS_H must be a string');
+assert.strictEqual(GRAPHICS_CANVAS_H.includes('#include <graphics.h>'), true);
+assert.strictEqual(GRAPHICS_CANVAS_H.includes('canvas_present'), true);
+assert.strictEqual(GRAPHICS_CANVAS_H.includes('canvas_fill_rect'), true);
+assert.strictEqual(GRAPHICS_CANVAS_H.includes('canvas_stroke_rect'), true);
+assert.strictEqual(GRAPHICS_CANVAS_H.includes('canvas_clear_rect'), true);
+assert.strictEqual(GRAPHICS_CANVAS_H.includes('canvas_arc'), true);
+assert.strictEqual(GRAPHICS_CANVAS_H.includes('canvas_fill_text'), true);
+assert.strictEqual(GRAPHICS_CANVAS_H.includes('canvas_set_fill_style'), true);
+assert.strictEqual(GRAPHICS_CANVAS_H.includes('canvas_set_font'), true);
+assert.strictEqual(GRAPHICS_CANVAS_H.includes('canvas_save'), true);
+assert.strictEqual(GRAPHICS_CANVAS_H.includes('canvas_restore'), true);
 console.log('✓ graphics_canvas.h presence and 2D vector API signatures verified');
 
 // Test 7: End-to-end Pure C compilation with <graphics_canvas.h>
@@ -506,7 +500,7 @@ assert.strictEqual(link03, 0, 'examples/03_framebuffer_graphics.c must link with
 console.log('✓ examples/03_framebuffer_graphics.c end-to-end compilation & linkage verified');
 
 // Test 12: Verify graphics_canvas.h declares pixel-level manipulation APIs
-const canvasHeader = vfs.readFile('/usr/include/graphics_canvas.h');
+const canvasHeader = GRAPHICS_CANVAS_H;
 assert.strictEqual(canvasHeader.includes('canvas_get_image_data'), true);
 assert.strictEqual(canvasHeader.includes('canvas_put_image_data'), true);
 assert.strictEqual(canvasHeader.includes('canvas_get_pixels'), true);
