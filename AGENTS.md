@@ -80,11 +80,11 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   └── runtime.js         # Host-side runtime manager and SharedArrayBuffer coordinator
 │   ├── toolchain/
 │   │   ├── compiler-client.js # Host-side manager and differential VFS sync for compiler worker
-│   │   ├── driver.js          # gcc / clang command parser and execution coordinator
+│   │   ├── driver.js          # Re-exports clang-wasi/driver with synchronous Make runner support
 │   │   ├── make.js            # Incremental Makefile runner evaluating mtimes
 │   │   ├── tar.js             # Sysroot tarball extractor
 │   │   ├── wasm-cache.js      # IndexedDB persistent binary cache for compiled WebAssembly modules
-│   │   └── wasm-clang.js      # LLVM multicall, streaming compiler, and direct VFS driver
+│   │   └── wasm-clang.js      # Augments clang-wasi/toolchain with IndexedDB caching & sysroot fallback
 │   ├── vfs/
 │   │   ├── archive.js         # JSZip project export and import routines
 │   │   ├── shared-sysroot.js  # Shared read-only sysroot binary builder, reader, and FNV-1a index
@@ -515,6 +515,19 @@ Agents executing this project should proceed milestone-by-milestone:
 - Refactor `src/vfs/vfs.js` to inherit from `OverlayVFS` from `vfs-wasi`, retaining backward-compatible signatures and system root initialization.
 - Refactor `src/vfs/shared-sysroot.js` to delegate binary parsing, indexing, and `SharedSysrootReader` to `vfs-wasi`, retaining IDE-specific sysroot unpacking and library preloading.
 - Refactor `src/vfs/wasi-host.js` to re-export `EROFS` from `vfs-wasi`.
+
+### Milestone 34: Compiler Driver & Toolchain Modularization (`clang-wasi`)
+- Decouple high-level toolchain coordinator and compiler driver into upstream [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi).
+- Subpath Imports:
+  - Import `parseCompilerArgs`, `executeGccCommand`, `executeLdCommand`, `executeToolCommand` from `clang-wasi/driver`.
+  - Import `WasmToolchain as BaseWasmToolchain`, `AppInstance`, `ProcExit`, `normalizePath` from `clang-wasi/toolchain`.
+- IDE Specialization:
+  - `src/toolchain/wasm-clang.js`: Subclasses `BaseWasmToolchain`, augmenting it with browser-specific IndexedDB caching (`llvm-box-19.1.0`), streaming compilation, and fallback `SharedSysroot` mounting.
+  - `src/toolchain/driver.js`: Re-exports `clang-wasi/driver` exports while retaining `executeGccCommandSync` for synchronous GNU Make recipe execution.
+- Pedagogical Integrity:
+  - Generic `clang-wasi` driver does not enforce educational flags. Pure C teaching mode (`mode: 'c'`) explicitly injects `-std=c11 -pedantic-errors -Wall -Wextra` at the worker/client layer (`compiler.worker.js`, `compiler-client.js`).
+- Codebase Simplification:
+  - Eliminates ~800 lines of duplicated argument parsing, stage routing, and tool execution logic from `wasm-c-ide`.
 
 ---
 

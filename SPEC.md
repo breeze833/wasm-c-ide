@@ -117,6 +117,10 @@ Detailed technical specifications, binary layouts, memory protocols, and case st
 
 ### 3.2 Toolchain & Persistent Binary Caching Summary
 - Single unified multicall driver `llvm-box.wasm` (LLVM 19.1.0) containing `clang`, `clang++`, `wasm-ld`, `ar`, `nm`, `size`, `objdump`, `cxxfilt`, and `strings`.
+- **Decoupled Toolchain & Driver via `clang-wasi`**:
+  - Consumes high-level compiler driver functions (`parseCompilerArgs`, `executeGccCommand`, `executeLdCommand`, `executeToolCommand`) directly from `clang-wasi/driver`.
+  - In-IDE `WasmToolchain` extends `WasmToolchain` from `clang-wasi/toolchain`, inheriting zero-copy VFS execution, multicall routing, and stage dispatching while augmenting it with browser-specific IndexedDB persistent module caching (`llvm-box-19.1.0`) and `SharedSysroot` initial mounting.
+  - Pedagogical Pure C mode (`mode: 'c'`) explicitly passes `-std=c11 -pedantic-errors -Wall -Wextra` via compiler arguments when invoking `executeGccCommand`, preserving educational rigor over the generic `clang-wasi` driver.
 - Persists raw 56 MB binary in IndexedDB (`wasm-cache.js`), bypassing `WebAssembly.Module` structured clone restrictions (`DataCloneError`) and loading in **<50ms** on repeat sessions.
 - Streaming concurrent compilation via `WebAssembly.compileStreaming` with automatic buffer capture for offline persistence.
 - Enforces strict link-time symbol resolution: missing libraries fail immediately at link time (`wasm-ld: error: undefined symbol`), while authorized host imports are whitelisted via `--allow-undefined-file=/usr/lib/wasm-host-imports.txt`.

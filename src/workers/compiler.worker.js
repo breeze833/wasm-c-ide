@@ -11,7 +11,7 @@ if (typeof self === 'undefined') {
 import { VFS, normalizePath } from '../vfs/vfs.js';
 import { mountSysroot } from '../vfs/sysroot.js';
 import { WasmToolchain } from '../toolchain/wasm-clang.js';
-import { executeGccCommand, executeLdCommand, executeToolCommand } from '../toolchain/driver.js';
+import { executeGccCommand, executeLdCommand, executeToolCommand } from 'clang-wasi/driver';
 import { runMake } from '../toolchain/make.js';
 
 const vfs = new VFS();
@@ -155,9 +155,16 @@ self.onmessage = async (event) => {
     try {
       if (cmd === 'gcc' || cmd === 'clang' || cmd === 'g++' || cmd === 'clang++' || cmd === 'clang-cpp') {
         const effectiveMode = (cmd === 'g++' || cmd === 'clang++') ? 'cpp' : (mode || 'c');
+        let finalArgs = args;
+        if (effectiveMode === 'c') {
+          const hasPedantic = args.includes('-pedantic') || args.includes('-pedantic-errors');
+          if (!hasPedantic && !args.some(a => a.startsWith('-std='))) {
+            finalArgs = ['-std=c11', '-pedantic-errors', ...args];
+          }
+        }
         exitCode = await executeGccCommand({
           cmd,
-          args,
+          args: finalArgs,
           cwd,
           environ,
           vfs,

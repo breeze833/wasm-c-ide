@@ -3,7 +3,7 @@
 
 import { normalizePath } from '../vfs/vfs.js';
 import { WasmToolchain } from './wasm-clang.js';
-import { executeGccCommand, executeLdCommand, executeToolCommand } from './driver.js';
+import { executeGccCommand, executeLdCommand, executeToolCommand } from 'clang-wasi/driver';
 import { runMake } from './make.js';
 
 export class CompilerClient {
@@ -194,9 +194,16 @@ export class CompilerClient {
       }
       if (cmd === 'gcc' || cmd === 'clang' || cmd === 'g++' || cmd === 'clang++' || cmd === 'clang-cpp') {
         const effectiveMode = (cmd === 'g++' || cmd === 'clang++') ? 'cpp' : (mode || 'c');
+        let finalArgs = args;
+        if (effectiveMode === 'c') {
+          const hasPedantic = args.includes('-pedantic') || args.includes('-pedantic-errors');
+          if (!hasPedantic && !args.some(a => a.startsWith('-std='))) {
+            finalArgs = ['-std=c11', '-pedantic-errors', ...args];
+          }
+        }
         return await executeGccCommand({
           cmd,
-          args,
+          args: finalArgs,
           cwd,
           environ,
           vfs: this.vfs,
