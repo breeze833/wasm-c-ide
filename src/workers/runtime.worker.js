@@ -10,24 +10,12 @@ if (typeof self === 'undefined') {
 
 import { createRaylibHost } from 'raylib-wasi';
 import { createGraphicsImports } from 'canvas-wasi/worker';
+import { createStdinReader } from 'stdin-wasi/worker';
 import { VFS } from '../vfs/vfs.js';
 import { WasiHost, ProcExit, normalizePath, ESUCCESS } from '../vfs/wasi-host.js';
 
 export { ProcExit, normalizePath };
 
-const STATE_IDLE = 0;
-const STATE_WAITING = 1;
-const STATE_READY = 2;
-const STATE_EOF = -1;
-
-const CONTROL_STATE_IDX = 0;
-const CONTROL_LEN_IDX = 1;
-const CONTROL_READ_POS_IDX = 2;
-
-const DATA_OFFSET = 16; // Byte offset in SharedArrayBuffer for stdin input data
-
-let sharedInt32 = null;
-let sharedUint8 = null;
 let activeGraphicsHost = null;
 
 self.onmessage = async (event) => {
@@ -44,13 +32,8 @@ self.onmessage = async (event) => {
   if (msg.type === 'run') {
     const { wasmBytes, sharedBuffer, argv = ['./a.out'], environ = {}, stdinBytes, raylibSharedBuffer, files = {}, sharedSysrootBuffer = null } = msg;
 
-    if (sharedBuffer) {
-      sharedInt32 = new Int32Array(sharedBuffer);
-      sharedUint8 = new Uint8Array(sharedBuffer);
-    }
-
     try {
-      const res = await runWasm(wasmBytes, argv, environ, stdinBytes, raylibSharedBuffer, files, sharedSysrootBuffer);
+      const res = await runWasm(wasmBytes, argv, environ, stdinBytes, raylibSharedBuffer, files, sharedSysrootBuffer, sharedBuffer);
       const changes = {};
       if (res && res.changedFiles) {
         for (const [k, v] of res.changedFiles.entries()) {
@@ -76,10 +59,8 @@ self.onmessage = async (event) => {
   }
 };
 
-export async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibSharedBuffer = null, initialFiles = {}, sharedSysrootBuffer = null) {
+export async function runWasm(wasmBytes, argv, environ, stdinBytes = null, raylibSharedBuffer = null, initialFiles = {}, sharedSysrootBuffer = null, sharedBuffer = null) {
   let memoryInstance = null;
-  let stdinPos = 0;
-  const preloadedStdin = stdinBytes ? (stdinBytes instanceof Uint8Array ? stdinBytes : new Uint8Array(stdinBytes)) : null;
 
   function memU8() {
     return new Uint8Array(memoryInstance.buffer);
@@ -88,79 +69,12 @@ export async function runWasm(wasmBytes, argv, environ, stdinBytes = null, rayli
     return new Uint32Array(memoryInstance.buffer);
   }
 
-  // Blocking synchronous stdin handler using Atomics or preloaded buffer
-  function readStdin(iovs, iovs_len, nread_out, host) {
-    if (preloadedStdin) {
-      let totalRead = 0;
-      for (let i = 0; i < iovs_len; i++) {
-        const bufPtr = host.memU32()[(iovs >> 2) + i * 2];
-        const bufLen = host.memU32()[(iovs >> 2) + i * 2 + 1];
-        const available = preloadedStdin.length - stdinPos;
-        if (available > 0) {
-          const toCopy = Math.min(bufLen, available);
-          host.memU8().set(preloadedStdin.subarray(stdinPos, stdinPos + toCopy), bufPtr);
-          stdinPos += toCopy;
-          totalRead += toCopy;
-          break;
-        }
-      }
-      host.memU32()[nread_out >> 2] = totalRead;
-      return ESUCCESS;
-    }
-
-    let totalRead = 0;
-
-    for (let i = 0; i < iovs_len; i++) {
-      const bufPtr = host.memU32()[(iovs >> 2) + i * 2];
-      const bufLen = host.memU32()[(iovs >> 2) + i * 2 + 1];
-
-      let available = 0;
-      let curLen = 0;
-      let curPos = 0;
-
-      if (sharedInt32) {
-        curLen = Atomics.load(sharedInt32, CONTROL_LEN_IDX);
-        curPos = Atomics.load(sharedInt32, CONTROL_READ_POS_IDX);
-        available = curLen - curPos;
-      }
-
-      if (available <= 0 && sharedInt32) {
-        // Notify host that we are blocked waiting for stdin input
-        self.postMessage({ type: 'stdin_request' });
-
-        // Set state to WAITING
-        Atomics.store(sharedInt32, CONTROL_STATE_IDX, STATE_WAITING);
-
-        // Synchronously block worker until main thread issues Atomics.notify()
-        Atomics.wait(sharedInt32, CONTROL_STATE_IDX, STATE_WAITING);
-
-        const state = Atomics.load(sharedInt32, CONTROL_STATE_IDX);
-        if (state === STATE_EOF) {
-          break;
-        }
-
-        curLen = Atomics.load(sharedInt32, CONTROL_LEN_IDX);
-        curPos = Atomics.load(sharedInt32, CONTROL_READ_POS_IDX);
-        available = curLen - curPos;
-      }
-
-      if (available > 0 && sharedInt32) {
-        curPos = Atomics.load(sharedInt32, CONTROL_READ_POS_IDX);
-        const toCopy = Math.min(bufLen, available);
-        const target = host.memU8().subarray(bufPtr, bufPtr + toCopy);
-        const source = sharedUint8.subarray(DATA_OFFSET + curPos, DATA_OFFSET + curPos + toCopy);
-
-        target.set(source);
-        Atomics.add(sharedInt32, CONTROL_READ_POS_IDX, toCopy);
-        totalRead += toCopy;
-      }
-
-      if (totalRead > 0) break;
-    }
-
-    host.memU32()[nread_out >> 2] = totalRead;
-    return ESUCCESS;
-  }
+  const readStdin = createStdinReader({
+    sharedBuffer,
+    stdinBytes,
+    getMemory: () => memoryInstance,
+    notifyHost: () => self.postMessage({ type: 'stdin_request' }),
+  });
 
   const vfs = new VFS();
   if (sharedSysrootBuffer) {

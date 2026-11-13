@@ -164,7 +164,7 @@ This IDE is specifically engineered for **students and systems programming educa
 ### 5. Execution Sandbox, Synchronous Stdin & In-Code File I/O
 - **Dedicated Runtime Web Worker**: User executables run in an isolated WebAssembly execution sandbox with complete WASI Preview 1 filesystem emulation.
 - **Synchronous Blocking Input (`scanf` / `cin`)**:
-  - Employs `SharedArrayBuffer` and `Atomics.wait()` / `Atomics.notify()`.
+  - Powered by modular [`breeze833/stdin-wasi`](https://github.com/breeze833/stdin-wasi) via `SharedArrayBuffer` and `Atomics.wait()` / `Atomics.notify()`.
   - When the user's C program invokes `scanf("%d", &val)` or `getchar()`, the runtime worker suspends synchronously without locking the main browser UI thread.
   - Characters typed into `xterm.js` are forwarded to the worker via shared memory upon pressing Enter.
 - **In-Code Standard File I/O (`fopen` & `fstream`)**:

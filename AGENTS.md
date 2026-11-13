@@ -173,8 +173,9 @@ Agents executing this project should proceed milestone-by-milestone:
 
 ### Milestone 6: Execution Runtime & Synchronous Stdin
 - Implement `runtime.worker.js` for executing generated `a.out`.
-- Implement `Atomics.wait` on `SharedArrayBuffer` for synchronous `scanf` / `cin` handling:
-  - Shell/Runtime requests stdin input $\to$ terminal captures characters $\to$ `Atomics.notify` resumes runtime worker.
+- Implement `Atomics.wait` on `SharedArrayBuffer` for synchronous `scanf` / `cin` handling powered by modular [`stdin-wasi`](https://github.com/breeze833/stdin-wasi):
+  - Host coordinator `StdinHost` writes entered lines or EOF and notifies waiting workers.
+  - Reader `createStdinReader` inside `runtime.worker.js` suspends on `Atomics.wait()` with zero CPU usage, distributing chunks across scatter-gather `iovec` arrays.
 - Implement execution timeout and explicit process cancellation (`Ctrl+C` / UI Stop button).
 
 ### Milestone 7: Build Systems (Shell Script & Makefile)

@@ -28,6 +28,7 @@
     "monaco-editor": "^0.52.2",
     "raylib-wasi": "https://github.com/breeze833/raylib-wasi/releases/download/latest/raylib-wasi-5.5.0.tgz",
     "sqlite-wasi": "https://github.com/breeze833/sqlite-wasi/releases/download/v3.54.1/sqlite-wasi-3.54.1.tgz",
+    "stdin-wasi": "https://github.com/breeze833/stdin-wasi/releases/download/v0.1.0/stdin-wasi-0.1.0.tgz",
     "vfs-wasi": "https://github.com/breeze833/vfs-wasi/releases/download/latest/vfs-wasi-0.1.0.tgz"
   },
   "devDependencies": {

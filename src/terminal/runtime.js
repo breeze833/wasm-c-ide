@@ -4,16 +4,7 @@
 import { InputCoordinator } from 'canvas-wasi';
 import { createAudioReceiver } from 'raylib-wasi';
 import { LineEditor } from 'ansi-line-editor';
-
-const CONTROL_STATE_IDX = 0;
-const CONTROL_LEN_IDX = 1;
-const CONTROL_READ_POS_IDX = 2;
-const DATA_OFFSET = 16;
-
-const STATE_IDLE = 0;
-const STATE_WAITING = 1;
-const STATE_READY = 2;
-const STATE_EOF = -1;
+import { StdinHost } from 'stdin-wasi/host';
 
 export class RuntimeManager {
   constructor(terminal, options = {}) {
@@ -32,9 +23,10 @@ export class RuntimeManager {
     this.currentOptions = null;
 
     if (typeof window !== 'undefined' && window.crossOriginIsolated) {
-      this.sharedBuffer = new SharedArrayBuffer(8192);
-      this.sharedInt32 = new Int32Array(this.sharedBuffer);
-      this.sharedUint8 = new Uint8Array(this.sharedBuffer);
+      this.stdinHost = new StdinHost({ bufferSize: 8192 });
+      this.sharedBuffer = this.stdinHost.getSharedBuffer();
+      this.sharedInt32 = this.stdinHost.sharedInt32;
+      this.sharedUint8 = this.stdinHost.sharedUint8;
 
       this.raylibSharedBuffer = new SharedArrayBuffer(512);
       this.inputCoordinator = new InputCoordinator({
@@ -46,6 +38,7 @@ export class RuntimeManager {
         this.graphicsWindow.setInputCoordinator(this.inputCoordinator);
       }
     } else {
+      this.stdinHost = null;
       this.sharedBuffer = null;
       this.sharedInt32 = null;
       this.sharedUint8 = null;
@@ -109,10 +102,12 @@ export class RuntimeManager {
       this.lineEditor.reset();
       let capturedStdout = '';
 
-      if (this.sharedInt32) {
-        Atomics.store(this.sharedInt32, CONTROL_STATE_IDX, STATE_IDLE);
-        Atomics.store(this.sharedInt32, CONTROL_LEN_IDX, 0);
-        Atomics.store(this.sharedInt32, CONTROL_READ_POS_IDX, 0);
+      if (this.stdinHost) {
+        this.stdinHost.reset();
+      } else if (this.sharedInt32) {
+        Atomics.store(this.sharedInt32, 0, 0);
+        Atomics.store(this.sharedInt32, 1, 0);
+        Atomics.store(this.sharedInt32, 2, 0);
       }
 
       if (this.inputCoordinator) {
@@ -291,16 +286,16 @@ export class RuntimeManager {
         // Flush line buffer without newline
         this.lineEditor.reset();
 
-        if (this.sharedInt32 && this.sharedUint8) {
+        if (this.stdinHost) {
+          this.stdinHost.sendInput(currentBuf);
+        } else if (this.sharedInt32 && this.sharedUint8) {
           const encoded = new TextEncoder().encode(currentBuf);
-          const toWrite = Math.min(encoded.length, this.sharedBuffer.byteLength - DATA_OFFSET);
-
-          this.sharedUint8.set(encoded.subarray(0, toWrite), DATA_OFFSET);
-          Atomics.store(this.sharedInt32, CONTROL_LEN_IDX, toWrite);
-          Atomics.store(this.sharedInt32, CONTROL_READ_POS_IDX, 0);
-
-          Atomics.store(this.sharedInt32, CONTROL_STATE_IDX, STATE_READY);
-          Atomics.notify(this.sharedInt32, CONTROL_STATE_IDX, 1);
+          const toWrite = Math.min(encoded.length, this.sharedBuffer.byteLength - 16);
+          this.sharedUint8.set(encoded.subarray(0, toWrite), 16);
+          Atomics.store(this.sharedInt32, 1, toWrite);
+          Atomics.store(this.sharedInt32, 2, 0);
+          Atomics.store(this.sharedInt32, 0, 2);
+          Atomics.notify(this.sharedInt32, 0, 1);
         }
 
         this.isWaitingForStdin = false;
@@ -308,9 +303,11 @@ export class RuntimeManager {
       }
 
       // Empty buffer: signal EOF
-      if (this.sharedInt32) {
-        Atomics.store(this.sharedInt32, CONTROL_STATE_IDX, STATE_EOF);
-        Atomics.notify(this.sharedInt32, CONTROL_STATE_IDX, 1);
+      if (this.stdinHost) {
+        this.stdinHost.sendEof();
+      } else if (this.sharedInt32) {
+        Atomics.store(this.sharedInt32, 0, -1);
+        Atomics.notify(this.sharedInt32, 0, 1);
       }
 
       this.isWaitingForStdin = false;
@@ -325,17 +322,16 @@ export class RuntimeManager {
       this.lineEditor.reset();
       const lineWithNewline = lineText + '\n';
 
-      if (this.sharedInt32 && this.sharedUint8) {
+      if (this.stdinHost) {
+        this.stdinHost.sendInput(lineWithNewline);
+      } else if (this.sharedInt32 && this.sharedUint8) {
         const encoded = new TextEncoder().encode(lineWithNewline);
-        const toWrite = Math.min(encoded.length, this.sharedBuffer.byteLength - DATA_OFFSET);
-
-        this.sharedUint8.set(encoded.subarray(0, toWrite), DATA_OFFSET);
-        Atomics.store(this.sharedInt32, CONTROL_LEN_IDX, toWrite);
-        Atomics.store(this.sharedInt32, CONTROL_READ_POS_IDX, 0);
-
-        // Resume runtime worker waiting on Atomics.wait
-        Atomics.store(this.sharedInt32, CONTROL_STATE_IDX, STATE_READY);
-        Atomics.notify(this.sharedInt32, CONTROL_STATE_IDX, 1);
+        const toWrite = Math.min(encoded.length, this.sharedBuffer.byteLength - 16);
+        this.sharedUint8.set(encoded.subarray(0, toWrite), 16);
+        Atomics.store(this.sharedInt32, 1, toWrite);
+        Atomics.store(this.sharedInt32, 2, 0);
+        Atomics.store(this.sharedInt32, 0, 2);
+        Atomics.notify(this.sharedInt32, 0, 1);
       }
 
       this.isWaitingForStdin = false;
@@ -355,9 +351,11 @@ export class RuntimeManager {
       this.worker = null;
     }
 
-    if (this.sharedInt32) {
-      Atomics.store(this.sharedInt32, CONTROL_STATE_IDX, STATE_EOF);
-      Atomics.notify(this.sharedInt32, CONTROL_STATE_IDX, 1);
+    if (this.stdinHost) {
+      this.stdinHost.sendEof();
+    } else if (this.sharedInt32) {
+      Atomics.store(this.sharedInt32, 0, -1);
+      Atomics.notify(this.sharedInt32, 0, 1);
     }
 
     if (this.graphicsWindow && typeof this.graphicsWindow.close === 'function') {
