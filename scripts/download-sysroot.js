@@ -252,6 +252,8 @@ async function downloadTurtleAssets() {
 
   // Compile Canvas-wasi HAL
   vfs.writeFile('/workspace/include/turtle_backend_canvas_wasi.h', fs.readFileSync(path.join(LIBTURTLE_BUILD_DIR, 'backend', 'canvas-wasi', 'include', 'turtle_backend_canvas_wasi.h')), Date.now(), true);
+  vfs.writeFile('/workspace/include/graphics_canvas.h', Buffer.from(GRAPHICS_CANVAS_H), Date.now(), true);
+  vfs.writeFile('/workspace/include/graphics.h', Buffer.from(GRAPHICS_H), Date.now(), true);
   vfs.writeFile('/workspace/src/hal_canvas_wasi.c', fs.readFileSync(path.join(LIBTURTLE_BUILD_DIR, 'backend', 'canvas-wasi', 'hal_canvas_wasi.c')), Date.now(), true);
 
   code = await tc.compile('/workspace/src/hal_canvas_wasi.c', '/workspace/build/hal_canvas.o', 'c', ['-I/workspace/include', '-D_POSIX_C_SOURCE=200809L']);
@@ -488,10 +490,16 @@ async function syncCustomHeaders() {
 }
 
 async function main() {
+  const incDir = path.join(projectRoot, 'public', 'sysroot', 'include');
+  fs.mkdirSync(incDir, { recursive: true });
   fs.mkdirSync(WASM_DIR, { recursive: true });
   fs.mkdirSync(RAYLIB_INC_DIR, { recursive: true });
   fs.mkdirSync(TURTLE_INC_DIR, { recursive: true });
   fs.mkdirSync(SQLITE_INC_DIR, { recursive: true });
+
+  // Ensure baseline graphics headers are present on disk early
+  fs.writeFileSync(path.join(incDir, 'graphics.h'), GRAPHICS_H);
+  fs.writeFileSync(path.join(incDir, 'graphics_canvas.h'), GRAPHICS_CANVAS_H);
 
   if (!force && allAssetsPresent()) {
     console.log('[sysroot] All toolchain & sysroot assets are present.');
