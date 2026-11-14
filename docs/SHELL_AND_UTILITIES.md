@@ -147,12 +147,27 @@ When `Ctrl+C` (`\x03`) is received:
 
 ---
 
-### 1.8 Synchronous Terminal Stdin Coordination & Interactive Commands
+### 1.8 Synchronous Terminal Stdin Coordination & Interactive Commands (`stdin-wasi`)
 When commands reading from standard input (such as `cat > file`, `sh`, or `sqlite3`) run inside the shell worker:
-- **SharedArrayBuffer Stdin Bridge**: When `fd_read` on stdin (fd 0) occurs in a sub-process, `shell.worker.js` requests input from the main thread via the `stdin_request` message protocol.
-- **Terminal Keystroke Capture**: `main.js` transitions terminal input routing to the active shell stdin coordinator, capturing keyboard strokes, echoing them to `xterm.js`, and handling line editing (Backspace, Enter).
-- **Line Delivery**: Upon pressing <kbd>Enter</kbd>, the encoded line (with `\n`) is copied into the shared buffer, and the waiting `fd_read` consumes it synchronously.
-- **EOF Handling (<kbd>Ctrl-D</kbd>)**: Pressing <kbd>Ctrl-D</kbd> on an empty input line delivers `STATE_EOF` (`0` bytes read), signalling EOF cleanly to the command (e.g. Closing `cat > file` or exiting interactive shells).
+- **Modular `stdin-wasi` Bridge**: Powered by externalized [`stdin-wasi`](https://github.com/breeze833/stdin-wasi), using a dedicated 8 KB `SharedArrayBuffer` (`StdinHost` in `main.js` and `createStdinReader` in `shell.worker.js`), decoupled from the 512-byte BusyBox process spawn buffer.
+- **SharedArrayBuffer Stdin Request**: When `fd_read` on stdin (fd 0) occurs in a sub-process without available buffered bytes, `createStdinReader` requests input from the main thread via the `stdin_request` message protocol and suspends on `Atomics.wait()`.
+- **Terminal Keystroke Capture**: `main.js` transitions terminal input routing to `handleShellStdinInput`, capturing keyboard strokes, echoing them to `xterm.js`, and handling line editing via `LineEditor`.
+- **Line Delivery**: Upon pressing <kbd>Enter</kbd>, `StdinHost.sendInput()` encodes the line (with `\n`), stores it in the shared buffer payload, and unblocks the worker with `Atomics.notify()`.
+- **EOF Handling (<kbd>Ctrl-D</kbd>)**: Pressing <kbd>Ctrl-D</kbd> on an empty input line calls `StdinHost.sendEof()`, delivering `STATE_EOF` (`0` bytes read), signalling EOF cleanly to the command (e.g. closing `cat > file` or exiting interactive shells).
+
+#### 1.8.1 Design Decision: Dedicated Shell Stdin Buffer (Option B) vs. Multiplexed Offsets (Option A)
+
+Prior to unifying shell stdin with `stdin-wasi`, the shell worker utilized handwritten `Atomics.wait()` / `Atomics.notify()` logic multiplexed inside the single 512-byte `SharedArrayBuffer` dedicated to BusyBox process spawning (`CONTROL_IDX = 0`, `RESULT_IDX = 1`). To avoid collisions, stdin indices were placed at 32-bit offsets 4, 5, 6 with data payload at byte offset 32.
+
+When evaluating how to eliminate this duplicated low-level code, two architectural approaches were considered:
+1. **Option A (Configurable Control & Data Offsets in `stdin-wasi`)**: Extend `stdin-wasi` upstream to accept custom `controlOffset` and `dataOffset` parameters, maintaining a single multiplexed 512-byte buffer.
+2. **Option B (Dedicated Shell Stdin `SharedArrayBuffer`) [SELECTED]**: Allocate a dedicated 8 KB `SharedArrayBuffer` for interactive shell standard input, leaving the 512-byte buffer strictly for process spawn coordination.
+
+**Rationale for Selecting Option B**:
+- **Strict Separation of Concerns**: Process lifecycle management (`wasi_host_spawn`) and stream standard input are orthogonal domains. Sharing a single buffer coupled two unrelated protocols into one memory slice. If process control ever requires additional status words, offset arithmetic would risk clobbering or shifting stdin layout.
+- **Upstream Library Cleanliness & Encapsulation**: `stdin-wasi` is designed as a zero-dependency, general-purpose WASI stdin coordinator. Injecting custom offset parameters to accommodate host/shell multiplexing in `wasm-c-ide` would leak an application-specific workaround into an upstream library. Option B consumes standard `new StdinHost({ bufferSize: 8192 })` and `createStdinReader({ sharedBuffer })` directly from `stdin-wasi` with zero modifications.
+- **Buffer Capacity & Burst Throughput**: Under Option A, the 512-byte buffer left only 480 bytes for payload (`512 - 32`), causing frequent worker blocking and context switching during large pastes (e.g. `cat > script.sh`) or multi-line heredocs. Option B provides an 8 KB buffer, matching the user binary runtime and easily absorbing burst input. The memory footprint of an extra 8 KB `SharedArrayBuffer` is negligible in modern browsers.
+- **Immediate Implementation & Maintainability**: Option B required no upstream repository modifications or release wait times, and guarantees identical stdin, EOF, and chunking semantics between shell applets and compiled user binaries.
 
 ---
 

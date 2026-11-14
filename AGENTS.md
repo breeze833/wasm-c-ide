@@ -95,7 +95,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   └── workers/
 │       ├── compiler.worker.js # Dedicated Web Worker executing Clang, LLD, ar, and make
 │       ├── runtime.worker.js  # WASI host executing user binaries with Atomics stdin & OffscreenCanvas
-│       └── shell.worker.js    # Interactive POSIX shell worker (pushd/popd, globs, mv/cp, direct scripts)
+│       └── shell.worker.js    # Interactive POSIX shell worker (pushd/popd, globs, direct scripts, stdin-wasi)
 ├── public/
 │   ├── coi-serviceworker.js   # Unified cross-origin isolation and CacheStorage offline worker
 │   ├── manifest.webmanifest   # Web App Manifest for PWA installation

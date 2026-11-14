@@ -153,14 +153,14 @@ console.log('--- Running Startup Loading & VFS Indication Unit Tests ---');
 
   // Verify shell.worker.js wires readStdin to WasiHost instances
   assert.ok(shellSrc.includes('stdin: readStdin,'), 'shell.worker.js must pass stdin: readStdin to WasiHost');
-  assert.ok(shellSrc.includes('Atomics.wait(sharedInt32, STDIN_STATE_IDX, STDIN_STATE_WAITING)'), 'shell.worker.js must block on Atomics.wait');
+  assert.ok(shellSrc.includes('createStdinReader'), 'shell.worker.js must create stdin reader via stdin-wasi');
   assert.ok(shellSrc.includes("self.postMessage({ type: 'command_done' })"), 'shell.worker.js must notify command_done upon completion');
   assert.ok(shellSrc.includes('findHeredocs'), 'shell.worker.js must define findHeredocs');
   assert.ok(shellSrc.includes('isCommandIncomplete'), 'shell.worker.js must support multi-line command completeness check');
   assert.ok(shellSrc.includes("write('> ')"), 'shell.worker.js must display continuation prompt > for incomplete commands');
 
   // Verify main.js SharedArrayBuffer allocation and LineEditor instantiation
-  assert.ok(mainSrc.includes('this.shellSharedBuffer = new SharedArrayBuffer(8192);'), 'main.js must allocate 8192-byte SharedArrayBuffer');
+  assert.ok(mainSrc.includes('this.shellStdinHost = new StdinHost({ bufferSize: 8192 });'), 'main.js must allocate 8192-byte StdinHost');
   assert.ok(mainSrc.includes('this.shellLineEditor = new LineEditor'), 'main.js must instantiate shellLineEditor');
   assert.ok(mainSrc.includes("if (msg.type === 'stdin_request')"), 'main.js must handle stdin_request');
   assert.ok(mainSrc.includes("if (msg.type === 'command_done')"), 'main.js must handle command_done');
@@ -168,17 +168,18 @@ console.log('--- Running Startup Loading & VFS Indication Unit Tests ---');
 
   // Functional test of handleShellStdinInput logic using mock App context
   const { LineEditor } = await import('ansi-line-editor');
-  const sharedBuf = new SharedArrayBuffer(8192);
-  const sharedI32 = new Int32Array(sharedBuf);
-  const sharedU8 = new Uint8Array(sharedBuf);
+  const { StdinHost } = await import('stdin-wasi/host');
+  const stdinHost = new StdinHost({ bufferSize: 8192 });
+  const sharedBuf = stdinHost.getSharedBuffer();
+  const sharedI32 = stdinHost.sharedInt32;
+  const sharedU8 = stdinHost.sharedUint8;
   let termOutput = '';
   let interrupted = false;
 
   const app = {
     isShellWaitingForStdin: false,
-    shellSharedBuffer: sharedBuf,
-    shellSharedInt32: sharedI32,
-    shellSharedUint8: sharedU8,
+    shellStdinHost: stdinHost,
+    shellStdinSharedBuffer: sharedBuf,
     terminal: { writeln: (s) => { termOutput += s + '\n'; } },
     shellWorker: { postMessage: (msg) => { if (msg.type === 'interrupt') interrupted = true; } },
     shellLineEditor: new LineEditor({ write: (s) => { termOutput += s; } }),
@@ -188,9 +189,9 @@ console.log('--- Running Startup Loading & VFS Indication Unit Tests ---');
   const methodMatch = mainSrc.match(/handleShellStdinInput\(key\)\s*\{([\s\S]*?\n  \})/);
   assert.ok(methodMatch, 'Must match handleShellStdinInput in main.js');
   const fnBody = methodMatch[1].replace(/\n\s*\}\s*$/, '');
-  const handleShellStdinInput = new Function('key', 'SHELL_STDIN_STATE_IDX', 'SHELL_STDIN_LEN_IDX', 'SHELL_STDIN_READ_POS_IDX', 'SHELL_STDIN_STATE_IDLE', 'SHELL_STDIN_STATE_WAITING', 'SHELL_STDIN_STATE_READY', 'SHELL_STDIN_STATE_EOF', 'SHELL_STDIN_DATA_OFFSET', fnBody);
+  const handleShellStdinInput = new Function('key', fnBody);
 
-  const invoke = (key) => handleShellStdinInput.call(app, key, 4, 5, 6, 0, 1, 2, -1, 32);
+  const invoke = (key) => handleShellStdinInput.call(app, key);
 
   // When not waiting, returns false
   assert.strictEqual(invoke('a'), false);
@@ -201,26 +202,26 @@ console.log('--- Running Startup Loading & VFS Indication Unit Tests ---');
   assert.strictEqual(invoke('i'), true);
   assert.strictEqual(app.shellLineEditor.getBuffer(), 'hi');
 
-  // Enter commits line + newline to SharedArrayBuffer
+  // Enter commits line + newline to SharedArrayBuffer via StdinHost
   assert.strictEqual(invoke('\r'), true);
   assert.strictEqual(app.isShellWaitingForStdin, false);
-  assert.strictEqual(Atomics.load(sharedI32, 4), 2); // READY
-  assert.strictEqual(Atomics.load(sharedI32, 5), 3); // 'hi\n'.length === 3
-  assert.strictEqual(Atomics.load(sharedI32, 6), 0); // read pos === 0
-  const committedText = new TextDecoder().decode(sharedU8.subarray(32, 35));
+  assert.strictEqual(stdinHost.getState(), 2); // READY (STATE_READY)
+  assert.strictEqual(Atomics.load(sharedI32, 1), 3); // len === 3 ('hi\n'.length)
+  assert.strictEqual(Atomics.load(sharedI32, 2), 0); // read pos === 0
+  const committedText = new TextDecoder().decode(sharedU8.subarray(16, 19));
   assert.strictEqual(committedText, 'hi\n');
 
-  // Ctrl-D (EOT) on empty buffer signals EOF
+  // Ctrl-D (EOT) on empty buffer signals EOF via StdinHost
   app.isShellWaitingForStdin = true;
   assert.strictEqual(invoke('\x04'), true);
   assert.strictEqual(app.isShellWaitingForStdin, false);
-  assert.strictEqual(Atomics.load(sharedI32, 4), -1); // EOF
+  assert.strictEqual(stdinHost.getState(), -1); // EOF (STATE_EOF)
 
   // Ctrl-C interrupts
   app.isShellWaitingForStdin = true;
   assert.strictEqual(invoke('\x03'), true);
   assert.strictEqual(app.isShellWaitingForStdin, false);
-  assert.strictEqual(Atomics.load(sharedI32, 4), -1); // EOF
+  assert.strictEqual(stdinHost.getState(), -1); // EOF (STATE_EOF)
   assert.strictEqual(interrupted, true);
 
   console.log('✓ Shell synchronous stdin coordination and handleShellStdinInput protocol verified');

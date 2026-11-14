@@ -9,6 +9,7 @@ if (typeof self === 'undefined') {
 }
 
 import { LineEditor } from 'ansi-line-editor';
+import { createStdinReader } from 'stdin-wasi/worker';
 import { VFS, normalizePath } from '../vfs/vfs.js';
 import { mountSysroot, BIN_COMMANDS } from '../vfs/sysroot.js';
 import { WasiHost, ProcExit, ESUCCESS } from '../vfs/wasi-host.js';
@@ -80,76 +81,13 @@ const vfs = new VFS();
 let busyboxModule = null;
 
 let sharedInt32 = null;
-let sharedUint8 = null;
 const CONTROL_IDX = 0; // 0 = idle, 1 = waiting, 2 = done
 const RESULT_IDX = 1;  // exitCode
 
-// Synchronous stdin control for shell applets (cat, read, etc.)
-const STDIN_STATE_IDX = 4;
-const STDIN_LEN_IDX = 5;
-const STDIN_READ_POS_IDX = 6;
-
-const STDIN_STATE_IDLE = 0;
-const STDIN_STATE_WAITING = 1;
-const STDIN_STATE_READY = 2;
-const STDIN_STATE_EOF = -1;
-
-const STDIN_DATA_OFFSET = 32;
-
-function readStdin(iovs, iovs_len, nread_out, host) {
-  let totalRead = 0;
-
-  for (let i = 0; i < iovs_len; i++) {
-    const bufPtr = host.memU32()[(iovs >> 2) + i * 2];
-    const bufLen = host.memU32()[(iovs >> 2) + i * 2 + 1];
-
-    let available = 0;
-    let curLen = 0;
-    let curPos = 0;
-
-    if (sharedInt32) {
-      curLen = Atomics.load(sharedInt32, STDIN_LEN_IDX);
-      curPos = Atomics.load(sharedInt32, STDIN_READ_POS_IDX);
-      available = curLen - curPos;
-    }
-
-    if (available <= 0 && sharedInt32) {
-      // Set state to WAITING before notifying host to prevent race
-      Atomics.store(sharedInt32, STDIN_STATE_IDX, STDIN_STATE_WAITING);
-
-      // Notify main thread that shell/applet is waiting for stdin input
-      self.postMessage({ type: 'stdin_request' });
-
-      // Block worker until main thread issues Atomics.notify()
-      Atomics.wait(sharedInt32, STDIN_STATE_IDX, STDIN_STATE_WAITING);
-
-      const state = Atomics.load(sharedInt32, STDIN_STATE_IDX);
-      if (state === STDIN_STATE_EOF) {
-        break;
-      }
-
-      curLen = Atomics.load(sharedInt32, STDIN_LEN_IDX);
-      curPos = Atomics.load(sharedInt32, STDIN_READ_POS_IDX);
-      available = curLen - curPos;
-    }
-
-    if (available > 0 && sharedInt32 && sharedUint8) {
-      curPos = Atomics.load(sharedInt32, STDIN_READ_POS_IDX);
-      const toCopy = Math.min(bufLen, available);
-      const target = host.memU8().subarray(bufPtr, bufPtr + toCopy);
-      const source = sharedUint8.subarray(STDIN_DATA_OFFSET + curPos, STDIN_DATA_OFFSET + curPos + toCopy);
-
-      target.set(source);
-      Atomics.add(sharedInt32, STDIN_READ_POS_IDX, toCopy);
-      totalRead += toCopy;
-    }
-
-    if (totalRead > 0) break;
-  }
-
-  host.memU32()[nread_out >> 2] = totalRead;
-  return ESUCCESS;
-}
+let readStdin = createStdinReader({
+  sharedBuffer: null,
+  notifyHost: () => self.postMessage({ type: 'stdin_request' }),
+});
 
 const shellEditor = new LineEditor({
   write: (str) => write(str),
@@ -1063,7 +1001,9 @@ self.onmessage = async (event) => {
     if (msg.cols) termCols = msg.cols;
     if (msg.sharedBuffer) {
       sharedInt32 = new Int32Array(msg.sharedBuffer);
-      sharedUint8 = new Uint8Array(msg.sharedBuffer);
+    }
+    if (msg.stdinSharedBuffer) {
+      readStdin.updateSharedBuffer(msg.stdinSharedBuffer);
     }
 
     if (msg.sharedSysrootBuffer) {
@@ -1159,12 +1099,9 @@ self.onmessage = async (event) => {
 
   if (msg.type === 'interrupt') {
     multiLineBuffer = [];
-    if (sharedInt32) {
-      Atomics.store(sharedInt32, STDIN_STATE_IDX, STDIN_STATE_EOF);
-      Atomics.notify(sharedInt32, STDIN_STATE_IDX, 1);
-    }
     if (isExecuting) {
       isExecuting = false;
+      self.postMessage({ type: 'command_done' });
       writeln('\r\n\x1b[31m[Process interrupted]\x1b[0m');
       showPrompt();
     } else {

@@ -36,6 +36,12 @@ The `LineEditor` (powered by the modular [`ansi-line-editor`](https://github.com
 - **Contextual Isolation**: Maintains isolated history contexts (e.g. `'shell'` vs user binary names) so shell commands do not pollute program stdin history.
 - **Signals & Hooks**: `Enter` triggers `onLine`, `Ctrl+D` triggers `onEof`, and `Ctrl+C` triggers `onInterrupt`.
 
+### 2.2 Integration with Synchronous Stdin Coordinator (`stdin-wasi`)
+`LineEditor` pairs with [`stdin-wasi`](https://github.com/breeze833/stdin-wasi) to provide prompt-safe, synchronous terminal input. When a sub-process in either the shell worker (`shell.worker.js`) or execution runtime worker (`runtime.worker.js`) blocks on WASI Preview 1 `fd_read`:
+- Host input routing transitions to the active line editor (`shellLineEditor` or runtime `lineEditor`), echoing keystrokes and ANSI escape movements into `xterm.js`.
+- Pressing <kbd>Enter</kbd> commits the line buffer and dispatches `line + '\n'` via `StdinHost.sendInput()`.
+- Pressing <kbd>Ctrl-D</kbd> on an empty line or <kbd>Ctrl-C</kbd> signals EOF via `StdinHost.sendEof()`, unblocking `createStdinReader` with `0` bytes (`STATE_EOF`) and zero CPU usage via `Atomics.wait()`.
+
 ---
 
 ## 3. Collapsible & Resizable Workspace Sidebar

@@ -11,6 +11,7 @@ import { showToast } from './components/toast.js';
 import { TerminalManager } from './terminal/terminal.js';
 import { RuntimeManager } from './terminal/runtime.js';
 import { LineEditor } from 'ansi-line-editor';
+import { StdinHost } from 'stdin-wasi/host';
 import { CompilerClient } from './toolchain/compiler-client.js';
 import { GraphicsWindowUI } from 'canvas-wasi';
 import 'canvas-wasi/style.css';
@@ -23,16 +24,6 @@ export function checkIsolation() {
   console.log(`[Wasm C IDE] Cross-Origin Isolation: ${isIsolated ? 'ENABLED' : 'DISABLED'}`);
   return isIsolated;
 }
-
-// Shell synchronous stdin control indices & states
-const SHELL_STDIN_STATE_IDX = 4;
-const SHELL_STDIN_LEN_IDX = 5;
-const SHELL_STDIN_READ_POS_IDX = 6;
-
-const SHELL_STDIN_STATE_READY = 2;
-const SHELL_STDIN_STATE_EOF = -1;
-
-const SHELL_STDIN_DATA_OFFSET = 32;
 
 // Synchronously register PWA install prompt listener at module evaluation to prevent race conditions
 let globalDeferredInstallPrompt = null;
@@ -206,6 +197,7 @@ export class App {
         type: 'init',
         cwd: '/workspace',
         sharedBuffer: this.shellSharedBuffer,
+        stdinSharedBuffer: this.shellStdinSharedBuffer,
         sharedSysrootBuffer: (this.vfs && this.vfs.sharedSysroot) ? this.vfs.sharedSysroot.buffer : null,
         files: initialFiles,
         basePath: wasmBasePath,
@@ -322,13 +314,18 @@ export class App {
 
     // Setup SharedArrayBuffer for synchronous host process execution & stdin in shell worker
     if (typeof SharedArrayBuffer !== 'undefined') {
-      this.shellSharedBuffer = new SharedArrayBuffer(8192);
+      this.shellSharedBuffer = new SharedArrayBuffer(512);
       this.shellSharedInt32 = new Int32Array(this.shellSharedBuffer);
       this.shellSharedUint8 = new Uint8Array(this.shellSharedBuffer);
+
+      this.shellStdinHost = new StdinHost({ bufferSize: 8192 });
+      this.shellStdinSharedBuffer = this.shellStdinHost.getSharedBuffer();
     } else {
       this.shellSharedBuffer = null;
       this.shellSharedInt32 = null;
       this.shellSharedUint8 = null;
+      this.shellStdinHost = null;
+      this.shellStdinSharedBuffer = null;
     }
 
     this.isShellWaitingForStdin = false;
@@ -360,6 +357,7 @@ export class App {
       if (msg.type === 'command_done') {
         this.isShellWaitingForStdin = false;
         if (this.shellLineEditor) this.shellLineEditor.reset();
+        if (this.shellStdinHost) this.shellStdinHost.reset();
         return;
       }
 
@@ -488,6 +486,7 @@ export class App {
         type: 'init',
         cwd: '/workspace',
         sharedBuffer: this.shellSharedBuffer,
+        stdinSharedBuffer: this.shellStdinSharedBuffer,
         files: initialFiles,
         dirs: initialDirs,
         rows: this.terminal && this.terminal.term ? this.terminal.term.rows : 24,
@@ -858,9 +857,8 @@ export class App {
     if (this.isShellWaitingForStdin) {
       this.isShellWaitingForStdin = false;
       if (this.shellLineEditor) this.shellLineEditor.reset();
-      if (this.shellSharedInt32) {
-        Atomics.store(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, SHELL_STDIN_STATE_EOF);
-        Atomics.notify(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, 1);
+      if (this.shellStdinHost) {
+        this.shellStdinHost.sendEof();
       }
     }
     if (this.shellWorker) {
@@ -878,9 +876,8 @@ export class App {
       this.terminal.writeln('^C');
       this.isShellWaitingForStdin = false;
       if (this.shellLineEditor) this.shellLineEditor.reset();
-      if (this.shellSharedInt32) {
-        Atomics.store(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, SHELL_STDIN_STATE_EOF);
-        Atomics.notify(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, 1);
+      if (this.shellStdinHost) {
+        this.shellStdinHost.sendEof();
       }
       if (this.shellWorker) {
         this.shellWorker.postMessage({ type: 'interrupt' });
@@ -895,16 +892,8 @@ export class App {
         // Flush line buffer without trailing newline
         this.shellLineEditor.reset();
 
-        if (this.shellSharedInt32 && this.shellSharedUint8) {
-          const encoded = new TextEncoder().encode(currentBuf);
-          const toWrite = Math.min(encoded.length, this.shellSharedBuffer.byteLength - SHELL_STDIN_DATA_OFFSET);
-
-          this.shellSharedUint8.set(encoded.subarray(0, toWrite), SHELL_STDIN_DATA_OFFSET);
-          Atomics.store(this.shellSharedInt32, SHELL_STDIN_LEN_IDX, toWrite);
-          Atomics.store(this.shellSharedInt32, SHELL_STDIN_READ_POS_IDX, 0);
-
-          Atomics.store(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, SHELL_STDIN_STATE_READY);
-          Atomics.notify(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, 1);
+        if (this.shellStdinHost) {
+          this.shellStdinHost.sendInput(currentBuf);
         }
 
         this.isShellWaitingForStdin = false;
@@ -912,9 +901,8 @@ export class App {
       }
 
       // Empty buffer: signal EOF
-      if (this.shellSharedInt32) {
-        Atomics.store(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, SHELL_STDIN_STATE_EOF);
-        Atomics.notify(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, 1);
+      if (this.shellStdinHost) {
+        this.shellStdinHost.sendEof();
       }
 
       this.isShellWaitingForStdin = false;
@@ -929,16 +917,8 @@ export class App {
       this.shellLineEditor.reset();
       const lineWithNewline = lineText + '\n';
 
-      if (this.shellSharedInt32 && this.shellSharedUint8) {
-        const encoded = new TextEncoder().encode(lineWithNewline);
-        const toWrite = Math.min(encoded.length, this.shellSharedBuffer.byteLength - SHELL_STDIN_DATA_OFFSET);
-
-        this.shellSharedUint8.set(encoded.subarray(0, toWrite), SHELL_STDIN_DATA_OFFSET);
-        Atomics.store(this.shellSharedInt32, SHELL_STDIN_LEN_IDX, toWrite);
-        Atomics.store(this.shellSharedInt32, SHELL_STDIN_READ_POS_IDX, 0);
-
-        Atomics.store(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, SHELL_STDIN_STATE_READY);
-        Atomics.notify(this.shellSharedInt32, SHELL_STDIN_STATE_IDX, 1);
+      if (this.shellStdinHost) {
+        this.shellStdinHost.sendInput(lineWithNewline);
       }
 
       this.isShellWaitingForStdin = false;
