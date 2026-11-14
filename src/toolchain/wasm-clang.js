@@ -2,7 +2,7 @@
 // Integrates clang-wasi toolchain with browser IndexedDB persistent cache and SharedSysroot
 
 import { WasmToolchain as BaseWasmToolchain, AppInstance, ProcExit, normalizePath } from 'clang-wasi/toolchain';
-import { createSharedSysrootFromTar } from '../vfs/shared-sysroot.js';
+import { createSharedSysrootFromTar, fetchWithProgress } from '../vfs/shared-sysroot.js';
 import { getWasmModule, saveWasmModule } from './wasm-cache.js';
 
 export { AppInstance, ProcExit, normalizePath };
@@ -31,7 +31,13 @@ export class WasmToolchain extends BaseWasmToolchain {
       if (this.vfs && this.vfs.sharedSysroot) {
         onProgress('Sysroot shared buffer attached.');
         if (!this.llvmBoxModule) {
-          this.llvmBoxModule = await this._getLlvmBox({ silent: true });
+          onProgress('Loading LLVM toolchain compiler (llvm-box.wasm)...');
+          this.llvmBoxModule = await this._getLlvmBox({
+            silent: true,
+            onProgress: (status, progress) => {
+              onProgress(status, progress);
+            },
+          });
         }
         this.initialized = true;
         return;
@@ -40,7 +46,11 @@ export class WasmToolchain extends BaseWasmToolchain {
       onProgress('Fetching standard library sysroot archive (sysroot.tar.gz)...');
       const fetchSysroot = async () => {
         try {
-          const res = await fetch(`${this.basePath}/sysroot.tar.gz`);
+          const res = await fetchWithProgress(`${this.basePath}/sysroot.tar.gz`, {
+            onProgress: (p) => {
+              onProgress('Fetching standard library sysroot archive (sysroot.tar.gz)...', p);
+            },
+          });
           if (res) {
             const buf = await res.arrayBuffer();
             const u8 = new Uint8Array(buf);
@@ -128,7 +138,13 @@ export class WasmToolchain extends BaseWasmToolchain {
 
       onProgress('VFS items populated.');
       if (!this.llvmBoxModule) {
-        this.llvmBoxModule = await this._getLlvmBox({ silent: true });
+        onProgress('Loading LLVM toolchain compiler (llvm-box.wasm)...');
+        this.llvmBoxModule = await this._getLlvmBox({
+          silent: true,
+          onProgress: (status, progress) => {
+            onProgress(status, progress);
+          },
+        });
       }
       this.initialized = true;
     })();
@@ -183,20 +199,19 @@ export class WasmToolchain extends BaseWasmToolchain {
       let compiled = null;
       let rawBuf = null;
 
-      if (typeof WebAssembly.compileStreaming === 'function') {
-        try {
-          const res = await fetch(wasmUrl);
-          if (res && res.ok && typeof res.clone === 'function') {
-            const clone = res.clone();
-            const [mod, buf] = await Promise.all([
-              WebAssembly.compileStreaming(res),
-              clone.arrayBuffer(),
-            ]);
-            compiled = mod;
-            rawBuf = buf;
-          }
-        } catch {}
-      }
+      try {
+        const res = await fetchWithProgress(wasmUrl, {
+          onProgress: (p) => {
+            if (typeof options.onProgress === 'function') {
+              options.onProgress('Loading LLVM toolchain compiler (llvm-box.wasm)...', p);
+            }
+          },
+        });
+        if (res && (res.ok || typeof res.ok === 'undefined')) {
+          rawBuf = await res.arrayBuffer();
+          compiled = await WebAssembly.compile(rawBuf);
+        }
+      } catch {}
 
       if (!compiled) {
         const res = await fetch(wasmUrl);

@@ -97,8 +97,8 @@ self.onmessage = async (event) => {
     });
 
     try {
-      await toolchain.init((status) => {
-        self.postMessage({ type: 'init_progress', status });
+      await toolchain.init((status, progress) => {
+        self.postMessage({ type: 'init_progress', status, progress });
       });
 
       // Warm up compiler in background so llvm-box is ready in cache

@@ -47,7 +47,7 @@ export class CompilerClient {
 
       if (msg.type === 'init_progress') {
         if (typeof onProgress === 'function') {
-          onProgress(msg.status);
+          onProgress(msg.status, msg.progress);
         }
       } else if (msg.type === 'ready') {
         this.isReady = true;
@@ -151,8 +151,8 @@ export class CompilerClient {
     }
 
     this.initPromise = new Promise((resolve, reject) => {
-      this._spawnWorker((status) => {
-        if (typeof onProgress === 'function') onProgress(status);
+      this._spawnWorker((status, progress) => {
+        if (typeof onProgress === 'function') onProgress(status, progress);
       });
 
       const readyHandler = (event) => {

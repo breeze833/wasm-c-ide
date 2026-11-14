@@ -141,19 +141,83 @@ export function createSharedSysrootFromTar(tarBuffer, options = {}) {
 }
 
 /**
+ * Fetches a resource while reporting download progress if ReadableStream is available.
+ * Gracefully falls back if body is not streamable (e.g. in test environments with mock fetch).
+ *
+ * @param {string|URL|Request} url
+ * @param {object} [options]
+ * @param {(progress: { loaded: number, total: number }) => void} [options.onProgress]
+ * @returns {Promise<Response>}
+ */
+export async function fetchWithProgress(url, options = {}) {
+  const { onProgress, ...fetchOptions } = options;
+  const res = await fetch(url, fetchOptions);
+
+  if (!res || (typeof res.ok !== 'undefined' && !res.ok)) {
+    return res;
+  }
+
+  // Fallback for mock environments (like tests where res.body or getReader is not implemented)
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    return res;
+  }
+
+  const contentLengthHeader = res.headers && typeof res.headers.get === 'function'
+    ? res.headers.get('content-length')
+    : null;
+  const total = contentLengthHeader ? parseInt(contentLengthHeader, 10) || 0 : 0;
+
+  try {
+    const reader = res.body.getReader();
+    const chunks = [];
+    let loaded = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        chunks.push(value);
+        loaded += value.length;
+        if (typeof onProgress === 'function') {
+          onProgress({ loaded, total });
+        }
+      }
+    }
+
+    const combined = new Uint8Array(loaded);
+    let offset = 0;
+    for (const chunk of chunks) {
+      combined.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    return new Response(combined, {
+      status: res.status,
+      statusText: res.statusText,
+      headers: res.headers,
+    });
+  } catch (_) {
+    return res;
+  }
+}
+
+/**
  * Loads sysroot.tar.gz from network, decompresses it, and packs it into a SharedArrayBuffer.
  * @param {string} [basePath='/sysroot/wasm']
- * @param {(status: string) => void} [onProgress]
+ * @param {(status: string, progress?: { loaded?: number, total?: number }) => void} [onProgress]
  * @param {object} [options]
  * @returns {Promise<SharedArrayBuffer|ArrayBuffer>}
  */
 export async function loadOrBuildSharedSysroot(basePath = '/sysroot/wasm', onProgress = () => {}, options = {}) {
   const cleanBase = (basePath || '/sysroot/wasm').replace(/\/+$/, '');
 
-  onProgress('Fetching standard library sysroot archive (sysroot.tar.gz)...');
   const fetchTar = async () => {
     try {
-      const res = await fetch(`${cleanBase}/sysroot.tar.gz`);
+      const res = await fetchWithProgress(`${cleanBase}/sysroot.tar.gz`, {
+        onProgress: (p) => {
+          onProgress('Fetching standard library sysroot archive (sysroot.tar.gz)...', p);
+        },
+      });
       if (res && (res.ok || typeof res.ok === 'undefined')) {
         const buf = await res.arrayBuffer();
         const u8 = new Uint8Array(buf);
@@ -169,6 +233,9 @@ export async function loadOrBuildSharedSysroot(basePath = '/sysroot/wasm', onPro
     } catch (_) {}
     return await fetch(`${cleanBase}/sysroot.tar`).then(r => r.arrayBuffer());
   };
+
+  onProgress('Fetching standard library sysroot archive (sysroot.tar.gz)...');
+  const tarBuf = await fetchTar();
 
   const preloadConfigs = [
     {
@@ -227,7 +294,6 @@ export async function loadOrBuildSharedSysroot(basePath = '/sysroot/wasm', onPro
     );
   }
 
-  const tarBuf = await fetchTar();
   onProgress('Packing sysroot into shared memory buffer...');
   return createSharedSysrootFromTar(tarBuf, { ...options, additionalEntries });
 }

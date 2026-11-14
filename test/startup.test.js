@@ -227,4 +227,87 @@ console.log('--- Running Startup Loading & VFS Indication Unit Tests ---');
   console.log('✓ Shell synchronous stdin coordination and handleShellStdinInput protocol verified');
 }
 
+// 6. Verify BootProgress interactive spinner, progress bar calculation, and clean completion
+{
+  const { BootProgress } = await import('../src/terminal/boot-progress.js');
+  const termOutputs = [];
+  const mockTerm = {
+    write: (data) => termOutputs.push(data),
+    writeln: (data) => termOutputs.push(data + '\r\n'),
+  };
+
+  const progress = new BootProgress(mockTerm);
+  assert.strictEqual(progress.spinnerFrames.length, 10, 'Must have 10 braille spinner frames');
+
+  // Start step
+  progress.start('Fetching standard library sysroot archive (sysroot.tar.gz)...');
+  assert.ok(termOutputs.some(o => o.includes('Fetching standard library sysroot archive')), 'Must output initial step message');
+  assert.ok(termOutputs.some(o => o.includes('⠋')), 'Must render initial spinner frame');
+
+  // Update download progress with byte count & total
+  progress.update('Fetching standard library sysroot archive (sysroot.tar.gz)...', {
+    loaded: 15 * 1024 * 1024,
+    total: 30 * 1024 * 1024,
+  });
+  const lastOutput = termOutputs[termOutputs.length - 1];
+  assert.ok(lastOutput.includes('50%'), 'Must compute 50% progress');
+  assert.ok(lastOutput.includes('15.0/30.0 MB'), 'Must display formatted MB count');
+  assert.ok(lastOutput.includes('█'), 'Must display filled bar characters');
+
+  // Complete current and move to next step
+  progress.start('Preloading runtime libraries (libraylib, libturtle, libsqlite3)...');
+  assert.ok(termOutputs.some(o => o.includes('✓') && o.includes('sysroot archive')), 'Previous step must be completed with checkmark');
+
+  // Finish
+  progress.finish('System ready.');
+  assert.ok(termOutputs.some(o => o.includes('System ready.')), 'Must display final system ready banner');
+  assert.strictEqual(progress.isFinished, true, 'isFinished must be true');
+  assert.strictEqual(progress.timer, null, 'Timer must be cleared');
+
+  console.log('✓ BootProgress interactive spinner, progress bar calculation, and checkmark transitions verified');
+}
+
+// 7. Verify loadOrBuildSharedSysroot download sequence: sysroot.tar.gz is fetched before preloading libraries
+{
+  const { loadOrBuildSharedSysroot } = await import('../src/vfs/shared-sysroot.js');
+  const sequenceLogs = [];
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const cleanUrl = url.replace(/^[./]+/, '').replace(/^sysroot\//, 'public/sysroot/');
+    if (fs.existsSync(cleanUrl)) {
+      const data = fs.readFileSync(cleanUrl);
+      return {
+        ok: true,
+        headers: new Map([['content-length', String(data.length)]]),
+        arrayBuffer: async () => data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
+      };
+    }
+    return { ok: false, status: 404 };
+  };
+
+  try {
+    const buf = await loadOrBuildSharedSysroot('public/sysroot/wasm', (status) => {
+      sequenceLogs.push(status);
+    });
+    assert.ok(buf, 'loadOrBuildSharedSysroot must return buffer');
+
+    // Verify ordering: sysroot.tar.gz is fetched BEFORE preloading runtime libraries
+    const fetchTarIdx = sequenceLogs.findIndex(s => s.includes('sysroot archive (sysroot.tar.gz)'));
+    const preloadIdx = sequenceLogs.findIndex(s => s.includes('Preloading runtime libraries'));
+    const packIdx = sequenceLogs.findIndex(s => s.includes('Packing sysroot'));
+
+    assert.ok(fetchTarIdx !== -1, 'Must log fetching sysroot archive');
+    assert.ok(preloadIdx !== -1, 'Must log preloading runtime libraries');
+    assert.ok(packIdx !== -1, 'Must log packing sysroot');
+
+    assert.ok(fetchTarIdx < preloadIdx, 'sysroot.tar.gz must be fetched BEFORE preloading runtime libraries');
+    assert.ok(preloadIdx < packIdx, 'preloading runtime libraries must happen before packing sysroot');
+
+    console.log('✓ loadOrBuildSharedSysroot correctly fetches sysroot.tar.gz before preloading runtime libraries');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 console.log('--- ALL STARTUP LOADING & VFS INDICATION TESTS PASSED ---');

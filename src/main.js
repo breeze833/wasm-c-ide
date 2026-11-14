@@ -10,6 +10,7 @@ import { FileTreeUI } from './components/filetree.js';
 import { showToast } from './components/toast.js';
 import { TerminalManager } from './terminal/terminal.js';
 import { RuntimeManager } from './terminal/runtime.js';
+import { BootProgress } from './terminal/boot-progress.js';
 import { LineEditor } from 'ansi-line-editor';
 import { StdinHost } from 'stdin-wasi/host';
 import { CompilerClient } from './toolchain/compiler-client.js';
@@ -82,17 +83,17 @@ export class App {
     // 1. Initialize Terminal, Shell Worker & Runtime early so xterm is visible and ready for startup messages
     this.initTerminalAndShell();
 
+    const bootProgress = new BootProgress(this.terminal);
+
     if (this.terminal) {
       this.terminal.writeln('\x1b[1;36m[System]\x1b[0m Initializing WebAssembly C/C++ environment...');
-      this.terminal.writeln('\x1b[90m[*] Mounting virtual filesystem headers...\x1b[0m');
     }
+    bootProgress.start('Mounting virtual filesystem headers...');
 
     // Mount read-only sysroot headers
     mountSysroot(this.vfs);
 
-    if (this.terminal) {
-      this.terminal.writeln('\x1b[90m[*] Loading workspace from storage...\x1b[0m');
-    }
+    bootProgress.start('Loading workspace from storage...');
 
     // Load workspace from IndexedDB
     await loadWorkspace(this.vfs);
@@ -151,39 +152,29 @@ export class App {
     });
 
     // Populate C/C++ sysroot headers and runtime libraries into VFS with progress indication
-    if (this.terminal) {
-      this.terminal.writeln('\x1b[90m[*] Preparing C/C++ standard library sysroot...\x1b[0m');
-    }
+    bootProgress.start('Preparing C/C++ standard library sysroot...');
     try {
       // Eagerly mount standalone utilities (sqlite3, make, busybox) concurrently
       mountSysrootUtilities(this.vfs, wasmBasePath).catch((err) => {
         console.warn('Failed to pre-mount sysroot utilities:', err);
       });
 
-      const sharedSysrootBuffer = await loadOrBuildSharedSysroot(wasmBasePath, (status) => {
-        if (this.terminal) {
-          this.terminal.writeln(`\x1b[90m[*] ${status}\x1b[0m`);
-        }
+      const sharedSysrootBuffer = await loadOrBuildSharedSysroot(wasmBasePath, (status, progress) => {
+        bootProgress.update(status, progress);
       });
       this.vfs.setSharedSysroot(sharedSysrootBuffer);
 
-      await this.toolchain.init((status) => {
-        if (this.terminal) {
-          this.terminal.writeln(`\x1b[90m[*] ${status}\x1b[0m`);
-        }
+      await this.toolchain.init((status, progress) => {
+        bootProgress.update(status, progress);
       });
       await mountSysrootUtilities(this.vfs, wasmBasePath);
     } catch (err) {
       console.warn('Toolchain sysroot setup notice:', err);
-      if (this.terminal) {
-        this.terminal.writeln(`\x1b[33m[!] Sysroot setup notice: ${err.message || err}\x1b[0m`);
-      }
+      bootProgress.fail(err.message || err);
     }
 
     // Signal VFS ready, display ready status in terminal, and launch shell prompt
-    if (this.terminal) {
-      this.terminal.writeln('\x1b[1;32m[✓]\x1b[0m System ready.\r\n');
-    }
+    bootProgress.finish('System ready.');
     this.isReady = true;
     if (this.shellWorker) {
       const initialFiles = {};
