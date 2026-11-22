@@ -136,12 +136,14 @@ console.log('--- Running Startup Loading & VFS Indication Unit Tests ---');
   console.log('✓ Lifecycle state progression, input guarding, and deferred message dispatch verified');
 }
 
-// 4. Verify shell worker init handler outputs welcome banner and prompt
+// 4. Verify shell worker config outputs welcome banner and web-ide-core/wasi/shell-worker handles prompt
 {
   const shellSrc = fs.readFileSync('src/workers/shell.worker.js', 'utf8');
+  const coreShellSrc = fs.readFileSync(new URL(import.meta.resolve('web-ide-core/wasi/shell-worker')).pathname, 'utf8');
   assert.ok(shellSrc.includes('Welcome to the In-Browser C/C++ Teaching IDE!'), 'shell.worker.js must contain welcome message');
-  assert.ok(shellSrc.includes("msg.type === 'init'"), 'shell.worker.js must handle init message');
-  assert.ok(shellSrc.includes('showPrompt()'), 'shell.worker.js must display prompt upon init');
+  assert.ok(shellSrc.includes('attachShellWorker'), 'shell.worker.js must delegate to attachShellWorker from web-ide-core/wasi/shell-worker');
+  assert.ok(coreShellSrc.includes("msg.type === 'init'"), 'web-ide-core shell-worker must handle init message');
+  assert.ok(coreShellSrc.includes('showPrompt()'), 'web-ide-core shell-worker must display prompt upon init');
 
   console.log('✓ shell.worker.js displays welcome message and prompt upon deferred init');
 }
@@ -149,15 +151,15 @@ console.log('--- Running Startup Loading & VFS Indication Unit Tests ---');
 // 5. Verify shell synchronous stdin coordination and handleShellStdinInput protocol
 {
   const mainSrc = fs.readFileSync('src/main.js', 'utf8');
-  const shellSrc = fs.readFileSync('src/workers/shell.worker.js', 'utf8');
+  const coreShellSrc = fs.readFileSync(new URL(import.meta.resolve('web-ide-core/wasi/shell-worker')).pathname, 'utf8');
 
-  // Verify shell.worker.js wires readStdin to WasiHost instances
-  assert.ok(shellSrc.includes('stdin: readStdin,'), 'shell.worker.js must pass stdin: readStdin to WasiHost');
-  assert.ok(shellSrc.includes('createStdinReader'), 'shell.worker.js must create stdin reader via stdin-wasi');
-  assert.ok(shellSrc.includes("self.postMessage({ type: 'command_done' })"), 'shell.worker.js must notify command_done upon completion');
-  assert.ok(shellSrc.includes('findHeredocs'), 'shell.worker.js must define findHeredocs');
-  assert.ok(shellSrc.includes('isCommandIncomplete'), 'shell.worker.js must support multi-line command completeness check');
-  assert.ok(shellSrc.includes("write('> ')"), 'shell.worker.js must display continuation prompt > for incomplete commands');
+  // Verify web-ide-core shell-worker wires readStdin to WasiHost instances
+  assert.ok(coreShellSrc.includes('stdin: readStdin,'), 'web-ide-core shell-worker must pass stdin: readStdin to WasiHost');
+  assert.ok(coreShellSrc.includes('createStdinReader'), 'web-ide-core shell-worker must create stdin reader via stdin-wasi');
+  assert.ok(coreShellSrc.includes("postMsg({ type: 'command_done' })"), 'web-ide-core shell-worker must notify command_done upon completion');
+  assert.ok(coreShellSrc.includes('findHeredocs'), 'web-ide-core shell-worker must define findHeredocs');
+  assert.ok(coreShellSrc.includes('isCommandIncomplete'), 'web-ide-core shell-worker must support multi-line command completeness check');
+  assert.ok(coreShellSrc.includes("write('> ')"), 'web-ide-core shell-worker must display continuation prompt > for incomplete commands');
 
   // Verify main.js SharedArrayBuffer allocation and LineEditor instantiation
   assert.ok(mainSrc.includes('this.shellStdinHost = new StdinHost({ bufferSize: 8192 });'), 'main.js must allocate 8192-byte StdinHost');
@@ -229,37 +231,37 @@ console.log('--- Running Startup Loading & VFS Indication Unit Tests ---');
 
 // 6. Verify BootProgress interactive spinner, progress bar calculation, and clean completion
 {
-  const { BootProgress } = await import('../src/terminal/boot-progress.js');
+  const { BootProgress } = await import('web-ide-core/terminal/boot-progress');
   const termOutputs = [];
   const mockTerm = {
     write: (data) => termOutputs.push(data),
     writeln: (data) => termOutputs.push(data + '\r\n'),
   };
 
-  const progress = new BootProgress(mockTerm);
-  assert.strictEqual(progress.spinnerFrames.length, 10, 'Must have 10 braille spinner frames');
+  const progress = new BootProgress(mockTerm, { noticePrefix: 'Sysroot setup notice' });
+  const mainSrc = fs.readFileSync('src/main.js', 'utf8');
+  const reportMatch = mainSrc.match(/export function reportBootProgress\([\s\S]*?\n\}/);
+  assert.ok(reportMatch, 'main.js must define reportBootProgress');
 
   // Start step
   progress.start('Fetching standard library sysroot archive (sysroot.tar.gz)...');
   assert.ok(termOutputs.some(o => o.includes('Fetching standard library sysroot archive')), 'Must output initial step message');
   assert.ok(termOutputs.some(o => o.includes('⠋')), 'Must render initial spinner frame');
 
-  // Update download progress with byte count & total
-  progress.update('Fetching standard library sysroot archive (sysroot.tar.gz)...', {
-    loaded: 15 * 1024 * 1024,
-    total: 30 * 1024 * 1024,
-  });
+  // Update download progress with percentage & detail (matching reportBootProgress mapping)
+  progress.update(50, '15.0/30.0 MB');
   const lastOutput = termOutputs[termOutputs.length - 1];
-  assert.ok(lastOutput.includes('50%'), 'Must compute 50% progress');
+  assert.ok(lastOutput.includes('50%'), 'Must display 50% progress');
   assert.ok(lastOutput.includes('15.0/30.0 MB'), 'Must display formatted MB count');
   assert.ok(lastOutput.includes('█'), 'Must display filled bar characters');
 
   // Complete current and move to next step
+  progress.completeCurrent();
   progress.start('Preloading runtime libraries (libraylib, libturtle, libsqlite3)...');
   assert.ok(termOutputs.some(o => o.includes('✓') && o.includes('sysroot archive')), 'Previous step must be completed with checkmark');
 
   // Finish
-  progress.finish('System ready.');
+  progress.finish('System ready.\r\n');
   assert.ok(termOutputs.some(o => o.includes('System ready.')), 'Must display final system ready banner');
   assert.strictEqual(progress.isFinished, true, 'isFinished must be true');
   assert.strictEqual(progress.timer, null, 'Timer must be cleared');

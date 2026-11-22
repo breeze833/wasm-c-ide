@@ -4,8 +4,8 @@ import fs from 'node:fs';
 
 console.log('--- Running Detached Terminal & ANSI Control Unit Tests ---');
 
-// 1. Verify TerminalManager in src/terminal/terminal.js
-const termSrc = fs.readFileSync('src/terminal/terminal.js', 'utf8');
+// 1. Verify TerminalManager in web-ide-core/terminal
+const termSrc = fs.readFileSync(new URL(import.meta.resolve('web-ide-core/terminal')).pathname, 'utf8');
 assert.ok(termSrc.includes('this.isDetached = false'), 'TerminalManager must track isDetached state');
 assert.ok(termSrc.includes('this.fixedGrid = false'), 'TerminalManager must track fixedGrid state');
 assert.ok(termSrc.includes('getGridDimensions()'), 'TerminalManager must provide getGridDimensions()');
@@ -31,31 +31,32 @@ assert.ok(size80x24.width >= 700 && size80x24.width <= 800, '80-column width sho
 assert.ok(size80x24.height >= 400 && size80x24.height <= 500, '24-row height should comfortably fit viewport');
 console.log('✓ 80x24 container dimension calculations verified');
 
-// 3. Verify main.js template and setupTerminalWindowing
+// 3. Verify main.js template and LayoutManager detached terminal windowing in web-ide-core/layout
 const mainSrc = fs.readFileSync('src/main.js', 'utf8');
+const layoutSrc = fs.readFileSync(new URL(import.meta.resolve('web-ide-core/layout')).pathname, 'utf8');
 assert.ok(mainSrc.includes('btn-term-detach'), 'main.js HTML template must include btn-term-detach');
 assert.ok(mainSrc.includes('btn-term-min'), 'main.js HTML template must include btn-term-min');
 assert.ok(mainSrc.includes('term-dimension-badge'), 'main.js HTML template must include term-dimension-badge');
-assert.ok(mainSrc.includes('setupTerminalWindowing()'), 'main.js must define setupTerminalWindowing()');
-assert.ok(mainSrc.includes('this.setupTerminalWindowing()'), 'App.init must call setupTerminalWindowing()');
-assert.ok(mainSrc.includes('detachTerminal(80, 24)'), 'Default detach mode must target 80x24 geometry');
-assert.ok(mainSrc.includes('dockTerminal()'), 'main.js must implement dockTerminal()');
-assert.ok(mainSrc.includes('terminalSection.classList.add(\'detached\')'), 'Detach must add .detached class');
-assert.ok(mainSrc.includes('terminalSection.classList.remove(\'detached\')'), 'Dock must remove .detached class');
-assert.ok(mainSrc.includes('resizer.classList.add(\'hidden\')'), 'Detach must hide split resizer');
-assert.ok(mainSrc.includes('this.editorManager.layout()'), 'Detach and dock must trigger editorManager layout');
-assert.ok(mainSrc.includes('presets'), 'main.js must define presets for dimension badge snapping');
-assert.ok(mainSrc.includes('Switch to ${next.label}'), 'main.js must dynamically display next preset in tooltip');
-assert.ok(mainSrc.includes('Detach (80x24)'), 'main.js must show Detach (80x24) in docked tooltip');
-assert.ok(mainSrc.includes('setDetachedFocus'), 'main.js must manage detached window focus');
-assert.ok(mainSrc.includes('toggleMinimize'), 'main.js must implement minimize toggle');
-assert.ok(mainSrc.includes('M2 13'), 'Minimize icon must be an underscore bar at bottom (y=13)');
-assert.ok(mainSrc.includes('maxSVG'), 'Maximize icon must be defined as a square');
-assert.ok(mainSrc.includes('Maximize Terminal'), 'Maximize action must be available when terminal is minimized');
-console.log('✓ main.js contains complete detached terminal windowing, minimize/maximize icons (underscore & square), 80x24 defaults, and focus management');
+assert.ok(mainSrc.includes('new LayoutManager('), 'main.js must instantiate LayoutManager from web-ide-core/layout');
+assert.ok(layoutSrc.includes('setupTerminalWindowing()'), 'LayoutManager must define setupTerminalWindowing()');
+assert.ok(layoutSrc.includes('this.detachTerminal(80, 24)'), 'Default detach mode must target 80x24 geometry');
+assert.ok(layoutSrc.includes('this.dockTerminal = () =>'), 'LayoutManager must implement dockTerminal()');
+assert.ok(layoutSrc.includes("terminalSection.classList.add('detached')"), 'Detach must add .detached class');
+assert.ok(layoutSrc.includes("terminalSection.classList.remove('detached')"), 'Dock must remove .detached class');
+assert.ok(layoutSrc.includes("resizer.classList.add('hidden')"), 'Detach must hide split resizer');
+assert.ok(layoutSrc.includes('this._layoutEditor()'), 'Detach and dock must trigger editorManager layout');
+assert.ok(layoutSrc.includes('DEFAULT_GRID_PRESETS'), 'LayoutManager must define presets for dimension badge snapping');
+assert.ok(layoutSrc.includes('Switch to ${next.label}'), 'LayoutManager must dynamically display next preset in tooltip');
+assert.ok(layoutSrc.includes('Detach (80x24)'), 'LayoutManager must show Detach (80x24) in docked tooltip');
+assert.ok(layoutSrc.includes('setDetachedFocus'), 'LayoutManager must manage detached window focus');
+assert.ok(layoutSrc.includes('toggleMinimize'), 'LayoutManager must implement minimize toggle');
+assert.ok(layoutSrc.includes('M2 13'), 'Minimize icon must be an underscore bar at bottom (y=13)');
+assert.ok(layoutSrc.includes('MAX_SVG'), 'Maximize icon must be defined as a square');
+assert.ok(layoutSrc.includes('Maximize Terminal'), 'Maximize action must be available when terminal is minimized');
+console.log('✓ main.js + web-ide-core LayoutManager detached terminal windowing, minimize/maximize icons, 80x24 defaults, and focus management verified');
 
-// 4. Verify style.css rules
-const cssSrc = fs.readFileSync('src/style.css', 'utf8');
+// 4. Verify web-ide-core/style.css rules
+const cssSrc = fs.readFileSync(new URL(import.meta.resolve('web-ide-core/style.css')).pathname, 'utf8');
 assert.ok(cssSrc.includes('.terminal-section.detached'), 'style.css must style .terminal-section.detached');
 assert.ok(cssSrc.includes('.terminal-section.detached.focused'), 'style.css must style focused state');
 assert.ok(cssSrc.includes('#23d18b'), 'style.css must use green phosphor accent (#23d18b)');

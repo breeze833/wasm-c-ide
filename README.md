@@ -59,6 +59,7 @@ This IDE is specifically engineered for **students and systems programming educa
 ## Key Features
 
 ### 1. Editor & Workspace UI
+- **Shared Workbench Core ([`breeze833/web-ide-core`](https://github.com/breeze833/web-ide-core) `v0.1.0`)**: Modular frontend IDE shell providing Monaco multi-file editing, tabs, file tree explorer, IndexedDB workspace persistence, Zip import/export, base dark-theme CSS (`web-ide-core/style.css`), `LayoutManager`, `TerminalManager`, `BootProgress`, and optional `./wasi` worker adapters.
 - **Monaco Code Editor**: Powered by the same engine as VS Code with dark theme, syntax highlighting, and keyboard shortcuts (`Ctrl+S` / `Cmd+S`).
 - **Tab Management & Dirty Tracking**: Visual dirty indicator (`*`) when in-memory buffers differ from VFS disk state.
 - **Ergonomic Toolbar**:

@@ -63,38 +63,28 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   ├── build-docs.js          # API docs builder compiling ide-docs/ into dist/docs/ and public/docs/
 │   └── download-sysroot.js    # Automated LLVM 19, Raylib WASI & libturtle asset downloader and unpacker
 ├── src/
-│   ├── main.js                # App bootstrap, DOM layout, and UI event binding
-│   ├── style.css              # Dark theme styling, button color hierarchy, tooltips
+│   ├── main.js                # App bootstrap, DOM layout (web-ide-core LayoutManager), and UI event binding
+│   ├── style.css              # Imports web-ide-core/style.css + IDE-specific canvas/reference-drawer styles
 │   ├── components/
 │   │   ├── examples-data.js   # Embedded offline pedagogical C examples for 1-click loading
-│   │   ├── filetree.js        # File tree sidebar, directory expansion, file operations
 │   │   ├── reference.js       # In-IDE slide-out right Reference Drawer & cheatsheet tabs
-│   │   ├── settings.js        # Project settings modal with decoupled Save and Generate buttons
-│   │   └── toast.js           # Non-blocking notification toasts
-│   ├── editor/
-│   │   ├── editor.js          # Monaco editor instance controller and save actions
-│   │   ├── monaco-setup.js    # Monaco worker environment setup
-│   │   └── tabs.js            # Tab bar manager and dirty mark (*) tracking
-│   ├── terminal/
-│   │   ├── terminal.js        # xterm.js wrapper and command injection bridge
-│   │   └── runtime.js         # Host-side runtime manager and SharedArrayBuffer coordinator
+│   │   └── settings.js        # Project settings modal with decoupled Save and Generate buttons
 │   ├── toolchain/
 │   │   ├── compiler-client.js # Host-side manager and differential VFS sync for compiler worker
 │   │   ├── driver.js          # Re-exports clang-wasi/driver with synchronous Make runner support
 │   │   ├── make.js            # Incremental Makefile runner evaluating mtimes
 │   │   ├── tar.js             # Sysroot tarball extractor
-│   │   ├── wasm-cache.js      # IndexedDB persistent binary cache for compiled WebAssembly modules
+│   │   ├── wasm-cache.js      # Configured web-ide-core/wasi/cache IndexedDB binary cache
 │   │   └── wasm-clang.js      # Augments clang-wasi/toolchain with IndexedDB caching & sysroot fallback
 │   ├── vfs/
-│   │   ├── archive.js         # JSZip project export and import routines
 │   │   ├── shared-sysroot.js  # Shared read-only sysroot binary builder, reader, and FNV-1a index
-│   │   ├── storage.js         # IndexedDB synchronization and default project seed
+│   │   ├── storage.js         # Configured web-ide-core/workspace IndexedDB storage + C starter project seed
 │   │   ├── sysroot.js         # System utilities, SYSTEM_DIRS, toolchain stubs, and host import definitions
 │   │   └── vfs.js             # In-memory virtual filesystem with path normalization
 │   └── workers/
 │       ├── compiler.worker.js # Dedicated Web Worker executing Clang, LLD, ar, and make
-│       ├── runtime.worker.js  # WASI host executing user binaries with Atomics stdin & OffscreenCanvas
-│       └── shell.worker.js    # Interactive POSIX shell worker (pushd/popd, globs, direct scripts, stdin-wasi)
+│       ├── runtime.worker.js  # Thin web-ide-core/wasi/runtime-worker wrapper injecting raylib-wasi imports
+│       └── shell.worker.js    # Thin web-ide-core/wasi/shell-worker wrapper configuring BusyBox & C toolchain commands
 ├── public/
 │   ├── coi-serviceworker.js   # Unified cross-origin isolation and CacheStorage offline worker
 │   ├── manifest.webmanifest   # Web App Manifest for PWA installation
@@ -559,6 +549,11 @@ Agents executing this project should proceed milestone-by-milestone:
 - Export `SYSTEM_DIRS = ['/dev', '/usr', '/include', '/lib', '/bin']` from `src/vfs/sysroot.js`.
 - Switch `src/workers/runtime.worker.js`, `src/toolchain/make.js`, `test/sqlite.test.js`, `test/raylib.test.js`, `test/shared-sysroot.test.js`, and `test/detached-terminal.test.js` directly to `'wasi-host'` with zero `busybox-wasi` coupling.
 - Switch `src/workers/shell.worker.js` (`createShellWasiHost`) and `test/shell.test.js` (`createShellHost`) to compose `'wasi-host'` + `createBusyboxHostOptions` directly, update custom stdin callbacks in `test/sqlite.test.js` and `test/shell.test.js` to use `host.memView()`, and remove `src/vfs/wasi-host.js`.
+
+### Milestone 41: Workbench Core Extraction (`web-ide-core` `v0.1.0`)
+- Adopt [`web-ide-core`](https://github.com/breeze833/web-ide-core) (`v0.1.0`) in `package.json` for backend-agnostic workbench UI (`EditorManager`, `TabsUI`, `FileTreeUI`, `showToast`, `TerminalManager`, `BootProgress`, `LayoutManager`, `web-ide-core/style.css`, Zip archive helpers, and IndexedDB storage factory) plus optional `./wasi` adapters (`wasm-cache`, `runtime`, `shell-worker`, `runtime-worker`).
+- Remove redundant files (`src/editor/*`, `src/components/{filetree.js,toast.js}`, `src/terminal/*`, `src/vfs/archive.js`) and replace inline layout/resizer/detach code in `src/main.js` and base CSS in `src/style.css`.
+- Retain C/C++/Raylib domain-configured wrappers in `src/vfs/storage.js`, `src/toolchain/wasm-cache.js`, `src/workers/shell.worker.js`, and `src/workers/runtime.worker.js` (injecting `raylib-wasi` custom imports and `createAudioReceiver()`).
 
 ---
 

@@ -13,33 +13,36 @@ assert.ok(mainSrc.includes('WORKSPACE'), 'sidebar-collapsed-strip must include W
 assert.ok(mainSrc.includes('sidebar-resizer'), 'main.js template must include sidebar-resizer');
 console.log('✓ main.js HTML template includes toggle button, collapsed vertical strip, and sidebar resizer');
 
-// 2. Verify App class sidebar state and initialization
-assert.ok(mainSrc.includes('this.sidebarWidth = 240'), 'App constructor must initialize default sidebarWidth');
-assert.ok(mainSrc.includes('this.sidebarCollapsed = false'), 'App constructor must initialize default sidebarCollapsed');
-assert.ok(mainSrc.includes('this.setupSidebar()'), 'App.init must call this.setupSidebar()');
-assert.ok(mainSrc.includes('setupSidebar()'), 'App class must implement setupSidebar()');
-assert.ok(mainSrc.includes('this.toggleSidebar'), 'App class must expose toggleSidebar()');
-assert.ok(mainSrc.includes('wasm_c_ide_sidebar_width'), 'Sidebar width must persist via localStorage wasm_c_ide_sidebar_width');
-assert.ok(mainSrc.includes('wasm_c_ide_sidebar_collapsed'), 'Sidebar collapsed state must persist via localStorage wasm_c_ide_sidebar_collapsed');
-console.log('✓ App class tracks sidebar state, registers setupSidebar, and persists to localStorage');
+// 2. Verify LayoutManager in web-ide-core/layout and storagePrefix wiring in main.js
+const layoutSrc = fs.readFileSync(new URL(import.meta.resolve('web-ide-core/layout')).pathname, 'utf8');
+assert.ok(mainSrc.includes("storagePrefix: 'wasm_c_ide_'"), 'main.js must configure LayoutManager storagePrefix wasm_c_ide_');
+assert.ok(mainSrc.includes('this.toggleSidebar'), 'App must expose toggleSidebar()');
+assert.ok(layoutSrc.includes('sidebarDefaultWidth'), 'LayoutManager must initialize default sidebarWidth');
+assert.ok(layoutSrc.includes('this.sidebarCollapsed = false'), 'LayoutManager must initialize default sidebarCollapsed');
+assert.ok(layoutSrc.includes('this.setupSidebar()'), 'LayoutManager must call setupSidebar()');
+assert.ok(layoutSrc.includes('this.toggleSidebar = (force)'), 'LayoutManager must expose toggleSidebar()');
+assert.ok(layoutSrc.includes('${this.storagePrefix}sidebar_width'), 'Sidebar width must persist via localStorage prefix');
+assert.ok(layoutSrc.includes('${this.storagePrefix}sidebar_collapsed'), 'Sidebar collapsed state must persist via localStorage prefix');
+console.log('✓ LayoutManager tracks sidebar state, registers setupSidebar, and persists to localStorage');
 
-// 3. Verify drag resizer, double-click reset, and shortcuts in main.js
-assert.ok(mainSrc.includes('sidebar.classList.add(\'resizing\')'), 'Mousedown on resizer must add resizing class to disable transitions');
-assert.ok(mainSrc.includes('sidebar.classList.remove(\'resizing\')'), 'Mouseup must remove resizing class');
-assert.ok(mainSrc.includes('resizer.addEventListener(\'dblclick\''), 'Resizer must listen for dblclick to reset width');
-assert.ok(mainSrc.includes('this.sidebarWidth = 240'), 'Double-click must reset sidebar width to 240px');
-assert.ok(mainSrc.includes('transitionend'), 'Sidebar must listen for transitionend to invoke editor layout');
-assert.ok(mainSrc.includes('(e.key === \'b\' || e.key === \'B\')'), 'Window keydown must capture Ctrl+B / Cmd+B shortcut');
-console.log('✓ Resizer dragging, double-click reset (240px), transitionend layout, and Ctrl+B shortcut verified');
+// 3. Verify drag resizer, double-click reset, and shortcuts in LayoutManager
+assert.ok(layoutSrc.includes("sidebar.classList.add('resizing')"), 'Mousedown on resizer must add resizing class to disable transitions');
+assert.ok(layoutSrc.includes("sidebar.classList.remove('resizing')"), 'Mouseup must remove resizing class');
+assert.ok(layoutSrc.includes("this._listen(resizer, 'dblclick'"), 'Resizer must listen for dblclick to reset width');
+assert.ok(layoutSrc.includes('this.sidebarWidth = this.sidebarDefaultWidth'), 'Double-click must reset sidebar width');
+assert.ok(layoutSrc.includes('transitionend'), 'Sidebar must listen for transitionend to invoke editor layout');
+assert.ok(layoutSrc.includes("(e.key === 'b' || e.key === 'B')"), 'Window keydown must capture Ctrl+B / Cmd+B shortcut');
+console.log('✓ Resizer dragging, double-click reset, transitionend layout, and Ctrl+B shortcut verified');
 
-// 4. Verify Monaco editor keybinding in src/editor/editor.js
-const editorSrc = fs.readFileSync('src/editor/editor.js', 'utf8');
+// 4. Verify Monaco editor keybinding in web-ide-core/editor and wiring in main.js
+const editorSrc = fs.readFileSync(new URL(import.meta.resolve('web-ide-core/editor')).pathname, 'utf8');
 assert.ok(editorSrc.includes('KeyCode.KeyB'), 'Monaco editor must register CtrlCmd + KeyCode.KeyB command');
-assert.ok(editorSrc.includes('toggleSidebar'), 'Monaco Ctrl+B command must call toggleSidebar()');
+assert.ok(editorSrc.includes('onToggleSidebar'), 'Monaco Ctrl+B command must invoke onToggleSidebar callback');
+assert.ok(mainSrc.includes('onToggleSidebar: () =>'), 'main.js must pass onToggleSidebar to EditorManager');
 console.log('✓ Monaco editor Ctrl+B keybinding verified');
 
-// 5. Verify style.css rules for sidebar, collapsed slim rail, and resizer
-const cssSrc = fs.readFileSync('src/style.css', 'utf8');
+// 5. Verify web-ide-core/style.css rules for sidebar, collapsed slim rail, and resizer
+const cssSrc = fs.readFileSync(new URL(import.meta.resolve('web-ide-core/style.css')).pathname, 'utf8');
 assert.ok(cssSrc.includes('.sidebar {'), 'style.css must style .sidebar');
 assert.ok(cssSrc.includes('transition: width'), 'style.css must define width transition for smooth collapse/expand');
 assert.ok(cssSrc.includes('.sidebar.resizing'), 'style.css must define .sidebar.resizing with transition: none');

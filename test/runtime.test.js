@@ -190,7 +190,7 @@ console.log('✓ Process EOF termination state verified');
 
 // Test 8: RuntimeManager stdin_request event and handleTerminalInput routing
 {
-  import('../src/terminal/runtime.js').then(({ RuntimeManager }) => {
+  import('web-ide-core/wasi/runtime').then(({ RuntimeManager }) => {
     let termWrites = '';
     const mockTerminal = {
       write(s) { termWrites += s; },

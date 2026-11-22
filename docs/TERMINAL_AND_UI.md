@@ -4,9 +4,9 @@ This document details the user interface components, terminal emulator subsystem
 
 ---
 
-## 1. Terminal Emulator & Detached Floating Mode (`TerminalManager`)
+## 1. Terminal Emulator & Detached Floating Mode (`TerminalManager` & `LayoutManager`)
 
-`wasm-c-ide` embeds `xterm.js` for authentic terminal interaction and provides standard VT100 windowing modes:
+`wasm-c-ide` uses [`web-ide-core`](https://github.com/breeze833/web-ide-core) (`v0.1.0`) wrapping `xterm.js` (`TerminalManager`) and workbench windowing (`LayoutManager`) for standard VT100 interaction:
 
 ### 1.1 Detached Floating Window Mode
 - **Window Detachment**: Terminal can be detached from the bottom dock into a floating draggable window (`#detached-terminal-window`).

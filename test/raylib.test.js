@@ -487,7 +487,7 @@ assert.strictEqual(new DataView(mockCoord.sharedBuffer).getInt32(20, true), 1);
 console.log('✓ GraphicsWindowUI onCloseRequested and shouldClose update verified');
 
 // Test 10: Verify RuntimeManager.kill closes graphics window and resolves promise cleanly
-const { RuntimeManager } = await import('../src/terminal/runtime.js');
+const { RuntimeManager } = await import('web-ide-core/wasi/runtime');
 let rmGwClosed = false;
 const rmGwMock = { close() { rmGwClosed = true; } };
 const rm = new RuntimeManager({ write() {}, writeln() {} });

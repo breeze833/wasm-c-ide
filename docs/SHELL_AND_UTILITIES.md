@@ -6,7 +6,7 @@ This document specifies the architecture, dispatch protocols, and runtime constr
 
 ## 1. BusyBox WASI POSIX Shell (`busybox-wasi` `v1.38.0-build1`)
 
-The interactive shell in `wasm-c-ide` is powered by upstream BusyBox compiled to single-threaded WebAssembly Preview 1 (`wasm32-wasip1`) as `busybox.wasm`. It executes inside a dedicated Web Worker (`src/workers/shell.worker.js`, IndexedDB cache key `'busybox-1.38.0-build1'`), composing `'wasi-host'` with `busybox-wasi/host` (`createBusyboxHostOptions`) directly via `createShellWasiHost`.
+The interactive shell in `wasm-c-ide` is powered by upstream BusyBox compiled to single-threaded WebAssembly Preview 1 (`wasm32-wasip1`) as `busybox.wasm`. It executes inside a dedicated Web Worker (`src/workers/shell.worker.js`, IndexedDB cache key `'busybox-1.38.0-build1'`) built on `attachShellWorker` from [`web-ide-core/wasi/shell-worker`](https://github.com/breeze833/web-ide-core), which composes `'wasi-host'` with `busybox-wasi/host` (`createBusyboxHostOptions`) while `wasm-c-ide` injects `SYSTEM_DIRS`, `BIN_COMMANDS`, C/C++/Make/SQLite `TOOLCHAIN_COMMANDS`, and `mountSysroot`.
 
 ### 1.1 Architecture & Core Components
 - **True In-Memory Ash Shell**: Interprets complete POSIX shell scripts, control structures (`for`, `while`, `if`/`then`/`else`), functions, and command substitutions.

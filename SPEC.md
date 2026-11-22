@@ -32,63 +32,81 @@ This specification defines the architecture and design invariants of `wasm-c-ide
   - Zero-dependency prompt-safe line editor (powered by modular [`ansi-line-editor`](https://github.com/breeze833/ansi-line-editor)) and zero-dependency synchronous standard input coordinator (powered by modular [`stdin-wasi`](https://github.com/breeze833/stdin-wasi)) that unifies terminal input handling and WebAssembly blocking `fd_read` across the shell prompt (`ide:~$ `), interactive shell builtins (`cat`), and running WASI binaries (`sqlite3`, `scanf`, `fgets`). *(See [`docs/TERMINAL_AND_UI.md`](./docs/TERMINAL_AND_UI.md))*.
 - **Toolchain Startup Acceleration & IndexedDB Binary Persistence**:
   - Streaming compilation (`WebAssembly.compileStreaming`) compiles bytecode concurrently as network chunks stream over the wire.
-  - Persists raw 56 MB `ArrayBuffer` binaries inside IndexedDB (`wasm-c-ide-wasm-cache` -> `wasm_modules`), completely bypassing browser deprecation of `WebAssembly.Module` structured cloning (`DataCloneError`).
+  - Persists raw 56 MB `ArrayBuffer` binaries inside IndexedDB (`wasm-c-ide-wasm-cache` -> `wasm_modules`) via `web-ide-core/wasi/cache`, completely bypassing browser deprecation of `WebAssembly.Module` structured cloning (`DataCloneError`).
   - Subsequent launches retrieve pre-downloaded binaries from local disk in **<100ms** with zero network transfer.
+- **Modular Workbench Core (`web-ide-core` `v0.1.0`)**:
+  - Delegates generic IDE workbench subsystems—`EditorManager`, `TabsUI`, `FileTreeUI`, `showToast`, `TerminalManager`, `BootProgress`, `LayoutManager` (collapsible slim-rail sidebar, split/sidebar resizers, detached 80x24 VT100 terminal), IndexedDB workspace persistence (`createWorkspaceStorage`), Zip import/export, base dark-theme workbench CSS (`web-ide-core/style.css`), and optional `./wasi` execution/shell worker hosts—to [`web-ide-core`](https://github.com/breeze833/web-ide-core) (`v0.1.0`).
+  - Retains C/C++-specific pedagogical and toolchain modules (`compiler-client.js`, `driver.js`, `make.js`, `wasm-clang.js`, `compiler.worker.js`, `reference.js`, `settings.js`, `examples-data.js`, starter C workspace seed, and `raylib-wasi` custom worker import wiring) cleanly in `wasm-c-ide`.
 
 ---
 
 ## 2. System Architecture
 
+`wasm-c-ide` composes a domain-specific C/C++ teaching layer on top of modular standalone packages (`web-ide-core` for frontend workbench & generic WASI worker orchestration, `wasi-host` + `vfs-wasi` for WASI syscalls & overlay storage, and specialized runtime/toolchain packages):
+
 ```
-+-----------------------------------------------------------------------------------------+
-|                                        Browser UI                                       |
-|  +---------------------------+  +------------------------------------+  +------------+  |
-|  | Multi-tab Code Editor     |  | Project Settings & Build Action Bar|  | Graphical  |  |
-|  | (Monaco Editor & Zoom +/-)|  | (Save/Compile/Build/Run/Canvas/PWA)|  | Console    |  |
-|  +-------------+-------------+  +-----------------+------------------+  | (Floating/ |  |
-|                |                                  | (Transparent        |  Pop-out   |  |
-|                v (Explicit Save / Dirty Marker)   v  pushd/cd/popd cmd) |  Canvas via|  |
-|  +-------------+----------------------------------+------------------+  | canvas-    |  |
-|  |               xterm.js Virtual Terminal & Zoom (+/-)              |  | wasi UI)   |  |
-|  +------------------------------------+------------------------------+  +-----+------+  |
-|                                       | (Keystrokes & ANSI Escapes)           |         |
-|                       +---------------v---------------+                       |         |
-|                       |   Unified LineEditor Engine   |                       |         |
-|                       | (History, Cursor Nav, Editing)|                       |         |
-|                       +-------+---------------+-------+                       |         |
-+-------------------------------|---------------|-------------------------------|---------+
-                                |               |                               | (Zero-copy
-+-------------------------------v---------------v-------------------------------v---------+
-|                                Tri-Worker Architecture                                  |
-|                                                                                         |
-|  +--------------------------+  +-----------------------+  +--------------------------+  |
-|  |       Shell Worker       |  |    Compiler Worker    |  |      Runtime Worker      |  |
-|  |    (shell.worker.js)     |  |  (compiler.worker.js) |  |   (runtime.worker.js)    |  |
-|  |  - busybox.wasm 1.38.0   |  |  - llvm-box.wasm 19.1 |  |  - User app (./a.out)    |  |
-|  |  - POSIX Shell (ash)     |  |  - clang, lld, ar, nm |  |  - SQLite 3 (CLI/Lib)    |  |
-|  |  - wasi_host_spawn Bridge|  |  - make.wasm (Make 4) |  |  - Raylib / Canvas / Txt |  |
-|  |  - Real Unix Coreutils   |  |  - Zero-Freeze Builds |  |  - Atomics Stdin & FPS   |  |
-|  +-------------+------------+  +-----------+-----------+  +------------+-------------+  |
-|                |                           |                           |                |
-|                +---------------------+     |     +---------------------+                |
-|                                      v     v     v                                      |
-|  +-----------------------------------------------------------------------------------+  |
-|  |                         Two-Tier Overlay VFS Architecture                         |  |
-|  |                                                                                   |  |
-|  |  [Top Tier: Mutable Local VFS]                                                    |  |
-|  |  - /workspace (Read-Write, Master VFS Authority, IndexedDB, Differential Sync)   |  |
-|  |  - /dev (Virtual Character Devices: /dev/null, /dev/zero)                         |  |
-|  |                                                                                   |  |
-|  |  [Bottom Tier: Immutable SharedSysroot via SharedArrayBuffer (~108 MB)]           |  |
-|  |  - /usr/include & /include/wasm32-wasip1 (Musl C, libc++, Raylib, Turtle headers)|  |
-|  |  - /usr/lib & /lib/wasm32-wasip1 (libc.a, libc++.a, libraylib.a, libturtle.a)     |  |
-|  |  - /bin & /usr/bin (Multi-call stubs: gcc, clang, make, sqlite3, busybox tools)  |  |
-|  |  - Zero-Copy TypedArray Subarrays, Hardware Read-Only Protection (EROFS)          |  |
-|  +-----------------------------------------------------------------------------------+  |
-+-----------------------------------------------------------------------------------------+
-| Offline Engine: Unified PWA Service Worker (COOP/COEP) + IndexedDB Wasm Cache           |
-+-----------------------------------------------------------------------------------------+
++---------------------------------------------------------------------------------------------------+
+|                                      Browser Main Thread UI                                       |
+|                                                                                                   |
+|  +----------------------------------------------------+  +-------------------------------------+  |
+|  |         web-ide-core (v0.1.0) Workbench            |  |   wasm-c-ide C/C++ Domain UI        |  |
+|  |  - EditorManager (Monaco) & TabsUI (*)             |  |  - Action Bar (Save/Compile/Build/  |  |
+|  |  - FileTreeUI & Zip Archive (archive.js)           |  |    Run/Stop -> pushd/cd/popd cmds)  |  |
+|  |  - TerminalManager (xterm.js) & BootProgress       |  |  - SettingsModal & Build Generators |  |
+|  |  - LayoutManager (Slim-Rail Sidebar, Split, 80x24) |  |  - ReferenceDrawer & Examples Suite |  |
+|  +-------------------------+--------------------------+  +------------------+------------------+  |
+|                            |                                                |                     |
+|  +-------------------------v------------------------------------------------v------------------+  |
+|  |          I/O, Audio & Graphical Console Bridge                                              |  |
+|  |  - ansi-line-editor (v0.1.0) + stdin-wasi (v0.1.0) [StdinHost <-> 8KB SharedArrayBuffer]    |  |
+|  |  - web-ide-core/wasi/runtime [RuntimeManager] + raylib-wasi [createAudioReceiver]           |  |
+|  |  - canvas-wasi (v0.1.4) + canvas-window [GraphicsWindowUI, InputCoordinator 512B SAB]       |  |
+|  +-------------------------+--------------------------+---------------------+------------------+  |
++----------------------------|--------------------------|---------------------|---------------------+
+                             |                          |                     | (ImageBitmap / Audio)
++----------------------------v--------------------------v---------------------v---------------------+
+|                                     Tri-Worker Architecture                                       |
+|                                                                                                   |
+|  +----------------------------+  +--------------------------+  +-------------------------------+  |
+|  |        Shell Worker        |  |     Compiler Worker      |  |        Runtime Worker         |  |
+|  |     (shell.worker.js)      |  |   (compiler.worker.js)   |  |      (runtime.worker.js)      |  |
+|  |  - web-ide-core/wasi/      |  |  - CompilerClient        |  |  - web-ide-core/wasi/         |  |
+|  |    shell-worker            |  |  - clang-wasi            |  |    runtime-worker             |  |
+|  |  - busybox-wasi            |  |    (v19.1.0-build1)      |  |  - wasi-host (v0.1.1)         |  |
+|  |    (v1.38.0-build1, ash)   |  |  - make-wasi (4.4.1)     |  |  - canvas-wasi/worker (2D/FB) |  |
+|  |  - wasi-host (v0.1.1)      |  |  - ar archiver           |  |  - raylib-wasi (v5.5.0-build1)|  |
+|  |  - TOOLCHAIN_COMMANDS RPC  |  |  - wasi-host (v0.1.1)    |  |    [GLES2 & Audio Hook]       |  |
+|  +--------------+-------------+  +------------+-------------+  |  - sqlite-wasi (v3.54.1)      |  |
+|                 |                             |                +---------------+---------------+  |
+|                 +-----------------------+     |     +--------------------------+                  |
+|                                         v     v     v                                             |
+|  +---------------------------------------------------------------------------------------------+  |
+|  |                     Two-Tier Overlay VFS Architecture (vfs-wasi v0.2.0)                     |  |
+|  |                                                                                             |  |
+|  |  [Top Tier: Mutable Local Overlay]                                                          |  |
+|  |  - /workspace (Read-Write, Differential Sync across Workers, C Starter Seed)                |  |
+|  |  - /dev (Virtual Character Devices via wasi-host: /dev/null, /dev/zero)                     |  |
+|  |                                                                                             |  |
+|  |  [Bottom Tier: Immutable SharedSysroot (SSYS SharedArrayBuffer, ~108 MB)]                   |  |
+|  |  - /usr/include & /include/wasm32-wasip1 (Musl C, libc++, Raylib, Turtle, Canvas, SQLite3)  |  |
+|  |  - /usr/lib & /lib/wasm32-wasip1 (libc.a, libc++.a, libraylib.a, libturtle*.a, libsqlite3.a)|  |
+|  |  - /bin & /usr/bin (BusyBox applets, sqlite3 CLI, toolchain stubs) + EROFS Enforcement      |  |
+|  +---------------------------------------------------------------------------------------------+  |
++---------------------------------------------------------------------------------------------------+
+|  Offline & Persistence Layer: coi-serviceworker.js (COOP/COEP) + web-ide-core Storage & Wasm Cache|
++---------------------------------------------------------------------------------------------------+
 ```
+
+### Modular Dependency Stack
+
+| Layer | Package / Source | Responsibility in `wasm-c-ide` |
+|---|---|---|
+| **Workbench Core & WASI Adapters** | [`web-ide-core`](https://github.com/breeze833/web-ide-core) (`v0.1.0`) | Monaco editor/tabs, file tree, Zip import/export, xterm wrapper, boot progress, collapsible sidebar & detached 80x24 layout (`LayoutManager`), IndexedDB storage/Wasm cache, `RuntimeManager`, and reusable `shell-worker`/`runtime-worker` hosts |
+| **WASI Runtime Host** | [`wasi-host`](https://github.com/breeze833/wasi-host) (`v0.1.1`) | Language-neutral `wasi_snapshot_preview1` syscall engine, `/dev/null` & `/dev/zero`, `poll_oneoff` sleeps, and `EROFS` guardrails shared across compiler, Make, shell, and user runtimes |
+| **Virtual Filesystem** | [`vfs-wasi`](https://github.com/breeze833/vfs-wasi) (`v0.2.0`) | `OverlayVFS`, zero-copy `SharedSysroot` (`SSYS`), and cross-worker delta synchronization |
+| **Shell & Terminal I/O** | [`busybox-wasi`](https://github.com/breeze833/busybox-wasi) (`v1.38.0-build1`), [`ansi-line-editor`](https://github.com/breeze833/ansi-line-editor), [`stdin-wasi`](https://github.com/breeze833/stdin-wasi) | POSIX `ash` + 70+ coreutils, prompt-safe inline editing, and `Atomics.wait` synchronous stdin |
+| **Compiler & Build** | [`clang-wasi`](https://github.com/breeze833/clang-wasi) (`v19.1.0-build1`), [`make-wasi`](https://github.com/breeze833/make-wasi) (`4.4.1`) | LLVM 19.1.0 `clang`/`wasm-ld`/multicall tools + GNU Make 4.4.1 in compiler worker |
+| **Graphics, UI & DB** | [`canvas-wasi`](https://github.com/breeze833/canvas-wasi) (`v0.1.4`), [`raylib-wasi`](https://github.com/breeze833/raylib-wasi) (`v5.5.0-build1`), `libturtle`, [`sqlite-wasi`](https://github.com/breeze833/sqlite-wasi) (`v3.54.1`) | Offscreen 2D/framebuffer canvas, floating/pop-out window UI, WebGL GLES2 + Web Audio bridge, Cartesian turtle graphics, and embedded SQLite 3 library/CLI |
 
 ---
 
@@ -129,6 +147,17 @@ Detailed technical specifications, binary layouts, memory protocols, and case st
 ### 3.3 Offline Delivery & Service Worker Summary
 - Service Worker (`coi-serviceworker.js`, cache key `wasm-c-ide-cache-v2`) injects COOP/COEP headers to enable `SharedArrayBuffer` for cross-origin isolation and purges stale CacheStorage entries when `CACHE_NAME` is bumped.
 - Large binary bypass: `llvm-box.wasm` (~56 MB) explicitly bypasses Service Worker `CacheStorage` stream cloning to eliminate stream buffer lockups, memory exhaustion, and `AbortError` timeouts.
+
+### 3.4 Workbench Core & Optional WASI Adapters (`web-ide-core` `v0.1.0`)
+- **`wasm-c-ide` Workbench Delegation**:
+  - `src/main.js` imports `EditorManager`, `TabsUI`, `configureMonacoEnvironment` (`web-ide-core/editor*`), `FileTreeUI`, `showToast` (`web-ide-core/ui*`), `TerminalManager`, `BootProgress` (`web-ide-core/terminal*`), `LayoutManager` (`web-ide-core/layout`), `exportWorkspaceZip`/`importWorkspaceZip` (`web-ide-core/workspace/archive`), and `RuntimeManager` (`web-ide-core/wasi/runtime`), removing duplicate internal workbench/layout files (`src/editor/*`, `src/components/filetree.js`, `src/components/toast.js`, `src/terminal/*`, `src/vfs/archive.js`).
+  - `EditorManager` and `TerminalManager` preserve existing user preferences (`fontSizeStorageKey: 'wasm_ide_editor_font_size'` / `'wasm_ide_term_font_size'`), and `LayoutManager` preserves sidebar width/collapse state (`storagePrefix: 'wasm_c_ide_'`) plus `Ctrl+B` / `Ctrl+Shift+D` shortcuts.
+  - `src/style.css` imports `web-ide-core/style.css` for base dark-theme layout, sidebar rail, tabs, resizers, terminal, detached window, modal, and toast rules, retaining only `wasm-c-ide`-specific rules (`.btn-graphics`, `.canvas-active-dot`, `.btn-upgrade-system`, `.confirm-overlay`, and `.reference-drawer`).
+- **Domain-Configured Thin Adapters**:
+  - `src/vfs/storage.js` configures `createWorkspaceStorage({ dbName: 'wasm_c_ide_db', rootPath: '/workspace' })` and supplies the starter multi-file C workspace (`calc.h`, `calc.c`, `main.c`, `build.sh`, `Makefile`) as `defaultFiles` on first boot.
+  - `src/toolchain/wasm-cache.js` configures `createWasmCache({ dbName: 'wasm-c-ide-wasm-cache' })`.
+  - `src/workers/shell.worker.js` calls `attachShellWorker` (`web-ide-core/wasi/shell-worker`) injecting `VFS`, `mountSysroot`, `SYSTEM_DIRS`, `BIN_COMMANDS`, C/C++/Make/SQLite `TOOLCHAIN_COMMANDS`, `envDefaults: { USER: 'student' }`, and the C/C++ welcome banner.
+  - `src/workers/runtime.worker.js` delegates execution to `runWasmBinary` / `attachRuntimeWorker` (`web-ide-core/wasi/runtime-worker`) while injecting `createRaylibHost` (`raylib-wasi`) via `resolveCustomImports`, and `RuntimeManager` in `src/main.js` injects `createAudioReceiver()` (`raylib-wasi`).
 
 ---
 

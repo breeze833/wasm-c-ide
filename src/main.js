@@ -1,21 +1,55 @@
 // Main Application Bootstrap & UI Wiring
 
 import { VFS } from './vfs/vfs.js';
-import { loadWorkspace, setupAutoSync } from './vfs/storage.js';
+import { loadWorkspace, saveWorkspace, setupAutoSync } from './vfs/storage.js';
 import { mountSysroot, mountSysrootUtilities } from './vfs/sysroot.js';
 import { loadOrBuildSharedSysroot } from './vfs/shared-sysroot.js';
-import { EditorManager } from './editor/editor.js';
-import { TabsUI } from './editor/tabs.js';
-import { FileTreeUI } from './components/filetree.js';
-import { showToast } from './components/toast.js';
-import { TerminalManager } from './terminal/terminal.js';
-import { RuntimeManager } from './terminal/runtime.js';
-import { BootProgress } from './terminal/boot-progress.js';
+import {
+  EditorManager,
+  TabsUI,
+  FileTreeUI,
+  showToast,
+  TerminalManager,
+  BootProgress,
+  LayoutManager,
+  configureMonacoEnvironment,
+} from 'web-ide-core';
+import { RuntimeManager } from 'web-ide-core/wasi/runtime';
+import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
+import { createAudioReceiver } from 'raylib-wasi';
 import { LineEditor } from 'ansi-line-editor';
 import { StdinHost } from 'stdin-wasi/host';
 import { CompilerClient } from './toolchain/compiler-client.js';
 import { GraphicsWindowUI } from 'canvas-wasi';
 import 'canvas-wasi/style.css';
+
+configureMonacoEnvironment({
+  getWorker: () => new editorWorker(),
+  force: true,
+});
+
+export function reportBootProgress(bootProgress, status, progress) {
+  if (!bootProgress) return;
+  if (status && status !== bootProgress.currentLabel) {
+    if (bootProgress.currentLabel) {
+      bootProgress.completeCurrent();
+    }
+    bootProgress.start(status);
+  }
+  if (progress && typeof progress.loaded === 'number') {
+    const { loaded, total } = progress;
+    const loadedMB = (loaded / (1024 * 1024)).toFixed(1);
+    if (total && total > 0) {
+      const totalMB = (total / (1024 * 1024)).toFixed(1);
+      const pct = Math.min(100, Math.max(0, Math.floor((loaded / total) * 100)));
+      bootProgress.update(pct, `${loadedMB}/${totalMB} MB`);
+    } else {
+      bootProgress.update(null, `${loadedMB} MB`);
+    }
+  } else if (progress === null) {
+    bootProgress.update(null, '');
+  }
+}
 
 import { SettingsModal, DEFAULT_RUN_COMMAND } from './components/settings.js';
 import { ReferenceDrawer, getDocsUrl } from './components/reference.js';
@@ -83,7 +117,9 @@ export class App {
     // 1. Initialize Terminal, Shell Worker & Runtime early so xterm is visible and ready for startup messages
     this.initTerminalAndShell();
 
-    const bootProgress = new BootProgress(this.terminal);
+    const bootProgress = new BootProgress(this.terminal, {
+      noticePrefix: 'Sysroot setup notice',
+    });
 
     if (this.terminal) {
       this.terminal.writeln('\x1b[1;36m[System]\x1b[0m Initializing WebAssembly C/C++ environment...');
@@ -103,21 +139,28 @@ export class App {
     const editorContainer = document.getElementById('editor-container');
     const tabsContainer = document.getElementById('tabs-bar');
 
-    this.editorManager = new EditorManager(
-      editorContainer,
-      this.vfs,
-      (_path, _isDirty) => {
+    this.editorManager = new EditorManager(editorContainer, this.vfs, {
+      fontSizeStorageKey: 'wasm_ide_editor_font_size',
+      onDirtyChange: (_path, _isDirty) => {
         if (this.tabsUI) this.tabsUI.render();
-      }
-    );
+      },
+      onToggleSidebar: () => {
+        if (this.layoutManager) this.layoutManager.toggleSidebar();
+      },
+    });
 
     this.tabsUI = new TabsUI(tabsContainer, this.editorManager);
 
     // Initialize File Tree
     const fileTreeContainer = document.getElementById('file-tree');
-    this.fileTreeUI = new FileTreeUI(fileTreeContainer, this.vfs, (path) => {
-      this.editorManager.openFile(path);
-      this.tabsUI.render();
+    this.fileTreeUI = new FileTreeUI(fileTreeContainer, this.vfs, {
+      rootPath: '/workspace',
+      expandedDirs: ['/workspace', '/workspace/src', '/workspace/include'],
+      onSave: (vfs) => saveWorkspace(vfs),
+      onSelectFile: (path) => {
+        this.editorManager.openFile(path);
+        this.tabsUI.render();
+      },
     });
 
     this.fileTreeUI.attachToolbarButtons({
@@ -160,12 +203,12 @@ export class App {
       });
 
       const sharedSysrootBuffer = await loadOrBuildSharedSysroot(wasmBasePath, (status, progress) => {
-        bootProgress.update(status, progress);
+        reportBootProgress(bootProgress, status, progress);
       });
       this.vfs.setSharedSysroot(sharedSysrootBuffer);
 
       await this.toolchain.init((status, progress) => {
-        bootProgress.update(status, progress);
+        reportBootProgress(bootProgress, status, progress);
       });
       await mountSysrootUtilities(this.vfs, wasmBasePath);
     } catch (err) {
@@ -214,14 +257,14 @@ export class App {
     // Zoom Controls for Editor and Terminal
     this.setupZoomControls();
 
-    // Detached / Floating Windowing for Terminal
-    this.setupTerminalWindowing();
-
-    // Draggable Split Resizer between Editor and Terminal
-    this.setupSplitResizer();
-
-    // Collapsible & Resizable Workspace Sidebar
-    this.setupSidebar();
+    // Unified Workbench Layout (Collapsible Sidebar, Split Resizer, Detached 80x24 Terminal)
+    this.layoutManager = new LayoutManager({
+      storagePrefix: 'wasm_c_ide_',
+      editorManager: this.editorManager,
+      terminalManager: this.terminal,
+    });
+    this.toggleSidebar = (force) => this.layoutManager?.toggleSidebar(force);
+    this.toggleTerminalDetach = () => this.layoutManager?.toggleTerminalDetach();
 
     // Slide-Out Right Reference Drawer
     this.setupReferenceDrawer();
@@ -246,9 +289,9 @@ export class App {
 
   initTerminalAndShell(options = {}) {
     const termContainer = document.getElementById('terminal-container');
-    this.terminal = new TerminalManager(
-      termContainer,
-      (inputData) => {
+    this.terminal = new TerminalManager(termContainer, {
+      fontSizeStorageKey: 'wasm_ide_term_font_size',
+      onInput: (inputData) => {
         // Drop input while system is initializing
         if (!this.isReady) {
           return;
@@ -265,12 +308,12 @@ export class App {
           this.shellWorker.postMessage({ type: 'input', data: inputData });
         }
       },
-      () => {
+      onInterrupt: () => {
         // Ctrl+C handling: interrupt active runtime process or shell
         if (!this.isReady) return;
         this.handleStopExecution();
-      }
-    );
+      },
+    });
 
     this.terminal.onDimensionsChange = (cols, rows) => {
       if (this.shellWorker) {
@@ -278,7 +321,13 @@ export class App {
       }
     };
 
-    this.runtimeManager = new RuntimeManager(this.terminal);
+    this.runtimeManager = new RuntimeManager(this.terminal, {
+      audioReceiver: typeof createAudioReceiver === 'function' ? createAudioReceiver() : null,
+      createWorker: () =>
+        new Worker(new URL('./workers/runtime.worker.js', import.meta.url), {
+          type: 'module',
+        }),
+    });
     this.graphicsWindow = new GraphicsWindowUI({
       sharedBuffer: this.runtimeManager.raylibSharedBuffer,
       inputCoordinator: this.runtimeManager.inputCoordinator,
@@ -960,514 +1009,6 @@ export class App {
     });
     termZoomLabel?.addEventListener('click', () => {
       this.terminal?.resetFontSize();
-    });
-  }
-
-  setupTerminalWindowing() {
-    const terminalSection = document.querySelector('.terminal-section');
-    const terminalHeader = terminalSection?.querySelector('.terminal-header');
-    const resizer = document.getElementById('split-resizer');
-    const btnDetach = document.getElementById('btn-term-detach');
-    const btnMin = document.getElementById('btn-term-min');
-    const dimBadge = document.getElementById('term-dimension-badge');
-    if (!terminalSection || !btnDetach || !this.terminal) return;
-
-    let dockedHeight = terminalSection.clientHeight || 240;
-    let isDetached = false;
-    let isMinimized = false;
-    let preMinHeight = '';
-    let isProgrammaticResize = false;
-
-    // Presets for dimension snapping
-    const presets = [
-      { cols: 80, rows: 24, label: '80x24' },
-      { cols: 80, rows: 25, label: '80x25' },
-      { cols: 100, rows: 30, label: '100x30' },
-      { cols: 120, rows: 40, label: '120x40' },
-      { cols: 132, rows: 24, label: '132x24' },
-    ];
-    let presetIdx = 0;
-
-    const updateDimBadge = (cols, rows) => {
-      if (!dimBadge) return;
-      dimBadge.textContent = `${cols}x${rows}`;
-      if (!isDetached) {
-        dimBadge.title = `Terminal Dimensions: ${cols}x${rows} (Click to Detach 80x24)`;
-        dimBadge.setAttribute('data-tooltip', 'Detach (80x24)');
-      } else {
-        const nextIdx = (presetIdx + 1) % presets.length;
-        const next = presets[nextIdx];
-        dimBadge.title = `Terminal Dimensions: ${cols}x${rows} (Click to switch to ${next.label})`;
-        dimBadge.setAttribute('data-tooltip', `Switch to ${next.label}`);
-      }
-    };
-
-    this.terminal.onDimensionsChange = (cols, rows) => {
-      updateDimBadge(cols, rows);
-    };
-
-    // Initialize dimensions badge
-    const dims = this.terminal.getGridDimensions();
-    updateDimBadge(dims.cols, dims.rows);
-
-    const detachSVG = `<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M1.5 1a.5.5 0 0 0-.5.5v13a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5V9a.5.5 0 0 0-1 0v5H2V2h5a.5.5 0 0 0 0-1H1.5z"/>
-      <path d="M10 .5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0V1.707L8.854 7.854a.5.5 0 1 1-.708-.708L14.293 1H10.5a.5.5 0 0 1-.5-.5z"/>
-    </svg>`;
-
-    const dockSVG = `<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M14.5 15a.5.5 0 0 0 .5-.5v-13a.5.5 0 0 0-.5-.5h-13a.5.5 0 0 0-.5.5V7a.5.5 0 0 0 1 0V2h12v12H9a.5.5 0 0 0 0 1h5.5z"/>
-      <path d="M6 15.5a.5.5 0 0 1-.5.5h-5a.5.5 0 0 1-.5-.5v-5a.5.5 0 0 1 1 0v3.793l6.146-6.147a.5.5 0 1 1 .708.708L1.707 15H5.5a.5.5 0 0 1 .5.5z"/>
-    </svg>`;
-
-    const minSVG = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M2 13a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 13z"/>
-    </svg>`;
-
-    const maxSVG = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M3 3h10v10H3V3zm1.5 1.5v7h7v-7h-7z"/>
-    </svg>`;
-
-    const setDetachedFocus = (focused) => {
-      if (!isDetached) return;
-      if (focused) {
-        terminalSection.classList.add('focused');
-        terminalSection.style.zIndex = '1001';
-        this.terminal.focus();
-      } else {
-        terminalSection.classList.remove('focused');
-        terminalSection.style.zIndex = '1000';
-      }
-    };
-
-    const toggleMinimize = () => {
-      if (!isDetached) return;
-      isMinimized = !isMinimized;
-      if (isMinimized) {
-        preMinHeight = terminalSection.style.height || `${terminalSection.clientHeight}px`;
-        terminalSection.classList.add('minimized');
-        if (btnMin) {
-          btnMin.innerHTML = maxSVG;
-          btnMin.title = 'Maximize Terminal';
-          btnMin.setAttribute('data-tooltip', 'Maximize');
-          btnMin.setAttribute('aria-label', 'Maximize Terminal');
-        }
-      } else {
-        terminalSection.classList.remove('minimized');
-        if (preMinHeight) {
-          terminalSection.style.height = preMinHeight;
-        }
-        if (btnMin) {
-          btnMin.innerHTML = minSVG;
-          btnMin.title = 'Minimize Terminal';
-          btnMin.setAttribute('data-tooltip', 'Minimize');
-          btnMin.setAttribute('aria-label', 'Minimize Terminal');
-        }
-        isProgrammaticResize = true;
-        this.terminal.fit();
-        setTimeout(() => { isProgrammaticResize = false; }, 60);
-        setDetachedFocus(true);
-      }
-    };
-
-    const detachTerminal = (cols = 80, rows = 24) => {
-      isDetached = true;
-      this.terminal.isDetached = true;
-      dockedHeight = terminalSection.clientHeight || dockedHeight;
-
-      terminalSection.classList.add('detached');
-      if (resizer) resizer.classList.add('hidden');
-      if (btnMin) {
-        btnMin.style.display = 'inline-flex';
-        btnMin.innerHTML = minSVG;
-        btnMin.title = 'Minimize Terminal';
-      }
-
-      // Compute exact 80x24 window size
-      const targetSize = this.terminal.computeContainerSizeForGrid(cols, rows);
-      const winW = Math.min(window.innerWidth - 30, Math.max(480, targetSize.width));
-      const winH = Math.min(window.innerHeight - 50, Math.max(260, targetSize.height));
-
-      // Center floating window
-      const left = Math.max(20, Math.round((window.innerWidth - winW) / 2));
-      const top = Math.max(40, Math.round((window.innerHeight - winH) / 2));
-
-      isProgrammaticResize = true;
-      presetIdx = 0;
-      terminalSection.style.position = 'fixed';
-      terminalSection.style.left = `${left}px`;
-      terminalSection.style.top = `${top}px`;
-      terminalSection.style.width = `${winW}px`;
-      terminalSection.style.height = `${winH}px`;
-      terminalSection.style.zIndex = '1001';
-
-      this.terminal.fixedGrid = true;
-      this.terminal.setGridDimensions(cols, rows);
-      updateDimBadge(cols, rows);
-      setTimeout(() => { isProgrammaticResize = false; }, 80);
-
-      btnDetach.innerHTML = dockSVG;
-      btnDetach.title = 'Dock Terminal (Ctrl+Shift+D)';
-      btnDetach.setAttribute('data-tooltip', 'Dock Terminal');
-      btnDetach.setAttribute('aria-label', 'Dock Terminal');
-
-      if (this.editorManager) this.editorManager.layout();
-      setDetachedFocus(true);
-    };
-
-    const dockTerminal = () => {
-      isDetached = false;
-      this.terminal.isDetached = false;
-      this.terminal.fixedGrid = false;
-      if (isMinimized) {
-        isMinimized = false;
-        terminalSection.classList.remove('minimized');
-      }
-
-      terminalSection.classList.remove('detached');
-      terminalSection.classList.remove('focused');
-      if (resizer) resizer.classList.remove('hidden');
-      if (btnMin) btnMin.style.display = 'none';
-
-      terminalSection.style.position = '';
-      terminalSection.style.left = '';
-      terminalSection.style.top = '';
-      terminalSection.style.width = '';
-      terminalSection.style.height = `${dockedHeight}px`;
-      terminalSection.style.zIndex = '';
-
-      btnDetach.innerHTML = detachSVG;
-      btnDetach.title = 'Detach Terminal (Floating 80x24)';
-      btnDetach.setAttribute('data-tooltip', 'Detach Terminal (80x24)');
-      btnDetach.setAttribute('aria-label', 'Detach Terminal');
-
-      this.terminal.fit();
-      updateDimBadge(this.terminal.term.cols, this.terminal.term.rows);
-      if (this.editorManager) this.editorManager.layout();
-      this.terminal.focus();
-    };
-
-    this.toggleTerminalDetach = () => {
-      if (isDetached) {
-        dockTerminal();
-      } else {
-        detachTerminal(80, 24);
-      }
-    };
-
-    btnDetach.addEventListener('click', (e) => {
-      e.preventDefault();
-      this.toggleTerminalDetach();
-    });
-
-    btnMin?.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      setDetachedFocus(true);
-    });
-
-    btnMin?.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      toggleMinimize();
-    });
-
-    // Clicking dimension badge (prevents focus loss and allows cycling presets)
-    dimBadge?.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      setDetachedFocus(true);
-    });
-
-    dimBadge?.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setDetachedFocus(true);
-      if (!isDetached) {
-        detachTerminal(80, 24);
-        return;
-      }
-      if (isMinimized) {
-        toggleMinimize();
-      }
-      // If already detached, cycle through presets
-      presetIdx = (presetIdx + 1) % presets.length;
-      const target = presets[presetIdx];
-      isProgrammaticResize = true;
-      this.terminal.fixedGrid = true;
-      const targetSize = this.terminal.computeContainerSizeForGrid(target.cols, target.rows);
-      const winW = Math.min(window.innerWidth - 30, targetSize.width);
-      const winH = Math.min(window.innerHeight - 50, targetSize.height);
-      terminalSection.style.width = `${winW}px`;
-      terminalSection.style.height = `${winH}px`;
-      if (winW < targetSize.width || winH < targetSize.height) {
-        this.terminal.fixedGrid = false;
-        this.terminal.fit();
-      } else {
-        this.terminal.setGridDimensions(target.cols, target.rows);
-      }
-      updateDimBadge(this.terminal.term.cols, this.terminal.term.rows);
-      setTimeout(() => {
-        isProgrammaticResize = false;
-        this.terminal.focus();
-      }, 80);
-    });
-
-    // Bring detached window to focus on any click inside
-    terminalSection.addEventListener('mousedown', () => {
-      if (isDetached) {
-        setDetachedFocus(true);
-      }
-    });
-
-    // Header dragging & focus support
-    let isDragging = false;
-    let dragStartX = 0;
-    let dragStartY = 0;
-    let initLeft = 0;
-    let initTop = 0;
-
-    terminalHeader?.addEventListener('mousedown', (e) => {
-      if (!isDetached) return;
-      setDetachedFocus(true);
-      if (e.target.closest('button') || e.target.closest('.terminal-dim-badge') || e.target.closest('.pane-zoom-controls')) {
-        return;
-      }
-      isDragging = true;
-      dragStartX = e.clientX;
-      dragStartY = e.clientY;
-      const rect = terminalSection.getBoundingClientRect();
-      initLeft = rect.left;
-      initTop = rect.top;
-      document.body.style.cursor = 'move';
-      e.preventDefault();
-    });
-
-    window.addEventListener('mousemove', (e) => {
-      if (!isDragging || !isDetached) return;
-      const dx = e.clientX - dragStartX;
-      const dy = e.clientY - dragStartY;
-      const maxL = window.innerWidth - 80;
-      const maxT = window.innerHeight - 40;
-      terminalSection.style.left = `${Math.max(0, Math.min(maxL, initLeft + dx))}px`;
-      terminalSection.style.top = `${Math.max(0, Math.min(maxT, initTop + dy))}px`;
-    });
-
-    window.addEventListener('mouseup', () => {
-      if (isDragging) {
-        isDragging = false;
-        document.body.style.cursor = '';
-      }
-    });
-
-    // Clicking outside unfocuses detached window
-    window.addEventListener('mousedown', (e) => {
-      if (isDetached && !terminalSection.contains(e.target)) {
-        setDetachedFocus(false);
-      }
-    });
-
-    // Terminal internal focus events
-    if (this.terminal.term?.onFocus) {
-      this.terminal.term.onFocus(() => {
-        if (isDetached) setDetachedFocus(true);
-      });
-    }
-
-    // Drag-resize observer when floating window is resized by user
-    let prevW = 0;
-    let prevH = 0;
-    const roFloating = new ResizeObserver((entries) => {
-      if (!isDetached || isMinimized) return;
-      for (const entry of entries) {
-        const cr = entry.contentRect;
-        if (!cr || cr.width === 0 || cr.height === 0) continue;
-        if (isProgrammaticResize) {
-          prevW = cr.width;
-          prevH = cr.height;
-          return;
-        }
-        if (Math.abs(cr.width - prevW) > 2 || Math.abs(cr.height - prevH) > 2) {
-          prevW = cr.width;
-          prevH = cr.height;
-          presetIdx = -1;
-          this.terminal.fixedGrid = false;
-          this.terminal.fit();
-          updateDimBadge(this.terminal.term.cols, this.terminal.term.rows);
-        }
-      }
-    });
-    roFloating.observe(terminalSection);
-
-    // Global keyboard shortcut: Ctrl+Shift+D (or Cmd+Shift+D) to toggle detach/dock
-    window.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
-        e.preventDefault();
-        this.toggleTerminalDetach();
-      }
-    });
-  }
-
-  setupSplitResizer() {
-    const resizer = document.getElementById('split-resizer');
-    const terminalSection = document.querySelector('.terminal-section');
-    if (!resizer || !terminalSection) return;
-
-    let isDragging = false;
-    let startY = 0;
-    let startHeight = 0;
-
-    resizer.addEventListener('mousedown', (e) => {
-      if (terminalSection.classList.contains('detached')) return;
-      isDragging = true;
-      startY = e.clientY;
-      startHeight = terminalSection.clientHeight;
-      document.body.style.cursor = 'row-resize';
-      e.preventDefault();
-    });
-
-    window.addEventListener('mousemove', (e) => {
-      if (!isDragging || terminalSection.classList.contains('detached')) return;
-      const deltaY = startY - e.clientY;
-      const newHeight = Math.max(100, Math.min(window.innerHeight - 150, startHeight + deltaY));
-      terminalSection.style.height = `${newHeight}px`;
-      if (this.editorManager) this.editorManager.layout();
-    });
-
-    window.addEventListener('mouseup', () => {
-      if (isDragging) {
-        isDragging = false;
-        document.body.style.cursor = '';
-        if (this.editorManager) this.editorManager.layout();
-      }
-    });
-  }
-
-  setupSidebar() {
-    const sidebar = document.querySelector('.sidebar');
-    const resizer = document.getElementById('sidebar-resizer');
-    const toggleBtn = document.getElementById('btn-sidebar-toggle');
-    const collapsedStrip = document.getElementById('sidebar-collapsed-strip');
-    if (!sidebar || !resizer) return;
-
-    // Load initial width and collapsed state from localStorage
-    try {
-      const savedWidth = parseInt(localStorage.getItem('wasm_c_ide_sidebar_width'), 10);
-      if (Number.isFinite(savedWidth) && savedWidth >= 160 && savedWidth <= 600) {
-        this.sidebarWidth = savedWidth;
-      }
-      const savedCollapsed = localStorage.getItem('wasm_c_ide_sidebar_collapsed');
-      if (savedCollapsed === 'true') {
-        this.sidebarCollapsed = true;
-      }
-    } catch {}
-
-    const applyState = () => {
-      if (this.sidebarCollapsed) {
-        sidebar.classList.add('collapsed');
-        resizer.classList.add('hidden');
-        sidebar.style.width = '36px';
-        if (toggleBtn) {
-          toggleBtn.title = 'Expand Sidebar (Ctrl+B)';
-          toggleBtn.setAttribute('data-tooltip', 'Expand (Ctrl+B)');
-          toggleBtn.setAttribute('aria-label', 'Expand Sidebar');
-        }
-      } else {
-        sidebar.classList.remove('collapsed');
-        resizer.classList.remove('hidden');
-        sidebar.style.width = `${this.sidebarWidth}px`;
-        if (toggleBtn) {
-          toggleBtn.title = 'Collapse Sidebar (Ctrl+B)';
-          toggleBtn.setAttribute('data-tooltip', 'Collapse (Ctrl+B)');
-          toggleBtn.setAttribute('aria-label', 'Collapse Sidebar');
-        }
-      }
-      if (this.editorManager) this.editorManager.layout();
-    };
-
-    applyState();
-
-    this.toggleSidebar = (force) => {
-      this.sidebarCollapsed = typeof force === 'boolean' ? force : !this.sidebarCollapsed;
-      try {
-        localStorage.setItem('wasm_c_ide_sidebar_collapsed', String(this.sidebarCollapsed));
-      } catch {}
-      applyState();
-    };
-
-    if (toggleBtn) {
-      toggleBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.toggleSidebar();
-      });
-    }
-
-    if (collapsedStrip) {
-      collapsedStrip.addEventListener('click', () => {
-        if (this.sidebarCollapsed) {
-          this.toggleSidebar(false);
-        }
-      });
-    }
-
-    sidebar.addEventListener('transitionend', (e) => {
-      if (e.propertyName === 'width' && this.editorManager) {
-        this.editorManager.layout();
-      }
-    });
-
-    window.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'b' || e.key === 'B')) {
-        e.preventDefault();
-        this.toggleSidebar();
-      }
-    });
-
-    // Sidebar resizer drag handling
-    let isDragging = false;
-    let startX = 0;
-    let startWidth = 0;
-
-    resizer.addEventListener('mousedown', (e) => {
-      if (this.sidebarCollapsed) return;
-      isDragging = true;
-      startX = e.clientX;
-      startWidth = sidebar.clientWidth;
-      sidebar.classList.add('resizing');
-      resizer.classList.add('dragging');
-      document.body.style.cursor = 'col-resize';
-      e.preventDefault();
-    });
-
-    window.addEventListener('mousemove', (e) => {
-      if (!isDragging || this.sidebarCollapsed) return;
-      const deltaX = e.clientX - startX;
-      const maxW = Math.max(200, Math.min(600, window.innerWidth - 300));
-      const newW = Math.max(160, Math.min(maxW, startWidth + deltaX));
-      sidebar.style.width = `${newW}px`;
-      this.sidebarWidth = newW;
-      if (this.editorManager) this.editorManager.layout();
-    });
-
-    window.addEventListener('mouseup', () => {
-      if (isDragging) {
-        isDragging = false;
-        sidebar.classList.remove('resizing');
-        resizer.classList.remove('dragging');
-        document.body.style.cursor = '';
-        try {
-          localStorage.setItem('wasm_c_ide_sidebar_width', String(this.sidebarWidth));
-        } catch {}
-        if (this.editorManager) this.editorManager.layout();
-      }
-    });
-
-    resizer.addEventListener('dblclick', () => {
-      if (this.sidebarCollapsed) return;
-      this.sidebarWidth = 240;
-      sidebar.style.width = '240px';
-      try {
-        localStorage.setItem('wasm_c_ide_sidebar_width', '240');
-      } catch {}
-      if (this.editorManager) this.editorManager.layout();
     });
   }
 
