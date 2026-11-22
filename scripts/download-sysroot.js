@@ -41,7 +41,8 @@ const LIBTURTLE_REPO_URL = 'https://github.com/breeze833/libturtle.git';
 const SQLITE_WASI_TAG = 'v3.54.1';
 const SQLITE_WASI_VERSION = '3.54.1';
 const SQLITE_WASI_BASE_URL = `https://github.com/breeze833/sqlite-wasi/releases/download/${SQLITE_WASI_TAG}`;
-const BUSYBOX_WASI_BASE_URL = 'https://github.com/breeze833/busybox-wasi/releases/download/latest';
+const BUSYBOX_WASI_TAG = 'v1.38.0-build1';
+const BUSYBOX_WASI_BASE_URL = `https://github.com/breeze833/busybox-wasi/releases/download/${BUSYBOX_WASI_TAG}`;
 const MAKE_WASI_BASE_URL = 'https://github.com/breeze833/make-wasi/releases/download/latest';
 
 const WASM_DIR = path.join(projectRoot, 'public', 'sysroot', 'wasm');
@@ -350,6 +351,16 @@ async function downloadBusyboxAssets() {
   const destPath = path.join(WASM_DIR, 'busybox.wasm');
   if (!force && fs.existsSync(destPath) && fs.statSync(destPath).size > 0) {
     console.log('[sysroot] busybox.wasm already present, skipping.');
+    return;
+  }
+
+  const moduleBin = path.join(projectRoot, 'node_modules', 'busybox-wasi', 'bin', 'busybox.wasm');
+  const localBin = path.resolve(projectRoot, '../busybox-wasi/bin/busybox.wasm');
+  const sourceBin = fs.existsSync(moduleBin) ? moduleBin : (fs.existsSync(localBin) ? localBin : null);
+  if (sourceBin) {
+    fs.mkdirSync(WASM_DIR, { recursive: true });
+    fs.copyFileSync(sourceBin, destPath);
+    console.log(`[sysroot] Copied busybox.wasm from ${path.relative(projectRoot, sourceBin)}.`);
     return;
   }
 

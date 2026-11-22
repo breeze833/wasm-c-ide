@@ -22,6 +22,8 @@ import {
   MemoryPipe,
   createBusyboxBridge,
   wrapWasiPipes,
+  attachBusybox,
+  createBusyboxHostOptions,
 } from 'busybox-wasi/host';
 
 export {
@@ -31,6 +33,8 @@ export {
   MemoryPipe,
   createBusyboxBridge,
   wrapWasiPipes,
+  attachBusybox,
+  createBusyboxHostOptions,
   ESUCCESS,
   EBADF,
   EEXIST,
@@ -45,30 +49,10 @@ export {
 
 export class WasiHost extends BaseWasiHost {
   constructor(options = {}) {
-    const userWasiWrapper = options.wasiWrapper;
-    const userEnvProvider = options.envProvider;
-
-    super({
+    super(createBusyboxHostOptions({
       ...options,
       systemDirs: options.systemDirs || ['/dev', '/usr', '/include', '/lib', '/bin'],
-      wasiWrapper: (wasi, host) => {
-        const base = userWasiWrapper ? userWasiWrapper(wasi, host) : wasi;
-        return wrapWasiPipes(base, host);
-      },
-      envProvider: (host) => ({
-        ...createBusyboxBridge(host),
-        ...(userEnvProvider ? userEnvProvider(host) : {}),
-      }),
-    });
-
-    this.hostBuiltinLookup = options.hostBuiltinLookup || null;
-    this.hostBuiltinRun = options.hostBuiltinRun || null;
-    this.hostBuiltinName = options.hostBuiltinName || null;
-    this.rows = options.rows || 24;
-    this.cols = options.cols || 80;
-    this.winchFlag = 0;
-    this.isInterrupted = options.isInterrupted || null;
-    this.interruptToken = options.interruptToken || 0;
+    }));
   }
 
   memU32() {

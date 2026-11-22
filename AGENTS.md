@@ -91,7 +91,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   ├── storage.js         # IndexedDB synchronization and default project seed
 │   │   ├── sysroot.js         # System utilities, toolchain command stubs, and host import definitions
 │   │   ├── vfs.js             # In-memory virtual filesystem with path normalization
-│   │   └── wasi-host.js       # Composes standalone wasi-host WASI Preview 1 host with busybox-wasi pipes/bridges
+│   │   └── wasi-host.js       # Composes standalone wasi-host with busybox-wasi createBusyboxHostOptions
 │   └── workers/
 │       ├── compiler.worker.js # Dedicated Web Worker executing Clang, LLD, ar, and make
 │       ├── runtime.worker.js  # WASI host executing user binaries with Atomics stdin & OffscreenCanvas
@@ -550,6 +550,11 @@ Agents executing this project should proceed milestone-by-milestone:
 - Upgrade `vfs-wasi` to `v0.2.0` (`https://github.com/breeze833/vfs-wasi/releases/download/v0.2.0/vfs-wasi-0.2.0.tgz`) in `package.json` and `package-lock.json`.
 - Keeps `wasm-c-ide` cleanly separated with `vfs-wasi` owning `OverlayVFS` + `SharedSysroot` (`SSYS`) storage (`src/vfs/vfs.js`, `src/vfs/shared-sysroot.js`) and `wasi-host` owning all WASI Preview 1 syscalls (`src/vfs/wasi-host.js`), without relying on the removed `vfs-wasi/wasi-fs` module.
 - Pin `wasi-host` to `v0.1.1` (`https://github.com/breeze833/wasi-host/releases/download/v0.1.1/wasi-host-0.1.1.tgz`) via both `dependencies` and `overrides` in `package.json` so `clang-wasi@19.1.0-build1` and `raylib-wasi@5.5.0-build1` resolve and deduplicate cleanly to `wasi-host@0.1.1`.
+
+### Milestone 39: `busybox-wasi` (`v1.38.0-build1`) Host Composition & Cache Upgrade
+- Upgrade `busybox-wasi` to `v1.38.0-build1` in `package.json` (`busybox-wasi-1.38.0-build1.tgz`), `scripts/download-sysroot.js` (`BUSYBOX_WASI_TAG = 'v1.38.0-build1'`), and `public/sysroot/wasm/busybox.wasm`.
+- Simplify `src/vfs/wasi-host.js` to pass `createBusyboxHostOptions(...)` from `busybox-wasi/host` directly into `super(...)`, eliminating manual `wasiWrapper`/`envProvider`/BusyBox property boilerplate while keeping `memU32()`/`memI64()`.
+- Bump shell IndexedDB `CACHE_KEY` in `src/workers/shell.worker.js` to `'busybox-1.38.0-build1'` and add `createBusyboxHostOptions` composition coverage to `test/shell.test.js`.
 
 ---
 

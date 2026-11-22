@@ -1663,4 +1663,43 @@ dirs() {
   }
 }
 
+// Verify WasiHost composes cleanly with busybox-wasi/host createBusyboxHostOptions & memU32/memI64
+{
+  const composedVfs = new VFS();
+  const composedMem = new WebAssembly.Memory({ initial: 1 });
+  let customWrappedSeen = false;
+  let customEnvSeen = false;
+
+  const composedHost = new WasiHost({
+    vfs: composedVfs,
+    cwd: '/workspace',
+    rows: 36,
+    cols: 110,
+    hostBuiltinLookup: (name) => name === 'custom_tool',
+    wasiWrapper: (wasi) => {
+      customWrappedSeen = true;
+      return wasi;
+    },
+    envProvider: () => {
+      customEnvSeen = true;
+      return { customProbe: () => 99 };
+    },
+    getMemory: () => composedMem,
+  });
+
+  const imports = composedHost.createImportObject();
+  assert.strictEqual(customWrappedSeen, true, 'WasiHost must preserve caller wasiWrapper via createBusyboxHostOptions');
+  assert.strictEqual(customEnvSeen, true, 'WasiHost must preserve caller envProvider via createBusyboxHostOptions');
+  assert.strictEqual(composedHost.rows, 36);
+  assert.strictEqual(composedHost.cols, 110);
+  assert.strictEqual(imports.env.customProbe(), 99);
+  assert.ok(composedHost.memU32() instanceof Uint32Array, 'memU32() helper must return Uint32Array');
+  assert.ok(composedHost.memI64() instanceof BigInt64Array, 'memI64() helper must return BigInt64Array');
+
+  imports.env.__host_winsize(64, 68);
+  assert.strictEqual(composedHost.memU32()[64 >> 2], 36);
+  assert.strictEqual(composedHost.memU32()[68 >> 2], 110);
+  console.log('✓ WasiHost createBusyboxHostOptions composition and mem helpers verified');
+}
+
 console.log('--- ALL SHELL TESTS PASSED ---');

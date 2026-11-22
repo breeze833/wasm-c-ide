@@ -15,7 +15,7 @@ import { mountSysroot, BIN_COMMANDS } from '../vfs/sysroot.js';
 import { WasiHost, ProcExit, ESUCCESS } from '../vfs/wasi-host.js';
 import { getWasmModule, saveWasmModule } from '../toolchain/wasm-cache.js';
 
-const CACHE_KEY = 'busybox-1.38.0-r1';
+const CACHE_KEY = 'busybox-1.38.0-build1';
 
 let cwd = '/workspace';
 let isExecuting = false;
