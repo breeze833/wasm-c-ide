@@ -12,7 +12,8 @@ import { createRaylibHost } from 'raylib-wasi';
 import { createGraphicsImports } from 'canvas-wasi/worker';
 import { createStdinReader } from 'stdin-wasi/worker';
 import { VFS } from '../vfs/vfs.js';
-import { WasiHost, ProcExit, normalizePath } from '../vfs/wasi-host.js';
+import { SYSTEM_DIRS } from '../vfs/sysroot.js';
+import { WasiHost, ProcExit, normalizePath } from 'wasi-host';
 
 export { ProcExit, normalizePath };
 
@@ -97,6 +98,7 @@ export async function runWasm(wasmBytes, argv, environ, stdinBytes = null, rayli
       { fd: 3, path: '/workspace', name: '.' },
       { fd: 4, path: '/', name: '/' },
     ],
+    systemDirs: SYSTEM_DIRS,
     stdin: readStdin,
     stdout: (text) => self.postMessage({ type: 'stdout', data: text }),
     stderr: (text) => self.postMessage({ type: 'stdout', data: text }),

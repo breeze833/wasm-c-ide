@@ -583,7 +583,7 @@ assert.strictEqual(reportedFps, 60, 'Should calculate and emit 60 FPS');
 console.log('✓ createRaylibHost onFPS tracking and calculation verified');
 
 // Test 12: createRaylibHost accepts injected wasiHost and invokes onInitWindow safely over SharedArrayBuffer memory
-const { WasiHost, ProcExit } = await import('../src/vfs/wasi-host.js');
+const { WasiHost, ProcExit } = await import('wasi-host');
 const sharedWasiVfs = new VFS();
 const injectedWasiHost = new WasiHost({
   vfs: sharedWasiVfs,

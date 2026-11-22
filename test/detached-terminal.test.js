@@ -79,15 +79,10 @@ const readmeSrc = fs.readFileSync('examples/README.md', 'utf8');
 assert.ok(readmeSrc.includes('08_ansi_terminal.c'), 'examples/README.md must reference 08_ansi_terminal.c');
 assert.ok(readmeSrc.includes('80×24'), 'examples/README.md must highlight 80x24 detached mode');
 // 6. Verify WasiHost properly decodes multi-byte UTF-8 box drawing sequences without corruption
-let hostSrc = fs.readFileSync('src/vfs/wasi-host.js', 'utf8');
-try {
-  const baseHostPath = import.meta.resolve ? new URL(import.meta.resolve('wasi-host')).pathname : null;
-  if (baseHostPath && fs.existsSync(baseHostPath)) {
-    const baseDir = baseHostPath.substring(0, baseHostPath.lastIndexOf('/'));
-    const coreHostPath = `${baseDir}/wasi-host.js`;
-    hostSrc += '\n' + fs.readFileSync(fs.existsSync(coreHostPath) ? coreHostPath : baseHostPath, 'utf8');
-  }
-} catch (_) {}
+const baseHostPath = new URL(import.meta.resolve('wasi-host')).pathname;
+const baseDir = baseHostPath.substring(0, baseHostPath.lastIndexOf('/'));
+const coreHostPath = `${baseDir}/wasi-host.js`;
+const hostSrc = fs.readFileSync(fs.existsSync(coreHostPath) ? coreHostPath : baseHostPath, 'utf8');
 assert.ok(hostSrc.includes('TextDecoder'), 'WasiHost must use TextDecoder for UTF-8 decoding');
 console.log('✓ WasiHost UTF-8 multi-byte decoding verified');
 

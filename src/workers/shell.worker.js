@@ -11,8 +11,9 @@ if (typeof self === 'undefined') {
 import { LineEditor } from 'ansi-line-editor';
 import { createStdinReader } from 'stdin-wasi/worker';
 import { VFS, normalizePath } from '../vfs/vfs.js';
-import { mountSysroot, BIN_COMMANDS } from '../vfs/sysroot.js';
-import { WasiHost, ProcExit, ESUCCESS } from '../vfs/wasi-host.js';
+import { mountSysroot, BIN_COMMANDS, SYSTEM_DIRS } from '../vfs/sysroot.js';
+import { WasiHost, ProcExit, ESUCCESS } from 'wasi-host';
+import { createBusyboxHostOptions } from 'busybox-wasi/host';
 import { getWasmModule, saveWasmModule } from '../toolchain/wasm-cache.js';
 
 const CACHE_KEY = 'busybox-1.38.0-build1';
@@ -303,11 +304,18 @@ function closePendingHeredocs(lines) {
   return result.join('\n');
 }
 
+function createShellWasiHost(options) {
+  return new WasiHost(createBusyboxHostOptions({
+    systemDirs: SYSTEM_DIRS,
+    ...options,
+  }));
+}
+
 function checkSyntaxEof(fullText) {
   if (!busyboxModule) return false;
   let err = '';
   let code = 0;
-  const host = new WasiHost({
+  const host = createShellWasiHost({
     vfs,
     cwd,
     argv: ['busybox', 'sh', '-n', '-c', fullText],
@@ -546,7 +554,7 @@ const SCRIPT_PREAMBLE = `_DIR_STACK=""; pushd() { if [ -z "$1" ]; then echo "pus
 
 async function runScriptFile(scriptPath, args, environ, isTimed, beforeMap) {
   const t0 = performance.now();
-  const wasiHost = new WasiHost({
+  const wasiHost = createShellWasiHost({
     vfs,
     cwd,
     argv: ['busybox', 'sh', '-c', `cd "$1" || exit 1; shift; ${SCRIPT_PREAMBLE} . "$@"`, 'sh', cwd, scriptPath, ...args],
@@ -824,7 +832,7 @@ async function executeCommandLine(toExecute) {
   const preamble = getShellPreamble(dirStackStr);
   const wrappedCmd = `cd "${cwd}"; ${preamble}\n${wrapped}\n__rc=$?; __host_update_pwd "$(pwd)"; exit $__rc`;
 
-  const wasiHost = new WasiHost({
+  const wasiHost = createShellWasiHost({
     vfs,
     cwd,
     argv: ['busybox', 'sh', '-c', wrappedCmd],

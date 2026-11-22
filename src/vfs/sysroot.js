@@ -1,5 +1,7 @@
 // Sysroot initialization for system commands, utilities, and host imports
 
+export const SYSTEM_DIRS = ['/dev', '/usr', '/include', '/lib', '/bin'];
+
 export const STANDARD_LIBS = [
   'crt1.o',
   'libc.a',

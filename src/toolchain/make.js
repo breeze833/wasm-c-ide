@@ -1,8 +1,9 @@
 // Real GNU Make WASI Integration and Educational Parser Compatibility Shim
 // Powered by make-wasi (GNU Make 4.4.1 compiled for WASI Preview 1)
 
-import { WasiHost, ProcExit, normalizePath } from '../vfs/wasi-host.js';
+import { WasiHost, ProcExit, normalizePath } from 'wasi-host';
 import { createMakeBridge } from 'make-wasi/host';
+import { SYSTEM_DIRS } from '../vfs/sysroot.js';
 import { executeGccCommandSync } from './driver.js';
 import { getWasmModule, saveWasmModule } from './wasm-cache.js';
 
@@ -145,6 +146,7 @@ export async function runMake({
     cwd: normCwd,
     argv: makeArgs,
     environ: { USER: 'student', HOME: '/workspace', PWD: normCwd, ...(environ || {}) },
+    systemDirs: SYSTEM_DIRS,
     stdout: writeFn,
     stderr: writeFn,
   });

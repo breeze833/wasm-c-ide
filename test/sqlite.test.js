@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VFS } from '../src/vfs/vfs.js';
-import { mountSysroot, STANDARD_LIBS, USR_BIN_COMMANDS } from '../src/vfs/sysroot.js';
+import { mountSysroot, STANDARD_LIBS, USR_BIN_COMMANDS, SYSTEM_DIRS } from '../src/vfs/sysroot.js';
 import { WasmToolchain } from '../src/toolchain/wasm-clang.js';
-import { WasiHost, ProcExit } from '../src/vfs/wasi-host.js';
+import { WasiHost, ProcExit } from 'wasi-host';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,6 +39,7 @@ async function executeWasiProgram(wasmBytes, argv, vfs) {
     cwd: '/workspace',
     argv,
     environ: { USER: 'ide', PWD: '/workspace' },
+    systemDirs: SYSTEM_DIRS,
     getMemory: () => memoryInstance,
     stdout: (str) => { output += str; },
     stderr: (str) => { output += str; },
@@ -302,13 +303,15 @@ int main(void) {
     cwd: '/workspace',
     argv: ['sqlite3', ':memory:'],
     environ: { USER: 'student', HOME: '/workspace', PWD: '/workspace' },
+    systemDirs: SYSTEM_DIRS,
     getMemory: () => mem,
     stdout: (s) => { interactiveOutput += s; },
     stderr: (s) => { interactiveOutput += s; },
     stdin: (iovs, iovs_len, nread_out, host) => {
+      const view = host.memView();
       if (!currentBytes || currentPos >= currentBytes.length) {
         if (lineIdx >= linesToFeed.length) {
-          host.memU32()[nread_out >> 2] = 0;
+          view.setUint32(nread_out, 0, true);
           return 0; // EOF
         }
         const str = linesToFeed[lineIdx++] + '\n';
@@ -318,8 +321,8 @@ int main(void) {
 
       let totalRead = 0;
       for (let i = 0; i < iovs_len; i++) {
-        const ptr = host.memU32()[(iovs >> 2) + i * 2];
-        const len = host.memU32()[(iovs >> 2) + i * 2 + 1];
+        const ptr = view.getUint32(iovs + i * 8, true);
+        const len = view.getUint32(iovs + i * 8 + 4, true);
         const available = currentBytes.length - currentPos;
         if (available > 0) {
           const toCopy = Math.min(len, available);
@@ -329,7 +332,7 @@ int main(void) {
           break;
         }
       }
-      host.memU32()[nread_out >> 2] = totalRead;
+      view.setUint32(nread_out, totalRead, true);
       return 0;
     }
   });

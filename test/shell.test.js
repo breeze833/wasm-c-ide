@@ -2,7 +2,8 @@
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
-import { WasiHost } from '../src/vfs/wasi-host.js';
+import { WasiHost } from 'wasi-host';
+import { createBusyboxHostOptions } from 'busybox-wasi/host';
 
 function parseArgs(line) {
   const args = [];
@@ -68,7 +69,14 @@ assert.strictEqual(normalizeCommand('make'), 'make');
 console.log('✓ Command path normalization passed');
 
 import { VFS } from '../src/vfs/vfs.js';
-import { mountSysroot, BIN_COMMANDS, USR_BIN_COMMANDS } from '../src/vfs/sysroot.js';
+import { mountSysroot, BIN_COMMANDS, USR_BIN_COMMANDS, SYSTEM_DIRS } from '../src/vfs/sysroot.js';
+
+function createShellHost(options) {
+  return new WasiHost(createBusyboxHostOptions({
+    systemDirs: SYSTEM_DIRS,
+    ...options,
+  }));
+}
 
 // Test 5: which resolution
 function resolveWhich(name) {
@@ -871,7 +879,7 @@ dirs() {
     const fullScript = `cd "/workspace"\n${SHELL_PREAMBLE}\n${wrapped}\n__rc=$?; __host_update_pwd "$(pwd)"; exit $__rc`;
     const t0 = performance.now();
 
-    const host = new WasiHost({
+    const host = createShellHost({
       vfs: testVfs,
       cwd: '/workspace',
       argv: ['busybox', 'sh', '-c', fullScript],
@@ -954,7 +962,7 @@ dirs() {
   let activeCwd = '/workspace';
   function simulateCdCommand(cmd) {
     const wrappedCmd = `cd "${activeCwd}"\n${cmd}\n__rc=$?; __host_update_pwd "$(pwd)"; exit $__rc`;
-    const host = new WasiHost({
+    const host = createShellHost({
       vfs: testVfs,
       cwd: activeCwd,
       argv: ['busybox', 'sh', '-c', wrappedCmd],
@@ -1005,7 +1013,7 @@ dirs() {
   assert.strictEqual(testVfs.exists('/dev/zero'), false, 'No /dev/zero file created on VFS');
 
   let devLsOutput = '';
-  const devLsHost = new WasiHost({
+  const devLsHost = createShellHost({
     vfs: testVfs,
     cwd: '/workspace',
     argv: ['busybox', 'ls', '/dev'],
@@ -1019,7 +1027,7 @@ dirs() {
 
   // 9. Published BusyBox multicall applets in /bin and which resolution
   let binLsOutput = '';
-  const binLsHost = new WasiHost({
+  const binLsHost = createShellHost({
     vfs: testVfs,
     cwd: '/workspace',
     argv: ['busybox', 'ls', '/bin'],
@@ -1035,7 +1043,7 @@ dirs() {
   assert.ok(binLsOutput.includes('wc'), `ls /bin output must include wc: ${binLsOutput}`);
 
   let whichHeadOutput = '';
-  const whichHeadHost = new WasiHost({
+  const whichHeadHost = createShellHost({
     vfs: testVfs,
     cwd: '/workspace',
     argv: ['busybox', 'which', 'head'],
@@ -1048,7 +1056,7 @@ dirs() {
   assert.strictEqual(whichHeadOutput.trim(), '/bin/head', `which head must resolve to /bin/head: ${whichHeadOutput}`);
 
   let whichTailOutput = '';
-  const whichTailHost = new WasiHost({
+  const whichTailHost = createShellHost({
     vfs: testVfs,
     cwd: '/workspace',
     argv: ['busybox', 'which', 'tail'],
@@ -1061,7 +1069,7 @@ dirs() {
   assert.strictEqual(whichTailOutput.trim(), '/bin/tail', `which tail must resolve to /bin/tail: ${whichTailOutput}`);
 
   // 10. File and directory creation and deletion via BusyBox (touch, mkdir, rmdir, rm -rf)
-  const touchHost = new WasiHost({
+  const touchHost = createShellHost({
     vfs: testVfs,
     cwd: '/workspace',
     argv: ['busybox', 'touch', 'b.txt'],
@@ -1072,7 +1080,7 @@ dirs() {
   assert.strictEqual(testVfs.exists('/workspace/b.txt'), true, 'b.txt created by touch b.txt');
   const bMtime1 = testVfs.stat('/workspace/b.txt').mtime;
 
-  const touch2Host = new WasiHost({
+  const touch2Host = createShellHost({
     vfs: testVfs,
     cwd: '/workspace',
     argv: ['busybox', 'touch', 'b.txt'],
@@ -1083,7 +1091,7 @@ dirs() {
   const bMtime2 = testVfs.stat('/workspace/b.txt').mtime;
   assert.ok(bMtime2 > bMtime1, `touch on existing file must advance mtime: ${bMtime2} > ${bMtime1}`);
 
-  const mkdirHost = new WasiHost({
+  const mkdirHost = createShellHost({
     vfs: testVfs,
     cwd: '/workspace',
     argv: ['busybox', 'mkdir', 'ttt'],
@@ -1095,7 +1103,7 @@ dirs() {
   assert.strictEqual(testVfs.isDir('/workspace/ttt'), true, 'ttt is a directory');
 
   let lsTttOutput = '';
-  const lsTttHost = new WasiHost({
+  const lsTttHost = createShellHost({
     vfs: testVfs,
     cwd: '/workspace',
     argv: ['busybox', 'ls', '/workspace'],
@@ -1106,7 +1114,7 @@ dirs() {
   try { lsTttInst.exports._start(); } catch (_) {}
   assert.ok(lsTttOutput.includes('ttt'), `ls /workspace output includes ttt: ${lsTttOutput}`);
 
-  const rmdirHost = new WasiHost({
+  const rmdirHost = createShellHost({
     vfs: testVfs,
     cwd: '/workspace',
     argv: ['busybox', 'rmdir', 'ttt'],
@@ -1121,7 +1129,7 @@ dirs() {
   testVfs.writeFile('/workspace/nested/subdir/file.txt', 'hello');
   assert.strictEqual(testVfs.exists('/workspace/nested/subdir/file.txt'), true);
 
-  const rmRfHost = new WasiHost({
+  const rmRfHost = createShellHost({
     vfs: testVfs,
     cwd: '/workspace',
     argv: ['busybox', 'rm', '-rf', 'nested'],
@@ -1457,7 +1465,7 @@ dirs() {
     // Case 7: Complex command with single-line preamble verified against BusyBox ash
     let ashOutput = '';
     const wrappedCmd = `cd "/workspace"; ${preamble} echo "testing ash"; __rc=$?; __host_update_pwd "$(pwd)"; exit $__rc`;
-    const ashHost = new WasiHost({
+    const ashHost = createShellHost({
       vfs: testVfs,
       cwd: '/workspace',
       argv: ['busybox', 'sh', '-c', wrappedCmd],
@@ -1478,7 +1486,7 @@ dirs() {
 
     let scriptGccCwd = null;
     let scriptOutput = '';
-    const scriptHost = new WasiHost({
+    const scriptHost = createShellHost({
       vfs: testVfs,
       cwd: '/workspace',
       argv: ['busybox', 'sh', '-c', 'cd "$1" || exit 1; shift; . "$@"', 'sh', '/workspace', '/workspace/script_test/build.sh'],
@@ -1506,7 +1514,7 @@ dirs() {
     let pushdOutput = '';
     const SCRIPT_PREAMBLE = `_DIR_STACK=""; pushd() { if [ -z "$1" ]; then echo "pushd: no other directory" >&2; return 1; fi; _DIR_STACK="$(pwd)|\${_DIR_STACK}"; cd "$1" || return 1; dirs; }; popd() { if [ -z "$_DIR_STACK" ]; then echo "popd: directory stack empty" >&2; return 1; fi; _TARGET="\${_DIR_STACK%%|*}"; _DIR_STACK="\${_DIR_STACK#*|}"; cd "$_TARGET" || return 1; dirs; }; dirs() { _res="$(pwd)"; _rest="$_DIR_STACK"; while [ -n "$_rest" ]; do _d="\${_rest%%|*}"; _rest="\${_rest#*|}"; if [ -n "$_d" ]; then _res="$_res $_d"; fi; done; echo "$_res"; };`;
 
-    const pushdHost = new WasiHost({
+    const pushdHost = createShellHost({
       vfs: testVfs,
       cwd: '/workspace',
       argv: ['busybox', 'sh', '-c', `cd "$1" || exit 1; shift; ${SCRIPT_PREAMBLE} . "$@"`, 'sh', '/workspace', '/workspace/script_pushd_test/run.sh'],
@@ -1533,10 +1541,11 @@ dirs() {
     const inputBytes = new TextEncoder().encode(inputLines);
 
     function simulatedStdin(iovs, iovs_len, nread_out, host) {
+      const view = host.memView();
       let totalRead = 0;
       for (let i = 0; i < iovs_len; i++) {
-        const bufPtr = host.memU32()[(iovs >> 2) + i * 2];
-        const bufLen = host.memU32()[(iovs >> 2) + i * 2 + 1];
+        const bufPtr = view.getUint32(iovs + i * 8, true);
+        const bufLen = view.getUint32(iovs + i * 8 + 4, true);
         const available = inputBytes.length - inputPos;
         if (available > 0) {
           const toCopy = Math.min(bufLen, available);
@@ -1546,11 +1555,11 @@ dirs() {
           break;
         }
       }
-      host.memU32()[nread_out >> 2] = totalRead;
+      view.setUint32(nread_out, totalRead, true);
       return 0; // ESUCCESS
     }
 
-    const catHost = new WasiHost({
+    const catHost = createShellHost({
       vfs: testVfs,
       cwd: '/workspace',
       argv: ['busybox', 'sh', '-c', 'cat > /workspace/a.txt'],
@@ -1569,7 +1578,7 @@ dirs() {
     let heredocOut = '';
     const heredocScript = 'cat <<EOF\nhello heredoc line 1\nhello heredoc line 2\nEOF';
     const wrappedHeredoc = `cd "/workspace"; _DIR_STACK="";\n${heredocScript}\n__rc=$?; exit $__rc`;
-    const heredocHost = new WasiHost({
+    const heredocHost = createShellHost({
       vfs: testVfs,
       cwd: '/workspace',
       argv: ['busybox', 'sh', '-c', wrappedHeredoc],
@@ -1583,7 +1592,7 @@ dirs() {
 
     const heredocFileScript = 'cat <<EOF > /workspace/heredoc.txt\nline 1 in file\nline 2 in file\nEOF';
     const wrappedFileHeredoc = `cd "/workspace"; _DIR_STACK="";\n${heredocFileScript}\n__rc=$?; exit $__rc`;
-    const heredocFileHost = new WasiHost({
+    const heredocFileHost = createShellHost({
       vfs: testVfs,
       cwd: '/workspace',
       argv: ['busybox', 'sh', '-c', wrappedFileHeredoc],
@@ -1643,7 +1652,7 @@ dirs() {
 
     const closedScript = closePendingHeredocsTest(unclosedLines);
     const wrappedUnclosed = `cd "/workspace"; _DIR_STACK="";\n${closedScript}\n__rc=$?; __host_update_pwd "$(pwd)"; exit $__rc`;
-    const unclosedHost = new WasiHost({
+    const unclosedHost = createShellHost({
       vfs: testVfs,
       cwd: '/workspace',
       argv: ['busybox', 'sh', '-c', wrappedUnclosed],
@@ -1670,7 +1679,7 @@ dirs() {
   let customWrappedSeen = false;
   let customEnvSeen = false;
 
-  const composedHost = new WasiHost({
+  const composedHost = createShellHost({
     vfs: composedVfs,
     cwd: '/workspace',
     rows: 36,
@@ -1693,13 +1702,12 @@ dirs() {
   assert.strictEqual(composedHost.rows, 36);
   assert.strictEqual(composedHost.cols, 110);
   assert.strictEqual(imports.env.customProbe(), 99);
-  assert.ok(composedHost.memU32() instanceof Uint32Array, 'memU32() helper must return Uint32Array');
-  assert.ok(composedHost.memI64() instanceof BigInt64Array, 'memI64() helper must return BigInt64Array');
+  assert.ok(composedHost.memView() instanceof DataView, 'memView() helper must return DataView');
 
   imports.env.__host_winsize(64, 68);
-  assert.strictEqual(composedHost.memU32()[64 >> 2], 36);
-  assert.strictEqual(composedHost.memU32()[68 >> 2], 110);
-  console.log('✓ WasiHost createBusyboxHostOptions composition and mem helpers verified');
+  assert.strictEqual(composedHost.memView().getInt32(64, true), 36);
+  assert.strictEqual(composedHost.memView().getInt32(68, true), 110);
+  console.log('✓ Direct WasiHost + createBusyboxHostOptions composition verified');
 }
 
 console.log('--- ALL SHELL TESTS PASSED ---');

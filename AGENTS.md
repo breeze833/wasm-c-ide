@@ -89,9 +89,8 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   ├── archive.js         # JSZip project export and import routines
 │   │   ├── shared-sysroot.js  # Shared read-only sysroot binary builder, reader, and FNV-1a index
 │   │   ├── storage.js         # IndexedDB synchronization and default project seed
-│   │   ├── sysroot.js         # System utilities, toolchain command stubs, and host import definitions
-│   │   ├── vfs.js             # In-memory virtual filesystem with path normalization
-│   │   └── wasi-host.js       # Composes standalone wasi-host with busybox-wasi createBusyboxHostOptions
+│   │   ├── sysroot.js         # System utilities, SYSTEM_DIRS, toolchain stubs, and host import definitions
+│   │   └── vfs.js             # In-memory virtual filesystem with path normalization
 │   └── workers/
 │       ├── compiler.worker.js # Dedicated Web Worker executing Clang, LLD, ar, and make
 │       ├── runtime.worker.js  # WASI host executing user binaries with Atomics stdin & OffscreenCanvas
@@ -555,6 +554,11 @@ Agents executing this project should proceed milestone-by-milestone:
 - Upgrade `busybox-wasi` to `v1.38.0-build1` in `package.json` (`busybox-wasi-1.38.0-build1.tgz`), `scripts/download-sysroot.js` (`BUSYBOX_WASI_TAG = 'v1.38.0-build1'`), and `public/sysroot/wasm/busybox.wasm`.
 - Simplify `src/vfs/wasi-host.js` to pass `createBusyboxHostOptions(...)` from `busybox-wasi/host` directly into `super(...)`, eliminating manual `wasiWrapper`/`envProvider`/BusyBox property boilerplate while keeping `memU32()`/`memI64()`.
 - Bump shell IndexedDB `CACHE_KEY` in `src/workers/shell.worker.js` to `'busybox-1.38.0-build1'` and add `createBusyboxHostOptions` composition coverage to `test/shell.test.js`.
+
+### Milestone 40: Direct `wasi-host` Adoption & Removal of `src/vfs/wasi-host.js`
+- Export `SYSTEM_DIRS = ['/dev', '/usr', '/include', '/lib', '/bin']` from `src/vfs/sysroot.js`.
+- Switch `src/workers/runtime.worker.js`, `src/toolchain/make.js`, `test/sqlite.test.js`, `test/raylib.test.js`, `test/shared-sysroot.test.js`, and `test/detached-terminal.test.js` directly to `'wasi-host'` with zero `busybox-wasi` coupling.
+- Switch `src/workers/shell.worker.js` (`createShellWasiHost`) and `test/shell.test.js` (`createShellHost`) to compose `'wasi-host'` + `createBusyboxHostOptions` directly, update custom stdin callbacks in `test/sqlite.test.js` and `test/shell.test.js` to use `host.memView()`, and remove `src/vfs/wasi-host.js`.
 
 ---
 

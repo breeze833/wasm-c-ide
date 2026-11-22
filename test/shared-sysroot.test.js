@@ -78,8 +78,9 @@ assert.throws(() => new SharedSysrootReader(badBuffer), /Invalid magic/, 'Throws
 console.log('✓ Invalid magic error throwing passed');
 
 // 8. WasiHost integration & EROFS permission enforcement
-import { WasiHost, EROFS } from '../src/vfs/wasi-host.js';
+import { WasiHost, EROFS } from 'wasi-host';
 import { VFS } from '../src/vfs/vfs.js';
+import { SYSTEM_DIRS } from '../src/vfs/sysroot.js';
 
 const testVfs = new VFS();
 testVfs.setSharedSysroot(buffer);
@@ -87,6 +88,7 @@ testVfs.setSharedSysroot(buffer);
 const wasiHost = new WasiHost({
   vfs: testVfs,
   cwd: '/workspace',
+  systemDirs: SYSTEM_DIRS,
   preopens: [
     { fd: 3, path: '/workspace', name: '.' },
     { fd: 4, path: '/', name: '/' },
