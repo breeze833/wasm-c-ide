@@ -194,10 +194,12 @@ export async function runWasm(wasmBytes, argv, environ, stdinBytes = null, rayli
       canvas: offscreen,
       gl,
       sharedBuffer: raylibSharedBuffer,
+      wasiHost,
       width: 800,
       height: 450,
-      print: (text) => self.postMessage({ type: 'stdout', data: text }),
-      printErr: (text) => self.postMessage({ type: 'stdout', data: text }),
+      onInitWindow: (width, height, title) => {
+        self.postMessage({ type: 'graphics_init', width, height, title: title || 'Graphics Display' });
+      },
       onFrame: (bitmap) => {
         if (bitmap) {
           self.postMessage({ type: 'frame', bitmap }, [bitmap]);
@@ -231,27 +233,7 @@ export async function runWasm(wasmBytes, argv, environ, stdinBytes = null, rayli
         return () => 0;
       }
     });
-    importObject.raylib = new Proxy({
-      ...raylibImports.raylib,
-      raylib_host_init_window: (w, h, titlePtr) => {
-        if (offscreen) {
-          offscreen.width = w;
-          offscreen.height = h;
-        }
-        const res = raylibImports.raylib.raylib_host_init_window(w, h, titlePtr);
-        let titleStr = 'Graphics Display';
-        try {
-          if (titlePtr && memoryInstance) {
-            const u8 = new Uint8Array(memoryInstance.buffer, titlePtr);
-            let end = 0;
-            while (u8[end] !== 0) end++;
-            titleStr = new TextDecoder('utf-8').decode(new Uint8Array(memoryInstance.buffer, titlePtr, end));
-          }
-        } catch (_) {}
-        self.postMessage({ type: 'graphics_init', width: w, height: h, title: titleStr });
-        return res;
-      },
-    }, {
+    importObject.raylib = new Proxy(raylibImports.raylib, {
       get(t, p) {
         if (p in t) return t[p];
         return () => 0;

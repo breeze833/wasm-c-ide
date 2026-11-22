@@ -1,6 +1,6 @@
 /*! coi-serviceworker v0.1.7 - Guido Zuidhof, MIT / Unified with Offline PWA CacheStorage */
 let coepCredentialless = false;
-const CACHE_NAME = 'wasm-c-ide-cache-v1';
+const CACHE_NAME = 'wasm-c-ide-cache-v2';
 
 if (typeof window === 'undefined') {
   self.addEventListener('install', (event) => {

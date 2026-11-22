@@ -582,4 +582,57 @@ if (origPerformanceNow && globalThis.performance) {
 assert.strictEqual(reportedFps, 60, 'Should calculate and emit 60 FPS');
 console.log('✓ createRaylibHost onFPS tracking and calculation verified');
 
+// Test 12: createRaylibHost accepts injected wasiHost and invokes onInitWindow safely over SharedArrayBuffer memory
+const { WasiHost, ProcExit } = await import('../src/vfs/wasi-host.js');
+const sharedWasiVfs = new VFS();
+const injectedWasiHost = new WasiHost({
+  vfs: sharedWasiVfs,
+  cwd: '/workspace',
+  argv: ['./game.wasm'],
+});
+const sentinelImports = injectedWasiHost.getImports();
+let getImportsCalls = 0;
+injectedWasiHost.getImports = () => {
+  getImportsCalls++;
+  return sentinelImports;
+};
+
+let initWindowEvent = null;
+const sabWasmMemory = new WebAssembly.Memory({ initial: 1, maximum: 1, shared: true });
+const titleBytes = new TextEncoder().encode('IDE Raylib Window\0');
+new Uint8Array(sabWasmMemory.buffer, 2048, titleBytes.length).set(titleBytes);
+
+const unifiedHost = createRaylibHost({
+  wasiHost: injectedWasiHost,
+  width: 640,
+  height: 360,
+  onInitWindow: (width, height, title) => {
+    initWindowEvent = { width, height, title };
+  },
+});
+
+assert.strictEqual(unifiedHost.wasiHost, injectedWasiHost, 'createRaylibHost must retain injected wasiHost instance');
+assert.strictEqual(getImportsCalls, 1, 'createRaylibHost must obtain WASI imports from injected wasiHost');
+unifiedHost.setInstance({ exports: { memory: sabWasmMemory } });
+const unifiedImports = unifiedHost.getImports();
+assert.strictEqual(
+  unifiedImports.wasi_snapshot_preview1.proc_exit,
+  sentinelImports.proc_exit,
+  'wasi_snapshot_preview1 must delegate directly to injected WasiHost'
+);
+assert.strictEqual(unifiedImports.wasi_unstable, unifiedImports.wasi_snapshot_preview1, 'wasi_unstable must alias wasi_snapshot_preview1');
+assert.throws(
+  () => unifiedImports.wasi_snapshot_preview1.proc_exit(42),
+  (err) => err instanceof ProcExit && err.code === 42,
+  'proc_exit via raylib host must unwind cleanly with injected WasiHost ProcExit'
+);
+
+unifiedImports.raylib.raylib_host_init_window(640, 360, 2048);
+assert.deepStrictEqual(
+  initWindowEvent,
+  { width: 640, height: 360, title: 'IDE Raylib Window' },
+  'onInitWindow must receive dimensions and UTF-8 title decoded from SharedArrayBuffer memory'
+);
+console.log('✓ createRaylibHost wasiHost injection and SharedArrayBuffer onInitWindow verified');
+
 console.log('--- ALL RAYLIB TESTS PASSED ---');

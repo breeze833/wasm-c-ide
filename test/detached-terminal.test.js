@@ -81,17 +81,19 @@ assert.ok(readmeSrc.includes('80×24'), 'examples/README.md must highlight 80x24
 // 6. Verify WasiHost properly decodes multi-byte UTF-8 box drawing sequences without corruption
 let hostSrc = fs.readFileSync('src/vfs/wasi-host.js', 'utf8');
 try {
-  const baseHostPath = import.meta.resolve ? new URL(import.meta.resolve('clang-wasi/host')).pathname : null;
+  const baseHostPath = import.meta.resolve ? new URL(import.meta.resolve('wasi-host')).pathname : null;
   if (baseHostPath && fs.existsSync(baseHostPath)) {
-    hostSrc += '\n' + fs.readFileSync(baseHostPath, 'utf8');
+    const baseDir = baseHostPath.substring(0, baseHostPath.lastIndexOf('/'));
+    const coreHostPath = `${baseDir}/wasi-host.js`;
+    hostSrc += '\n' + fs.readFileSync(fs.existsSync(coreHostPath) ? coreHostPath : baseHostPath, 'utf8');
   }
 } catch (_) {}
 assert.ok(hostSrc.includes('TextDecoder'), 'WasiHost must use TextDecoder for UTF-8 decoding');
 console.log('✓ WasiHost UTF-8 multi-byte decoding verified');
 
 // 7. Verify WasiHost poll_oneoff implements clock timers for nanosleep
-assert.ok(hostSrc.includes('poll_oneoff: (in_ptr, out_ptr, nsubscriptions, nevents_out)'), 'WasiHost must implement poll_oneoff with arguments');
-assert.ok(hostSrc.includes('__WASI_EVENTTYPE_CLOCK') || hostSrc.includes('maxSleepMs'), 'poll_oneoff must handle clock timeouts');
+assert.ok(hostSrc.includes('poll_oneoff: (inPtr, outPtr, nsubscriptions, neventsOut)'), 'WasiHost must implement poll_oneoff with arguments');
+assert.ok(hostSrc.includes('EVENTTYPE_CLOCK') || hostSrc.includes('maxSleepMs'), 'poll_oneoff must handle clock timeouts');
 console.log('✓ WasiHost poll_oneoff clock and delay support verified');
 
 console.log('--- ALL DETACHED TERMINAL & ANSI TESTS PASSED ---');

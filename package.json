@@ -22,17 +22,21 @@
     "ansi-line-editor": "https://github.com/breeze833/ansi-line-editor/releases/download/latest/ansi-line-editor-0.1.0.tgz",
     "busybox-wasi": "https://github.com/breeze833/busybox-wasi/releases/download/latest/busybox-wasi-1.38.0.tgz",
     "canvas-wasi": "https://github.com/breeze833/canvas-wasi/releases/download/v0.1.4/canvas-wasi-0.1.4.tgz",
-    "clang-wasi": "https://github.com/breeze833/clang-wasi/releases/download/v19.1.0/clang-wasi-19.1.0.tgz",
+    "clang-wasi": "https://github.com/breeze833/clang-wasi/releases/download/v19.1.0-build1/clang-wasi-19.1.0-build1.tgz",
     "jszip": "^3.10.1",
     "make-wasi": "https://github.com/breeze833/make-wasi/releases/download/latest/make-wasi-4.4.1.tgz",
     "monaco-editor": "^0.52.2",
-    "raylib-wasi": "https://github.com/breeze833/raylib-wasi/releases/download/latest/raylib-wasi-5.5.0.tgz",
+    "raylib-wasi": "https://github.com/breeze833/raylib-wasi/releases/download/v5.5.0-build1/raylib-wasi-5.5.0-build1.tgz",
     "sqlite-wasi": "https://github.com/breeze833/sqlite-wasi/releases/download/v3.54.1/sqlite-wasi-3.54.1.tgz",
     "stdin-wasi": "https://github.com/breeze833/stdin-wasi/releases/download/v0.1.0/stdin-wasi-0.1.0.tgz",
-    "vfs-wasi": "https://github.com/breeze833/vfs-wasi/releases/download/latest/vfs-wasi-0.1.0.tgz"
+    "vfs-wasi": "https://github.com/breeze833/vfs-wasi/releases/download/v0.2.0/vfs-wasi-0.2.0.tgz",
+    "wasi-host": "https://github.com/breeze833/wasi-host/releases/download/v0.1.1/wasi-host-0.1.1.tgz"
   },
   "devDependencies": {
     "vite": "^6.2.0"
+  },
+  "overrides": {
+    "wasi-host": "https://github.com/breeze833/wasi-host/releases/download/v0.1.1/wasi-host-0.1.1.tgz"
   },
   "allowScripts": {
     "esbuild@0.25.12": true

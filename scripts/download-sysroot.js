@@ -33,9 +33,10 @@ globalThis.fetch = async (url, ...args) => {
   };
 };
 
-const CLANG_WASI_TAG = 'v19.1.0';
+const CLANG_WASI_TAG = 'v19.1.0-build1';
 const CLANG_WASI_BASE_URL = `https://github.com/breeze833/clang-wasi/releases/download/${CLANG_WASI_TAG}`;
-const RAYLIB_WASI_BASE_URL = 'https://github.com/breeze833/raylib-wasi/releases/download/latest';
+const RAYLIB_WASI_TAG = 'v5.5.0-build1';
+const RAYLIB_WASI_BASE_URL = `https://github.com/breeze833/raylib-wasi/releases/download/${RAYLIB_WASI_TAG}`;
 const LIBTURTLE_REPO_URL = 'https://github.com/breeze833/libturtle.git';
 const SQLITE_WASI_TAG = 'v3.54.1';
 const SQLITE_WASI_VERSION = '3.54.1';

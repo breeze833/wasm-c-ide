@@ -117,7 +117,7 @@ This IDE is specifically engineered for **students and systems programming educa
   - Guarantees that the student's shell working directory is preserved even if compilation or execution exits with an error code.
 
 ### 3. Clang & LLD WebAssembly Toolchain
-- **Modern LLVM 19.1.0 Toolchain & Decoupled Driver**: Powered by real WebAssembly builds of LLVM Clang 19.1.0 and `wasm-ld` 19.1.0 targeting **WASI Preview 1 (`wasm32-wasip1`)**, directly integrated from [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi) and [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi). The compiler driver, CLI argument parser, and multicall toolchain coordinators are consumed directly from `clang-wasi/driver` and `clang-wasi/toolchain`, eliminating duplicate driver logic. Toolchain and sysroot assets are downloaded on demand during the build/install lifecycle via `scripts/download-sysroot.js`, keeping the repository clean and free of large binary blobs.
+- **Modern LLVM 19.1.0 Toolchain & Decoupled Driver**: Powered by real WebAssembly builds of LLVM Clang 19.1.0 and `wasm-ld` 19.1.0 targeting **WASI Preview 1 (`wasm32-wasip1`)**, directly integrated from [`breeze833/clang-wasi`](https://github.com/breeze833/clang-wasi) (`v19.1.0-build1`), [`breeze833/wasi-host`](https://github.com/breeze833/wasi-host) (`v0.1.1`), and [`breeze833/raylib-wasi`](https://github.com/breeze833/raylib-wasi) (`v5.5.0-build1`). The compiler driver, CLI argument parser, and multicall toolchain coordinators are consumed directly from `clang-wasi/driver` and `clang-wasi/toolchain`, eliminating duplicate driver logic. Toolchain and sysroot assets are downloaded on demand during the build/install lifecycle via `scripts/download-sysroot.js`, keeping the repository clean and free of large binary blobs.
 - **Native WebAssembly Section 12 Support**: `wasm-ld` natively parses and links relocatable object files containing Section 12 (`DataCount`) emitted by modern Clang for bulk-memory operations.
 - **Sysroot & Standard Libraries**:
   - Bundles standard WASI Preview 1 headers under `/usr/include/`, `/include/wasm32-wasip1/`, `/lib/clang/19/include/`, and standard C++ headers under `/usr/include/` (`<iostream>`, `<vector>`, `<string>`, `<fstream>`).
@@ -139,7 +139,7 @@ This IDE is specifically engineered for **students and systems programming educa
 - **WebAssembly Shared Objects (`.so`)**:
   - Position-Independent Code: `-fPIC` and `-fpic` flags compile code with position-independent relocation records.
   - Shared library creation: `gcc -shared -fPIC src/math.c -o build/libmath.so` (and `g++ -shared -fPIC ...` for C++) generates standard WebAssembly dynamic libraries with `dylink.0` custom sections.
-- **Zero-MemFS Direct VFS Architecture**: `memfs.wasm` is completely eliminated. The unified Platform Host (`src/vfs/wasi-host.js`) directly bridges `llvm-box.wasm` (`clang`, `wasm-ld`, `llvm-ar`) and runtime binaries (`a.out`, `busybox.wasm`) to the application `VFS`, fusing standard WASI Preview 1 POSIX syscalls, in-memory `MemoryPipe` descriptors, and component graphics/audio bridges without double-buffering, memory limits, or intermediate file copying.
+- **Zero-MemFS Direct VFS Architecture**: `memfs.wasm` is completely eliminated. The Platform Host (`src/vfs/wasi-host.js`) composes the standalone [`breeze833/wasi-host`](https://github.com/breeze833/wasi-host) runtime with `busybox-wasi/host` (`MemoryPipe`, `wrapWasiPipes`, `createBusyboxBridge`), directly bridging `llvm-box.wasm` (`clang`, `wasm-ld`, `llvm-ar`) and runtime binaries (`a.out`, `busybox.wasm`) to the application `VFS` without double-buffering, memory limits, or intermediate file copying.
 - **Dedicated Compiler Web Worker (`compiler.worker.js`)**:
   - Clang, LLD linker, archiver (`ar`), and GNU Make (`make`) execute off the main browser thread in a dedicated, persistent Web Worker managed by `CompilerClient` (`src/toolchain/compiler-client.js`).
   - **Zero UI Freezing**: Large header expansions (such as `raygui.h` in `examples/10_raylib_gui_audio.c`) run entirely in the background without blocking Monaco Editor typing, xterm.js rendering, or floating window interactions.
@@ -159,7 +159,7 @@ This IDE is specifically engineered for **students and systems programming educa
 - **Passive System Upgrade**:
   - Accessible via the **System Upgrade** button in the Project Settings modal header.
   - Presents a two-stage confirmation dialog explaining that compiler caches and Service Worker caches will be refreshed while keeping user `/workspace` files completely untouched.
-  - Purges the `wasm_cache` IndexedDB, clears Service Worker `CacheStorage`, unregisters active Service Workers, and triggers a cache-busting reload (`?_upgrade=<timestamp>`) to fetch fresh assets without stale browser HTTP disk cache locks.
+  - Purges the `wasm-c-ide-wasm-cache` IndexedDB, clears Service Worker `CacheStorage`, unregisters active Service Workers, and triggers a cache-busting reload (`?_upgrade=<timestamp>`) to fetch fresh assets without stale browser HTTP disk cache locks.
 
 ### 5. Execution Sandbox, Synchronous Stdin & In-Code File I/O
 - **Dedicated Runtime Web Worker**: User executables run in an isolated WebAssembly execution sandbox with complete WASI Preview 1 filesystem emulation.
@@ -193,7 +193,7 @@ This IDE is specifically engineered for **students and systems programming educa
   - Standard C headers (`<raylib.h>`, `<raymath.h>`, `<rlgl.h>`, `<raygui.h>`) and static library archive (`libraylib.a`) are mounted permanently into the sysroot by default.
   - **Web Audio Subsystem**: Pure WASI audio decoders and playback (`InitAudioDevice`, `Sound`, `Wave`, `Music`, `AudioStream`) without POSIX threads, bridged to browser `AudioContext` via `createAudioReceiver` and runtime worker proxying.
   - **Immediate-Mode GUI**: Built-in `raygui.h` support for desktop-style UI widgets (buttons, sliders, toggles, text boxes) compiled natively in C.
-  - Zero ad-hoc host dispatchers: WebGL ES 2.0 state machine, handle tables, audio receiver, and Wasm runtime imports (`gl`, `raylib`) are imported directly from `raylib-wasi`.
+  - Zero ad-hoc host dispatchers: WebGL ES 2.0 state machine, handle tables, audio receiver, and Wasm runtime imports (`gl`, `raylib`, `audio`) are imported directly from `raylib-wasi` (`v5.5.0-build1`), while `runtime.worker.js` injects `wasm-c-ide`'s shared `wasiHost` and `onInitWindow` callback into `createRaylibHost` to eliminate duplicate WASI stubs and manual title decoding.
   - Shares the 512-byte `SharedArrayBuffer` `InputCoordinator` and floating/dockable `GraphicsWindowUI` with `canvas-wasi`.
   - Compiles and links out-of-the-box using standard `-lraylib` linker flag.
 - **Synchronous Zero-Copy Frame Delivery**:
@@ -270,8 +270,8 @@ The repository includes a ready-to-run suite of single-file C programs in the `e
 - **`examples/README.md`**: Step-by-step user compilation and running guide for each example.
 
 ### 10. Virtual File System & Storage
-- **Two-Tier Overlay VFS & SharedSysroot (`vfs-wasi`)**:
-  - **Modular Architecture**: Powered by [`breeze833/vfs-wasi`](https://github.com/breeze833/vfs-wasi), providing a zero-dependency Two-Tier Virtual File System and WASI Preview 1 filesystem provider.
+- **Two-Tier Overlay VFS & SharedSysroot (`vfs-wasi` `v0.2.0`)**:
+  - **Modular Architecture**: Powered by [`breeze833/vfs-wasi`](https://github.com/breeze833/vfs-wasi) (`v0.2.0`), providing the zero-dependency Two-Tier Virtual File System (`OverlayVFS`), contiguous `SSYS` sysroot (`SharedSysrootReader`), and worker delta synchronization, composed cleanly with [`breeze833/wasi-host`](https://github.com/breeze833/wasi-host) for WASI Preview 1 syscalls.
   - **Shared Read-Only Sysroot (`SharedSysroot`)**: Packs the complete Musl C and LLVM libc++ sysroot headers and precompiled static runtime libraries (~108 MB) into a single contiguous `SharedArrayBuffer` shared across the tri-worker architecture (`compiler.worker.js`, `shell.worker.js`, `runtime.worker.js`).
   - **Zero Duplicate Heap Overhead**: Eliminates redundant ~108 MB heap duplication per worker thread; all workers read directly from shared memory.
   - **Hardware & Host EROFS Protection**: System directories (`/usr`, `/include`, `/lib`, `/bin`) are mounted as read-only overlays. Any attempt to write, truncate, delete, or create files within system paths fails with POSIX error `EROFS` (*Read-only file system*).
@@ -286,7 +286,7 @@ The repository includes a ready-to-run suite of single-file C programs in the `e
 - **Installable Desktop/Mobile App**: Certified PWA with Web App Manifest (`manifest.webmanifest`), dark theme colors, and icons.
 - **In-App Install Prompt**: Automatically reveals an **Install** button in the header toolbar when the browser detects installability.
 - **100% Offline Capability**:
-  - Unified Service Worker caches App Shell, fonts, editor modules, WebAssembly compiler binaries (`llvm-box.wasm`, `sysroot.tar.gz`), Raylib assets, and Turtle static archives.
+  - Unified Service Worker (`wasm-c-ide-cache-v2`) caches App Shell, fonts, editor modules, sysroot archives (`sysroot.tar.gz`), Raylib assets, and Turtle static archives, while `llvm-box.wasm` is cached directly in IndexedDB under key `llvm-box-19.1.0-build1`.
   - Seamless offline execution with retained `COOP: same-origin` and `COEP: require-corp` isolation headers so `SharedArrayBuffer` remains operational without an internet connection.
   - Automatic connection status notifications when transitioning between online and offline modes.
 

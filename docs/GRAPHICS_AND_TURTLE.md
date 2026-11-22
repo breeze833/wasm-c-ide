@@ -23,7 +23,8 @@ Graphics in `wasm-c-ide` are decoupled across execution sandboxes to maintain 60
 |  - User WebAssembly Binary (a.out)                                      |
 |  - OffscreenCanvas & WebGL Context                                      |
 |  - Frame Pacing: Atomics.wait() clamp to 60 FPS                         |
-|  - Host Import Bridges (env.gl*, env.raylib*, env.graphics*)            |
+|  - Unified WasiHost (wasi-host) injected into createRaylibHost          |
+|  - Host Import Bridges (gl.*, raylib.*, audio.*, graphics.*, env.*)      |
 +-------------------------------------------------------------------------+
 ```
 
@@ -43,8 +44,9 @@ Graphics in `wasm-c-ide` are decoupled across execution sandboxes to maintain 60
 
 ## 3. WebGL 3D & Immediate-Mode GUI Engine (`raylib-wasi`)
 
-`raylib-wasi` compiles upstream Raylib 5.5 to WASI Preview 1 without modifying upstream C sources (`vendor/raylib`):
+`raylib-wasi` (`v5.5.0-build1`) compiles upstream Raylib 5.5 to WASI Preview 1 without modifying upstream C sources (`vendor/raylib`) and delegates WASI Preview 1 hosting to `wasi-host`:
 - **OpenGL ES 2.0 / WebGL Bridge**: State machine and handle table in `src/host/gl-context.js` mapping C pointers and integer handles to native `WebGLBuffer`, `WebGLTexture`, `WebGLProgram`, and `WebGLShader` instances.
+- **Unified WASI Delegation & Window Callback**: `src/workers/runtime.worker.js` injects `wasm-c-ide`'s `wasiHost` and `onInitWindow` callback directly into `createRaylibHost`, sharing the single `wasi-host` instance (`OverlayVFS`, `SharedSysroot`, `stdin-wasi`) and performing `SharedArrayBuffer`-safe UTF-8 window title decoding.
 - **Audio Subsystem**: Web Audio bridge in `src/host/audio-context.js` supporting procedural waveform synthesis, WAV/MP3 decoding, and real-time streaming sound buffers.
 - **Immediate-Mode GUI (`raygui.h`)**: Full support for controls (buttons, sliders, toggles, text boxes, message boxes) rendered at 60 FPS.
 

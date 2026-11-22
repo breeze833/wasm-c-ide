@@ -12,20 +12,20 @@ This specification defines the architecture and design invariants of `wasm-c-ide
   - Eliminates `memfs.wasm` download, instantiation, and runtime overhead.
   - Eliminates all pre-compilation file synchronization and post-compilation artifact extraction bridges.
   - Eliminates historical C-level inode exhaustion, inode reuse, and buffer offset corruption bugs by relying on clean JavaScript `Map` and `Uint8Array` memory management.
-  - **Shared Read-Only Sysroot (`SharedSysroot`) & Two-Tier Overlay VFS (`vfs-wasi`)**: Standard C/C++ sysroot headers and static runtime libraries (`sysroot.tar.gz`) are compiled into a contiguous memory-mapped `SharedArrayBuffer` (~108 MB) shared across all workers (`compiler`, `shell`, `runtime`), powered by the modular [`vfs-wasi`](https://github.com/breeze833/vfs-wasi) library. System paths (`/usr`, `/include`, `/lib`, `/bin`) operate as zero-copy, read-only overlays, while `/workspace` remains a dynamic, mutable virtual filesystem with differential synchronization. *(See [`docs/SHARED_SYSROOT_VFS.md`](./docs/SHARED_SYSROOT_VFS.md))*.
+  - **Shared Read-Only Sysroot (`SharedSysroot`) & Two-Tier Overlay VFS (`vfs-wasi` `v0.2.0`)**: Standard C/C++ sysroot headers and static runtime libraries (`sysroot.tar.gz`) are compiled into a contiguous memory-mapped `SharedArrayBuffer` (~108 MB) shared across all workers (`compiler`, `shell`, `runtime`), powered by the zero-dependency [`vfs-wasi`](https://github.com/breeze833/vfs-wasi) storage/overlay package (`OverlayVFS`, `SharedSysroot`, `DeltaTracker`), while WASI Preview 1 syscalls are hosted by [`wasi-host`](https://github.com/breeze833/wasi-host). System paths (`/usr`, `/include`, `/lib`, `/bin`) operate as zero-copy, read-only overlays, while `/workspace` remains a dynamic, mutable virtual filesystem with differential synchronization. *(See [`docs/SHARED_SYSROOT_VFS.md`](./docs/SHARED_SYSROOT_VFS.md))*.
 - **Comprehensive Standard C & C++ Library Headers**:
   - Full availability of standard C headers (`<stdio.h>`, `<stdlib.h>`, `<string.h>`, `<math.h>`, `<ctype.h>`, `<assert.h>`, `<stdint.h>`, `<stddef.h>`, `<stdbool.h>`, `<time.h>`, `<limits.h>`, `<float.h>`, `<inttypes.h>`, `<fcntl.h>`, `<sys/stat.h>`, `<dirent.h>`, etc.) and standard C++ headers (`<cstdio>`, `<cstdlib>`, `<cstring>`, `<cmath>`, `<cctype>`, `<cstddef>`, `<cstdint>`, `<cassert>`, `<ctime>`, `<climits>`, `<cfloat>`, `<cerrno>`, `<iostream>`, `<vector>`, `<string>`, `<fstream>`, `<algorithm>`, `<memory>`, `<map>`, `<set>`, etc.).
   - Zero missing header errors during teaching or shell exploration, with complete Musl C and LLVM libc++ sysroot structures directly accessible in both the compiler and the terminal shell.
-- **Unified WASI Preview 1 Host (`WasiHost`)**:
-  - Single, modular JavaScript engine implementing the complete WASI Preview 1 specification (`wasi_snapshot_preview1`).
-  - Supports capability-based preopened directories (`.` / `/workspace`, `/`).
+- **Unified WASI Preview 1 Host (`wasi-host` `v0.1.1`)**:
+  - Powered by the language-neutral [`wasi-host`](https://github.com/breeze833/wasi-host) (`v0.1.1`, pinned in `package.json` `dependencies` and `overrides`) package implementing the complete WASI Preview 1 specification (`wasi_snapshot_preview1` / `wasi_unstable`) and virtual character devices (`/dev/null`, `/dev/zero`), composed with `busybox-wasi/host` in `src/vfs/wasi-host.js`.
+  - Supports capability-based preopened directories (`.` / `/workspace`, `/`), native `EROFS` protection, and `mtime` preservation.
   - Scatter/gather I/O (`fd_read`, `fd_write`) with direct zero-copy `Uint8Array.set` transfers into and out of WebAssembly linear memory.
   - In-code standard file I/O (`fopen`, `fread`, `fwrite`, `fseek`, `ftell`, `fclose`, `<fstream>`) and interactive standard I/O (`scanf`, `cin`, `getchar`) seamlessly coordinated.
 - **Pedagogical Discipline**: Enforce strict standard C mode (`-std=c11 -pedantic-errors`), disallow automatic saving to cultivate deliberate save habits, and route all GUI actions into visible shell terminal commands.
 - **Strict Standard Link-Time Symbol Resolution**: The linker enforces standard resolution of undefined symbols, immediately reporting missing libraries or unlinked object files as standard `wasm-ld: error: undefined symbol: <name>` diagnostics rather than deferring failures to opaque runtime crashes. Authorized host imports (`canvas-wasi`) are strictly whitelisted via `--allow-undefined-file=/usr/lib/wasm-host-imports.txt`.
 - **Decoupled Dual-Module Graphics Subsystems**:
   - **`canvas-wasi`**: Pure C direct software framebuffer (`<graphics.h>`), HTML5 Canvas 2D vector primitives (`<graphics_canvas.h>`), floating/dockable graphics console UI (`GraphicsWindowUI`), and shared 512-byte `SharedArrayBuffer` input coordination (`InputCoordinator`), powered by `canvas-window`.
-  - **`raylib-wasi`**: Standalone Raylib 5.5 port, WebGL ES 2.0 host bridge, and pure WASI Web Audio subsystem, providing Wasm imports (`gl`, `raylib`) and zero-Emscripten `PLATFORM_CUSTOM` execution. Includes `raylib.h`, `raymath.h`, `rlgl.h`, and `raygui.h`. *(See [`docs/GRAPHICS_AND_TURTLE.md`](./docs/GRAPHICS_AND_TURTLE.md))*.
+  - **`raylib-wasi`**: Standalone Raylib 5.5 port (`v5.5.0-build1`), WebGL ES 2.0 host bridge, and pure WASI Web Audio subsystem, providing Wasm imports (`gl`, `raylib`, `audio`) and zero-Emscripten `PLATFORM_CUSTOM` execution while delegating WASI Preview 1 hosting to the shared `wasi-host` instance injected from `runtime.worker.js`. Includes `raylib.h`, `raymath.h`, `rlgl.h`, and `raygui.h`. *(See [`docs/GRAPHICS_AND_TURTLE.md`](./docs/GRAPHICS_AND_TURTLE.md))*.
 - **Turtle Graphics Subsystem (`libturtle`)**: Modular educational turtle graphics with dual backend support (Canvas-WASI and Raylib backends permanently bundled into sysroot out-of-the-box).
 - **SQLite 3 Embedded Database & CLI Subsystem (`sqlite-wasi`)**: Precompiled SQLite 3.54.1 WASI Preview 1 static library (`libsqlite3.a`), C headers (`sqlite3.h`, `sqlite3ext.h`), and standalone interactive CLI (`sqlite3.wasm` mounted at `/usr/bin/sqlite3`) bundled permanently into sysroot, supporting relational databases with real-time VFS persistence. *(See [`docs/SHELL_AND_UTILITIES.md`](./docs/SHELL_AND_UTILITIES.md))*.
 - **Unified Terminal Line Editor & Interactive Stdin Subsystem (`LineEditor` & `stdin-wasi`)**:
@@ -109,24 +109,24 @@ Detailed technical specifications, binary layouts, memory protocols, and case st
 | **Known Issues & Constraints** | Documented version limits, browser quirks, and environment restrictions | [`docs/KNOWN_ISSUES.md`](./docs/KNOWN_ISSUES.md) |
 
 ### 3.1 Unified Platform Host (`WasiHost`) Summary
-- Direct ownership of `src/vfs/wasi-host.js` as the first-class platform integrator composing WASI Preview 1, BusyBox host hooks, and graphics bridges.
-- Routes path queries across the Two-Tier Overlay VFS (`/workspace` mutable top tier + `SharedSysroot` immutable bottom tier).
-- Intercepts mutating syscalls (`path_open`, `path_unlink_file`, `path_remove_directory`, `path_create_directory`, `path_rename`) targeting system paths and enforces POSIX error `EROFS` (65).
+- `src/vfs/wasi-host.js` composes the standalone `wasi-host` package (`WasiHost`) with `busybox-wasi` host hooks (`wrapWasiPipes`, `createBusyboxBridge`) and `systemDirs: ['/dev', '/usr', '/include', '/lib', '/bin']`.
+- `wasi-host` natively routes path queries across the Two-Tier Overlay VFS (`/workspace` mutable top tier + `SharedSysroot` immutable bottom tier), preserves VFS `mtime` metadata, and enforces POSIX error `EROFS` (65) on mutating syscalls targeting system paths.
 - Preopens `fd 3` (`/workspace`, `.`) and `fd 4` (`/`, `/`) across toolchain, shell, and runtime sandboxes.
+- `src/workers/runtime.worker.js` injects this unified `wasiHost` directly into `createRaylibHost({ wasiHost, onInitWindow, ... })` (`raylib-wasi` `v5.5.0-build1`), sharing one WASI runtime across Raylib and user binaries without a redundant WASI stub.
 - Streams stdout/stderr directly to `xterm.js` and coordinates blocking stdin reads via `SharedArrayBuffer` and `Atomics.wait()`.
 
 ### 3.2 Toolchain & Persistent Binary Caching Summary
 - Single unified multicall driver `llvm-box.wasm` (LLVM 19.1.0) containing `clang`, `clang++`, `wasm-ld`, `ar`, `nm`, `size`, `objdump`, `cxxfilt`, and `strings`.
-- **Decoupled Toolchain & Driver via `clang-wasi`**:
-  - Consumes high-level compiler driver functions (`parseCompilerArgs`, `executeGccCommand`, `executeLdCommand`, `executeToolCommand`) directly from `clang-wasi/driver`.
-  - In-IDE `WasmToolchain` extends `WasmToolchain` from `clang-wasi/toolchain`, inheriting zero-copy VFS execution, multicall routing, and stage dispatching while augmenting it with browser-specific IndexedDB persistent module caching (`llvm-box-19.1.0`) and `SharedSysroot` initial mounting.
+- **Decoupled Toolchain & Driver via `clang-wasi` (`v19.1.0-build1`) & `wasi-host`**:
+  - Consumes high-level compiler driver functions (`parseCompilerArgs`, `executeGccCommand`, `executeLdCommand`, `executeToolCommand`) directly from `clang-wasi/driver`, while `clang-wasi` and `src/vfs/wasi-host.js` share the standalone `wasi-host` runtime package.
+  - In-IDE `WasmToolchain` extends `WasmToolchain` from `clang-wasi/toolchain`, inheriting zero-copy VFS execution, multicall routing, and stage dispatching while augmenting it with browser-specific IndexedDB persistent module caching (`llvm-box-19.1.0-build1`, invalidating legacy `llvm-box-19.1.0`) and `SharedSysroot` initial mounting.
   - Pedagogical Pure C mode (`mode: 'c'`) explicitly passes `-std=c11 -pedantic-errors -Wall -Wextra` via compiler arguments when invoking `executeGccCommand`, preserving educational rigor over the generic `clang-wasi` driver.
 - Persists raw 56 MB binary in IndexedDB (`wasm-cache.js`), bypassing `WebAssembly.Module` structured clone restrictions (`DataCloneError`) and loading in **<50ms** on repeat sessions.
 - Streaming concurrent compilation via `WebAssembly.compileStreaming` with automatic buffer capture for offline persistence.
 - Enforces strict link-time symbol resolution: missing libraries fail immediately at link time (`wasm-ld: error: undefined symbol`), while authorized host imports are whitelisted via `--allow-undefined-file=/usr/lib/wasm-host-imports.txt`.
 
 ### 3.3 Offline Delivery & Service Worker Summary
-- Service Worker (`coi-serviceworker.js`) injects COOP/COEP headers to enable `SharedArrayBuffer` for cross-origin isolation.
+- Service Worker (`coi-serviceworker.js`, cache key `wasm-c-ide-cache-v2`) injects COOP/COEP headers to enable `SharedArrayBuffer` for cross-origin isolation and purges stale CacheStorage entries when `CACHE_NAME` is bumped.
 - Large binary bypass: `llvm-box.wasm` (~56 MB) explicitly bypasses Service Worker `CacheStorage` stream cloning to eliminate stream buffer lockups, memory exhaustion, and `AbortError` timeouts.
 
 ---

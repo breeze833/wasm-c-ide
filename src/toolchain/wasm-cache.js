@@ -27,7 +27,7 @@ function openWasmDb() {
 
 /**
  * Retrieve a pre-compiled WebAssembly.Module or ArrayBuffer from IndexedDB
- * @param {string} key Unique module cache key (e.g. 'llvm-box-19.1.0')
+ * @param {string} key Unique module cache key (e.g. 'llvm-box-19.1.0-build1')
  * @returns {Promise<WebAssembly.Module | null>}
  */
 export async function getWasmModule(key) {
@@ -61,7 +61,7 @@ export async function getWasmModule(key) {
 
 /**
  * Save a WebAssembly module or raw ArrayBuffer into IndexedDB
- * @param {string} key Unique module cache key (e.g. 'llvm-box-19.1.0')
+ * @param {string} key Unique module cache key (e.g. 'llvm-box-19.1.0-build1')
  * @param {WebAssembly.Module | ArrayBuffer | Uint8Array} data
  * @returns {Promise<boolean>}
  */

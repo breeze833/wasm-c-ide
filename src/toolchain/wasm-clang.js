@@ -3,7 +3,7 @@
 
 import { WasmToolchain as BaseWasmToolchain, AppInstance, ProcExit, normalizePath } from 'clang-wasi/toolchain';
 import { createSharedSysrootFromTar, fetchWithProgress } from '../vfs/shared-sysroot.js';
-import { getWasmModule, saveWasmModule } from './wasm-cache.js';
+import { getWasmModule, saveWasmModule, deleteWasmModule } from './wasm-cache.js';
 
 export { AppInstance, ProcExit, normalizePath };
 
@@ -157,7 +157,8 @@ export class WasmToolchain extends BaseWasmToolchain {
     if (this.llvmBoxPromise) return this.llvmBoxPromise;
 
     const silent = Boolean(options.silent);
-    const CACHE_KEY = 'llvm-box-19.1.0';
+    const CACHE_KEY = 'llvm-box-19.1.0-build1';
+    const LEGACY_CACHE_KEY = 'llvm-box-19.1.0';
 
     this.llvmBoxPromise = (async () => {
       // 1. Check IndexedDB persistent cache
@@ -167,6 +168,8 @@ export class WasmToolchain extends BaseWasmToolchain {
           this.llvmBoxModule = cached;
           return cached;
         }
+        // Clean up legacy cache key when migrating to new build
+        deleteWasmModule(LEGACY_CACHE_KEY).catch(() => {});
       } catch {}
 
       // 2. Fetch from network & compile

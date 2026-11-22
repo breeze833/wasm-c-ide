@@ -91,7 +91,7 @@ You are an autonomous senior systems and web engineer implementing the project s
 │   │   ├── storage.js         # IndexedDB synchronization and default project seed
 │   │   ├── sysroot.js         # System utilities, toolchain command stubs, and host import definitions
 │   │   ├── vfs.js             # In-memory virtual filesystem with path normalization
-│   │   └── wasi-host.js       # Unified Platform Host fusing WASI Preview 1, MemoryPipe, and component bridges
+│   │   └── wasi-host.js       # Composes standalone wasi-host WASI Preview 1 host with busybox-wasi pipes/bridges
 │   └── workers/
 │       ├── compiler.worker.js # Dedicated Web Worker executing Clang, LLD, ar, and make
 │       ├── runtime.worker.js  # WASI host executing user binaries with Atomics stdin & OffscreenCanvas
@@ -535,6 +535,21 @@ Agents executing this project should proceed milestone-by-milestone:
 - Remove fallback header injection loops from `src/vfs/shared-sysroot.js`.
 - Single Source of Truth: All standard libc, libc++, Raylib, SQLite, Turtle, and Canvas C/C++ headers are exclusively sourced from `SharedSysroot` (`sysroot.tar.gz`), eliminating header divergence, type mismatches with `-pedantic-errors`, and ~1,300 lines of redundant code.
 - Refactor `src/vfs/sysroot.js` to focus strictly on system commands (`BIN_COMMANDS`, `USR_BIN_COMMANDS`), static library stubs (`STANDARD_LIBS`), host imports (`WASM_HOST_IMPORTS`), and CLI utilities (`mountSysrootUtilities`).
+
+### Milestone 36: Standalone WASI Host Decoupling (`wasi-host`) & Toolchain Cache Upgrade
+- Migrate baseline WASI Preview 1 hosting from `clang-wasi/host` to standalone [`breeze833/wasi-host`](https://github.com/breeze833/wasi-host) and upgrade `clang-wasi` to `v19.1.0-build1` (`package.json`, `scripts/download-sysroot.js`).
+- Simplify `src/vfs/wasi-host.js` to extend `WasiHost` from `'wasi-host'`, removing ~220 lines of redundant FS syscall overrides (`EROFS`, `mtime`, `setTimes`, `path_open`, `path_unlink_file`, `path_remove_directory`, `path_create_directory`, `path_rename`), passing `systemDirs: ['/dev', '/usr', '/include', '/lib', '/bin']`, composing `wrapWasiPipes` + `createBusyboxBridge`, and retaining `memU32()`/`memI64()` helpers for existing stdin callbacks.
+- Bump IndexedDB compiler cache ID in `src/toolchain/wasm-clang.js` to `'llvm-box-19.1.0-build1'` (evicting legacy `'llvm-box-19.1.0'`) and bump Service Worker `CACHE_NAME` in `public/coi-serviceworker.js` to `'wasm-c-ide-cache-v2'` for clean cached-IDE upgrades.
+
+### Milestone 37: `raylib-wasi` (`v5.5.0-build1`) Delegation & Unified `wasiHost` Injection
+- Upgrade `raylib-wasi` to `v5.5.0-build1` in `package.json` and `scripts/download-sysroot.js` (`RAYLIB_WASI_TAG = 'v5.5.0-build1'`), sharing a single deduplicated `wasi-host` dependency across `wasm-c-ide`, `clang-wasi`, and `raylib-wasi`.
+- Update `src/workers/runtime.worker.js` to pass `wasm-c-ide`'s `wasiHost` and `onInitWindow` callback directly into `createRaylibHost`, eliminating redundant fallback WASI host instantiation and manual UTF-8 title decoding in the worker.
+- Extend `test/raylib.test.js` with `wasiHost` injection and `SharedArrayBuffer`-backed `onInitWindow` verification.
+
+### Milestone 38: `vfs-wasi` (`v0.2.0`) Storage/Host Boundary Upgrade & `wasi-host` `v0.1.1` Pin
+- Upgrade `vfs-wasi` to `v0.2.0` (`https://github.com/breeze833/vfs-wasi/releases/download/v0.2.0/vfs-wasi-0.2.0.tgz`) in `package.json` and `package-lock.json`.
+- Keeps `wasm-c-ide` cleanly separated with `vfs-wasi` owning `OverlayVFS` + `SharedSysroot` (`SSYS`) storage (`src/vfs/vfs.js`, `src/vfs/shared-sysroot.js`) and `wasi-host` owning all WASI Preview 1 syscalls (`src/vfs/wasi-host.js`), without relying on the removed `vfs-wasi/wasi-fs` module.
+- Pin `wasi-host` to `v0.1.1` (`https://github.com/breeze833/wasi-host/releases/download/v0.1.1/wasi-host-0.1.1.tgz`) via both `dependencies` and `overrides` in `package.json` so `clang-wasi@19.1.0-build1` and `raylib-wasi@5.5.0-build1` resolve and deduplicate cleanly to `wasi-host@0.1.1`.
 
 ---
 

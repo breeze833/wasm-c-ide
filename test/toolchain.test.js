@@ -702,17 +702,17 @@ int main() {
         }
       };
 
-      const saveRes = await saveWasmModule('llvm-box-19.1.0', dummyModule);
+      const saveRes = await saveWasmModule('llvm-box-19.1.0-build1', dummyModule);
       assert.strictEqual(saveRes, true, 'saveWasmModule should succeed in IDB environment');
 
-      const retrieved = await getWasmModule('llvm-box-19.1.0');
+      const retrieved = await getWasmModule('llvm-box-19.1.0-build1');
       assert.strictEqual(retrieved instanceof WebAssembly.Module, true, 'getWasmModule should return WebAssembly.Module');
 
       // Test saving raw ArrayBuffer (which works universally across Firefox & Chrome without DataCloneError)
-      const saveBufRes = await saveWasmModule('llvm-box-19.1.0', testWasmBytes.buffer);
+      const saveBufRes = await saveWasmModule('llvm-box-19.1.0-build1', testWasmBytes.buffer);
       assert.strictEqual(saveBufRes, true, 'saveWasmModule with ArrayBuffer should succeed');
 
-      const retrievedFromBuf = await getWasmModule('llvm-box-19.1.0');
+      const retrievedFromBuf = await getWasmModule('llvm-box-19.1.0-build1');
       assert.strictEqual(retrievedFromBuf instanceof WebAssembly.Module, true, 'getWasmModule should compile ArrayBuffer to WebAssembly.Module');
 
       // Test 9.3: WasmToolchain._getLlvmBox instant cache hit without terminal prompt
